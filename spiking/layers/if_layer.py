@@ -49,3 +49,7 @@ class IntegrateAndFireLayer(SpikingLayer):
         )
         for neuron_idx in neurons_to_learn:
             self.neurons[neuron_idx].backward(pre_spike_times, learning_mechanism)
+
+    def reset(self):
+        for neuron in self.neurons:
+            neuron.reset()
