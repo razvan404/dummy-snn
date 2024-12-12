@@ -29,7 +29,9 @@ class IntegrateAndFireLayer(SpikingLayer):
         spikes = np.zeros(self.num_outputs, dtype=np.float32)
 
         for neuron_idx, neuron in enumerate(self.neurons):
-            neuron_spike = neuron.forward(incoming_spikes=incoming_spikes, dt=dt)
+            neuron_spike = neuron.forward(
+                incoming_spikes=incoming_spikes, current_time=current_time, dt=dt
+            )
             if neuron_spike == 1.0 and np.isinf(self.spike_times[neuron_idx]):
                 self.spike_times[neuron_idx] = current_time
                 spikes[neuron_idx] = 1.0
@@ -49,3 +51,7 @@ class IntegrateAndFireLayer(SpikingLayer):
         )
         for neuron_idx in neurons_to_learn:
             self.neurons[neuron_idx].backward(pre_spike_times, learning_mechanism)
+
+    def reset(self):
+        for neuron in self.neurons:
+            neuron.reset()

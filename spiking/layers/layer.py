@@ -21,3 +21,6 @@ class SpikingLayer(ABC):
         learning_mechanism: LearningMechanism,
         competition_mechanism: CompetitionMechanism | None = None,
     ): ...
+
+    @abstractmethod
+    def reset(self): ...
