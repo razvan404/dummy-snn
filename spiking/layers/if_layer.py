@@ -55,3 +55,4 @@ class IntegrateAndFireLayer(SpikingLayer):
     def reset(self):
         for neuron in self.neurons:
             neuron.reset()
+        self.spike_times = np.ones(self.num_outputs, dtype=np.float32) * np.inf

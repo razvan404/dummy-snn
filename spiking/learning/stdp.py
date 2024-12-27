@@ -25,6 +25,7 @@ class STDP(LearningMechanism):
         pre_spike_times: np.ndarray,
         post_spike_times: np.ndarray,
     ) -> np.ndarray:
+        # TODO: ignore infinities
         delta_t = post_spike_times - pre_spike_times
         dw = np.zeros_like(weights)
 
