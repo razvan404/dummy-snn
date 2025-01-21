@@ -25,11 +25,14 @@ class STDP(LearningMechanism):
         pre_spike_times: np.ndarray,
         post_spike_times: np.ndarray,
     ) -> np.ndarray:
-        # TODO: ignore infinities
         delta_t = post_spike_times - pre_spike_times
+        finite_mask = np.isfinite(delta_t)
+
         dw = np.zeros_like(weights)
+        potentiation = finite_mask & (delta_t > 0)
+        depression = finite_mask & (delta_t < 0)
 
-        dw[delta_t > 0] = self.lr * np.exp(-delta_t[delta_t > 0] / self.tau_pre)
-        dw[delta_t < 0] = -self.lr * np.exp(delta_t[delta_t < 0] / self.tau_post)
+        dw[potentiation] = np.exp(-delta_t[potentiation] / self.tau_pre)
+        dw[depression] = -np.exp(delta_t[depression] / self.tau_post)
 
-        return np.clip(weights + dw, 0, 1)
+        return np.clip(weights + self.lr * dw, 0, 1)

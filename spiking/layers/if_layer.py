@@ -9,17 +9,25 @@ from ..neurons import IntegrateAndFireNeuron
 class IntegrateAndFireLayer(SpikingLayer):
     def __init__(
         self,
-        num_inputs: int = 1,
-        num_outputs: int = 1,
+        num_inputs: int,
+        num_outputs: int,
+        learning_mechanism: LearningMechanism,
+        competition_mechanism: CompetitionMechanism | None = None,
         threshold: float = 1.0,
         refractory_period: float = 1.0,
     ):
-        super().__init__(num_inputs=num_inputs, num_outputs=num_outputs)
+        super().__init__(
+            num_inputs=num_inputs,
+            num_outputs=num_outputs,
+            learning_mechanism=learning_mechanism,
+            competition_mechanism=competition_mechanism,
+        )
         self.neurons = [
             IntegrateAndFireNeuron(
+                num_inputs=num_inputs,
+                learning_mechanism=learning_mechanism,
                 threshold=threshold,
                 refractory_period=refractory_period,
-                num_inputs=num_inputs,
             )
             for _ in range(num_outputs)
         ]
@@ -38,19 +46,14 @@ class IntegrateAndFireLayer(SpikingLayer):
 
         return spikes
 
-    def backward(
-        self,
-        pre_spike_times: np.ndarray,
-        learning_mechanism: LearningMechanism,
-        competition_mechanism: CompetitionMechanism | None = None,
-    ):
+    def backward(self, pre_spike_times: np.ndarray):
         neurons_to_learn = (
-            competition_mechanism.neurons_to_learn(self.spike_times)
-            if competition_mechanism
+            self.competition_mechanism.neurons_to_learn(self.spike_times)
+            if self.competition_mechanism
             else range(0, self.num_outputs)
         )
         for neuron_idx in neurons_to_learn:
-            self.neurons[neuron_idx].backward(pre_spike_times, learning_mechanism)
+            self.neurons[neuron_idx].backward(pre_spike_times)
 
     def reset(self):
         for neuron in self.neurons:

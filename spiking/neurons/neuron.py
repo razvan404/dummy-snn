@@ -1,24 +1,11 @@
-from abc import ABC, abstractmethod
-
-import numpy as np
-
-from spiking.learning import LearningMechanism
+from ..learning import LearningMechanism
+from ..spiking_module import SpikingModule
 
 
-class SpikingNeuron(ABC):
-    __slots__ = ["num_inputs", "weights"]
+class SpikingNeuron(SpikingModule):
+    __slots__ = ["num_inputs", "weights", "learning_mechanism"]
 
-    def __init__(self, num_inputs: int = 1):
+    def __init__(self, num_inputs: int, learning_mechanism: LearningMechanism):
         self.num_inputs = num_inputs
+        self.learning_mechanism = learning_mechanism
         self.weights = None
-
-    @abstractmethod
-    def forward(self, incoming_spikes: np.ndarray, current_time: float, dt: float): ...
-
-    @abstractmethod
-    def backward(
-        self, pre_spike_times: np.ndarray, learning_mechanism: LearningMechanism
-    ): ...
-
-    @abstractmethod
-    def reset(self): ...

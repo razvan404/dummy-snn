@@ -1,15 +1,16 @@
 import numpy as np
 
-from spiking.learning import LearningMechanism
-from spiking.neurons.neuron import SpikingNeuron
+from ..learning import LearningMechanism
+from ..neurons.neuron import SpikingNeuron
 
 
 class IntegrateAndFireNeuron(SpikingNeuron):
     def __init__(
         self,
+        num_inputs: int,
+        learning_mechanism: LearningMechanism,
         threshold: float = 1.0,
         refractory_period: float = 1.0,
-        num_inputs: int = 1,
     ):
         """
         Integrate and Fire Neuron Model.
@@ -19,7 +20,7 @@ class IntegrateAndFireNeuron(SpikingNeuron):
             refractory_period (float): Amount of time it takes to recharge the neuron.
             num_inputs (int): The number of inputs of the neuron.
         """
-        super().__init__(num_inputs=num_inputs)
+        super().__init__(num_inputs=num_inputs, learning_mechanism=learning_mechanism)
         self.threshold = threshold
         self.membrane_potential = 0.0
 
@@ -53,11 +54,9 @@ class IntegrateAndFireNeuron(SpikingNeuron):
 
         return self._update_potential(incoming_spikes, current_time)
 
-    def backward(
-        self, pre_spike_times: np.ndarray, learning_mechanism: LearningMechanism
-    ):
+    def backward(self, pre_spike_times: np.ndarray):
         for spike_time in self.spike_times:
-            self.weights = learning_mechanism.update_weights(
+            self.weights = self.learning_mechanism.update_weights(
                 self.weights, pre_spike_times, spike_time
             )
 
