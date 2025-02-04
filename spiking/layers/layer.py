@@ -1,15 +1,12 @@
+from abc import ABC
+
 from ..competition import CompetitionMechanism
 from ..learning import LearningMechanism
 from ..spiking_module import SpikingModule
 
 
-class SpikingLayer(SpikingModule):
-    __slots__ = [
-        "num_inputs",
-        "num_outputs",
-        "learning_mechanism",
-        "competition_mechanism",
-    ]
+class SpikingLayer(SpikingModule, ABC):
+    __slots__ = ["learning_mechanism", "competition_mechanism"]
 
     def __init__(
         self,
@@ -18,7 +15,6 @@ class SpikingLayer(SpikingModule):
         learning_mechanism: LearningMechanism,
         competition_mechanism: CompetitionMechanism | None = None,
     ):
-        self.num_inputs = num_inputs
-        self.num_outputs = num_outputs
+        super().__init__(num_inputs=num_inputs, num_outputs=num_outputs)
         self.learning_mechanism = learning_mechanism
         self.competition_mechanism = competition_mechanism

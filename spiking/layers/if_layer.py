@@ -31,7 +31,7 @@ class IntegrateAndFireLayer(SpikingLayer):
             )
             for _ in range(num_outputs)
         ]
-        self.spike_times = np.ones(self.num_outputs, dtype=np.float32) * np.inf
+        self._spike_times = np.ones(self.num_outputs, dtype=np.float32) * np.inf
 
     def forward(self, incoming_spikes: np.ndarray, current_time: float, dt: float):
         spikes = np.zeros(self.num_outputs, dtype=np.float32)
@@ -40,15 +40,15 @@ class IntegrateAndFireLayer(SpikingLayer):
             neuron_spike = neuron.forward(
                 incoming_spikes=incoming_spikes, current_time=current_time, dt=dt
             )
-            if neuron_spike == 1.0 and np.isinf(self.spike_times[neuron_idx]):
-                self.spike_times[neuron_idx] = current_time
+            if neuron_spike == 1.0 and np.isinf(self._spike_times[neuron_idx]):
+                self._spike_times[neuron_idx] = current_time
                 spikes[neuron_idx] = 1.0
 
         return spikes
 
     def backward(self, pre_spike_times: np.ndarray):
         neurons_to_learn = (
-            self.competition_mechanism.neurons_to_learn(self.spike_times)
+            self.competition_mechanism.neurons_to_learn(self._spike_times)
             if self.competition_mechanism
             else range(0, self.num_outputs)
         )
@@ -58,4 +58,8 @@ class IntegrateAndFireLayer(SpikingLayer):
     def reset(self):
         for neuron in self.neurons:
             neuron.reset()
-        self.spike_times = np.ones(self.num_outputs, dtype=np.float32) * np.inf
+        self._spike_times = np.ones(self.num_outputs, dtype=np.float32) * np.inf
+
+    @property
+    def spike_times(self):
+        return self._spike_times

@@ -28,7 +28,7 @@ class IntegrateAndFireNeuron(SpikingNeuron):
         self.refractory_time = 0.0
         self.weights = np.abs(np.random.rand(self.num_inputs)) * 0.1
 
-        self.spike_times = []
+        self._spike_times = []
 
     def _update_refractory(self, dt: float):
         if self.refractory_time > 0:
@@ -43,7 +43,7 @@ class IntegrateAndFireNeuron(SpikingNeuron):
 
         self.membrane_potential = 0.0
         self.refractory_time = self.refractory_period
-        self.spike_times.append(current_time)
+        self._spike_times.append(current_time)
         return np.float32(1.0)
 
     def forward(
@@ -55,7 +55,7 @@ class IntegrateAndFireNeuron(SpikingNeuron):
         return self._update_potential(incoming_spikes, current_time)
 
     def backward(self, pre_spike_times: np.ndarray):
-        for spike_time in self.spike_times:
+        for spike_time in self._spike_times:
             self.weights = self.learning_mechanism.update_weights(
                 self.weights, pre_spike_times, spike_time
             )
@@ -63,4 +63,8 @@ class IntegrateAndFireNeuron(SpikingNeuron):
     def reset(self):
         self.membrane_potential = 0.0
         self.refractory_time = 0.0
-        self.spike_times = []
+        self._spike_times = []
+
+    @property
+    def spike_times(self):
+        return self._spike_times
