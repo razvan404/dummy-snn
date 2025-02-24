@@ -4,6 +4,7 @@ from .layer import SpikingLayer
 from ..competition import CompetitionMechanism
 from ..learning import LearningMechanism
 from ..neurons import IntegrateAndFireNeuron
+from ..threshold import ThresholdInitialization, ThresholdAdaptation
 
 
 class IntegrateAndFireLayer(SpikingLayer):
@@ -15,6 +16,8 @@ class IntegrateAndFireLayer(SpikingLayer):
         competition_mechanism: CompetitionMechanism | None = None,
         threshold: float = 1.0,
         refractory_period: float = 1.0,
+        threshold_initialization: ThresholdInitialization | None = None,
+        threshold_adaptation: ThresholdAdaptation | None = None,
     ):
         super().__init__(
             num_inputs=num_inputs,
@@ -28,6 +31,8 @@ class IntegrateAndFireLayer(SpikingLayer):
                 learning_mechanism=learning_mechanism,
                 threshold=threshold,
                 refractory_period=refractory_period,
+                threshold_initialization=threshold_initialization,
+                threshold_adaptation=threshold_adaptation,
             )
             for _ in range(num_outputs)
         ]

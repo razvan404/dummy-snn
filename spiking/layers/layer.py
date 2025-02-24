@@ -6,7 +6,12 @@ from ..spiking_module import SpikingModule
 
 
 class SpikingLayer(SpikingModule, ABC):
-    __slots__ = ["learning_mechanism", "competition_mechanism"]
+    __slots__ = [
+        "learning_mechanism",
+        "competition_mechanism",
+        "threshold_initialization",
+        "threshold_adaptation",
+    ]
 
     def __init__(
         self,

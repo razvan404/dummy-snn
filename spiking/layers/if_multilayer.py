@@ -2,6 +2,7 @@ from spiking.layers.sequential import SpikingSequential
 from spiking.competition import CompetitionMechanism
 from spiking.layers import IntegrateAndFireLayer
 from spiking.learning import LearningMechanism
+from spiking.threshold import ThresholdInitialization, ThresholdAdaptation
 
 
 class IntegrateAndFireMultilayer(SpikingSequential):
@@ -14,6 +15,8 @@ class IntegrateAndFireMultilayer(SpikingSequential):
         competition_mechanism: CompetitionMechanism | None = None,
         threshold: float | list[float] = 1.0,
         refractory_period: float = 1.0,
+        threshold_initialization: ThresholdInitialization | None = None,
+        threshold_adaptation: ThresholdAdaptation | None = None,
     ):
         if isinstance(threshold, list):
             assert len(threshold) == len(num_hidden) + 1
@@ -27,6 +30,8 @@ class IntegrateAndFireMultilayer(SpikingSequential):
                 learning_mechanism=learning_mechanism,
                 threshold=threshold[0],
                 refractory_period=refractory_period,
+                threshold_initialization=threshold_initialization,
+                threshold_adaptation=threshold_adaptation,
             )
         ]
         for i in range(len(num_hidden)):
