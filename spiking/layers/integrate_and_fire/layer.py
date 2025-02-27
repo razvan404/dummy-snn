@@ -4,7 +4,11 @@ from spiking.layers.layer import SpikingLayer
 from spiking.competition import CompetitionMechanism
 from spiking.learning import LearningMechanism
 from spiking.neurons import IntegrateAndFireNeuron
-from spiking.threshold import ThresholdInitialization, ThresholdAdaptation
+from spiking.threshold import (
+    ThresholdInitialization,
+    ThresholdAdaptation,
+    ConstantInitialization,
+)
 
 
 class IntegrateAndFireLayer(SpikingLayer):
@@ -19,20 +23,23 @@ class IntegrateAndFireLayer(SpikingLayer):
         threshold_initialization: ThresholdInitialization | None = None,
         threshold_adaptation: ThresholdAdaptation | None = None,
     ):
+        if threshold_initialization is None:
+            threshold_initialization = ConstantInitialization()
+
         super().__init__(
             num_inputs=num_inputs,
             num_outputs=num_outputs,
             learning_mechanism=learning_mechanism,
             competition_mechanism=competition_mechanism,
+            threshold_initialization=threshold_initialization,
+            threshold_adaptation=threshold_adaptation,
         )
         self.neurons = [
             IntegrateAndFireNeuron(
                 num_inputs=num_inputs,
                 learning_mechanism=learning_mechanism,
-                threshold=threshold,
+                threshold=threshold_initialization.initialize(threshold),
                 refractory_period=refractory_period,
-                threshold_initialization=threshold_initialization,
-                threshold_adaptation=threshold_adaptation,
             )
             for _ in range(num_outputs)
         ]
@@ -59,6 +66,14 @@ class IntegrateAndFireLayer(SpikingLayer):
         )
         for neuron_idx in neurons_to_learn:
             self.neurons[neuron_idx].backward(pre_spike_times)
+
+        if self.threshold_adaptation:
+            thresholds = np.array([neuron.threshold for neuron in self.neurons])
+            updated_thresholds = self.threshold_adaptation.update(
+                thresholds, self._spike_times
+            )
+            for neuron_idx, neuron in enumerate(self.neurons):
+                neuron.threshold = updated_thresholds[neuron_idx]
 
     def reset(self):
         for neuron in self.neurons:

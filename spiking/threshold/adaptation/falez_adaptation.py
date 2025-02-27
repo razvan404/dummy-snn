@@ -15,9 +15,11 @@ class FalezAdaptation(ThresholdAdaptation):
         self.threshold_learning_rate = threshold_learning_rate
         self.target_timestamp = target_timestamp
 
-    def update(self, current_threshold: float, current_time: float) -> float:
-        return np.maximum(
-            self.min_threshold,
-            current_threshold
-            - self.threshold_learning_rate * (current_time - self.target_timestamp),
+    def update(
+        self, current_thresholds: np.ndarray, spike_times: np.ndarray
+    ) -> np.ndarray:
+        threshold_delta = np.zeros_like(current_thresholds)
+        threshold_delta[np.isfinite(spike_times)] = self.threshold_learning_rate * (
+            spike_times[np.isfinite(spike_times)] - self.target_timestamp
         )
+        return current_thresholds - threshold_delta

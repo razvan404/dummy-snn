@@ -22,15 +22,17 @@ class IntegrateAndFireOptimizedLayer(SpikingLayer):
         threshold_initialization: ThresholdInitialization | None = None,
         threshold_adaptation: ThresholdAdaptation | None = None,
     ):
+        if threshold_initialization is None:
+            threshold_initialization = ConstantInitialization()
+
         super().__init__(
             num_inputs=num_inputs,
             num_outputs=num_outputs,
             learning_mechanism=learning_mechanism,
             competition_mechanism=competition_mechanism,
+            threshold_initialization=threshold_initialization,
+            threshold_adaptation=threshold_adaptation,
         )
-
-        if threshold_initialization is None:
-            threshold_initialization = ConstantInitialization()
 
         self.threshold = threshold_initialization.initialize(
             threshold, shape=(num_outputs,)
@@ -64,11 +66,6 @@ class IntegrateAndFireOptimizedLayer(SpikingLayer):
         self._spike_times[spiking_neurons & np.isinf(self._spike_times)] = current_time
         self.refractory_times[spiking_neurons] = self.refractory_period
 
-        if self.threshold_adaptation:
-            self.threshold = self.threshold_adaptation.update(
-                self.threshold, current_time
-            )
-
         return spiking_neurons.astype(np.float32)
 
     def forward(self, incoming_spikes: np.ndarray, current_time: float, dt: float):
@@ -84,6 +81,11 @@ class IntegrateAndFireOptimizedLayer(SpikingLayer):
         for neuron_idx in neurons_to_learn:
             self.weights[neuron_idx] = self.learning_mechanism.update_weights(
                 self.weights[neuron_idx], pre_spike_times, self._spike_times[neuron_idx]
+            )
+
+        if self.threshold_adaptation:
+            self.threshold = self.threshold_adaptation.update(
+                self.threshold, self._spike_times
             )
 
     def reset(self):

@@ -1,5 +1,4 @@
-from .adaptation.adaptation import ThresholdAdaptation
-from .adaptation.falez_adaptation import FalezAdaptation
+from .adaptation import ThresholdAdaptation, FalezAdaptation, CompetitiveFalezAdaptation
 from .initialization import (
     ThresholdInitialization,
     ConstantInitialization,
@@ -9,6 +8,7 @@ from .initialization import (
 __all__ = [
     "ThresholdAdaptation",
     "FalezAdaptation",
+    "CompetitiveFalezAdaptation",
     "ThresholdInitialization",
     "ConstantInitialization",
     "NormalInitialization",

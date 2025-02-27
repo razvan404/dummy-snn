@@ -11,4 +11,6 @@ class NormalInitialization(ThresholdInitialization):
     def initialize(self, threshold: float, shape: tuple[int] | int = 1):
         thresholds = np.random.normal(loc=threshold, scale=self.std_dev, size=shape)
         thresholds = np.maximum(thresholds, self.min_threshold)
+        if shape == 1:
+            return thresholds[0]
         return thresholds
