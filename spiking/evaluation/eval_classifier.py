@@ -43,7 +43,8 @@ class SpikingClassifierEvaluator:
                 self.model.forward(
                     incoming_spikes.flatten(), current_time=current_time, dt=dt
                 )
-            X.append(np.clip(1.2 - self.model.spike_times, 0, 1.2))
+            X.append(np.clip(1.0 - self.model.spike_times, 0, 1.0))
+            # TODO: take formula (10) into consideration
             y.append(label)
             self.model.reset()
         return np.array(X), np.array(y)

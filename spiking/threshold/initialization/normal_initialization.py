@@ -8,7 +8,7 @@ class NormalInitialization(ThresholdInitialization):
         self.min_threshold = min_threshold
         self.std_dev = std_dev
 
-    def initialize(self, threshold: float):
-        thresholds = np.random.normal(loc=threshold, scale=self.std_dev, size=1)
+    def initialize(self, threshold: float, shape: tuple[int] | int = 1):
+        thresholds = np.random.normal(loc=threshold, scale=self.std_dev, size=shape)
         thresholds = np.maximum(thresholds, self.min_threshold)
         return thresholds

@@ -1,0 +1,8 @@
+import numpy as np
+
+from .initialization import ThresholdInitialization
+
+
+class ConstantInitialization(ThresholdInitialization):
+    def initialize(self, threshold: float, shape: tuple[int] | int = 1):
+        return np.ones(shape) * threshold

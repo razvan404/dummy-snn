@@ -1,8 +1,13 @@
-from spiking.layers.sequential import SpikingSequential
 from spiking.competition import CompetitionMechanism
-from spiking.layers import IntegrateAndFireLayer
 from spiking.learning import LearningMechanism
-from spiking.threshold import ThresholdInitialization, ThresholdAdaptation
+from spiking.threshold import (
+    ThresholdInitialization,
+    ThresholdAdaptation,
+    ConstantInitialization,
+)
+
+from ..sequential import SpikingSequential
+from .optimized_layer import IntegrateAndFireOptimizedLayer
 
 
 class IntegrateAndFireMultilayer(SpikingSequential):
@@ -16,7 +21,7 @@ class IntegrateAndFireMultilayer(SpikingSequential):
         threshold: float | list[float] = 1.0,
         refractory_period: float = 1.0,
         threshold_initialization: ThresholdInitialization | None = None,
-        threshold_adaptation: ThresholdAdaptation | None = None,
+        threshold_adaptation: ThresholdAdaptation | None = ConstantInitialization(),
     ):
         if isinstance(threshold, list):
             assert len(threshold) == len(num_hidden) + 1
@@ -24,7 +29,7 @@ class IntegrateAndFireMultilayer(SpikingSequential):
             threshold = [threshold for _ in range(len(num_hidden) + 1)]
 
         layers = [
-            IntegrateAndFireLayer(
+            IntegrateAndFireOptimizedLayer(
                 num_inputs=num_inputs,
                 num_outputs=num_outputs if len(num_hidden) == 0 else num_hidden[0],
                 learning_mechanism=learning_mechanism,
@@ -40,7 +45,7 @@ class IntegrateAndFireMultilayer(SpikingSequential):
                 num_hidden[i + 1] if i < len(num_hidden) - 1 else num_outputs
             )
             layers.append(
-                IntegrateAndFireLayer(
+                IntegrateAndFireOptimizedLayer(
                     num_inputs=layer_inputs,
                     num_outputs=layer_outputs,
                     learning_mechanism=learning_mechanism,

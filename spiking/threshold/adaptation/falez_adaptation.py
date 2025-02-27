@@ -1,3 +1,5 @@
+import numpy as np
+
 from .adaptation import ThresholdAdaptation
 
 
@@ -14,7 +16,7 @@ class FalezAdaptation(ThresholdAdaptation):
         self.target_timestamp = target_timestamp
 
     def update(self, current_threshold: float, current_time: float) -> float:
-        return max(
+        return np.maximum(
             self.min_threshold,
             current_threshold
             - self.threshold_learning_rate * (current_time - self.target_timestamp),

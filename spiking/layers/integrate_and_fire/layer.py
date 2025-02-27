@@ -1,10 +1,10 @@
 import numpy as np
 
-from .layer import SpikingLayer
-from ..competition import CompetitionMechanism
-from ..learning import LearningMechanism
-from ..neurons import IntegrateAndFireNeuron
-from ..threshold import ThresholdInitialization, ThresholdAdaptation
+from spiking.layers.layer import SpikingLayer
+from spiking.competition import CompetitionMechanism
+from spiking.learning import LearningMechanism
+from spiking.neurons import IntegrateAndFireNeuron
+from spiking.threshold import ThresholdInitialization, ThresholdAdaptation
 
 
 class IntegrateAndFireLayer(SpikingLayer):

@@ -2,7 +2,11 @@ import numpy as np
 
 from ..learning import LearningMechanism
 from ..neurons.neuron import SpikingNeuron
-from ..threshold import ThresholdInitialization, ThresholdAdaptation
+from ..threshold import (
+    ThresholdInitialization,
+    ThresholdAdaptation,
+    ConstantInitialization,
+)
 
 
 class IntegrateAndFireNeuron(SpikingNeuron):
@@ -24,11 +28,11 @@ class IntegrateAndFireNeuron(SpikingNeuron):
             num_inputs (int): The number of inputs of the neuron.
         """
         super().__init__(num_inputs=num_inputs, learning_mechanism=learning_mechanism)
-        self.threshold = (
-            threshold_initialization.initialize(threshold)
-            if threshold_initialization
-            else threshold
-        )
+
+        if threshold_initialization is None:
+            threshold_initialization = ConstantInitialization()
+
+        self.threshold = threshold_initialization.initialize(threshold)
         self.threshold_adaptation = threshold_adaptation
 
         self.membrane_potential = 0.0
@@ -53,7 +57,12 @@ class IntegrateAndFireNeuron(SpikingNeuron):
         self.membrane_potential = 0.0
         self.refractory_time = self.refractory_period
         self._spike_times.append(current_time)
-        self.threshold = self.threshold_adaptation.update(self.threshold, current_time)
+
+        if self.threshold_adaptation:
+            self.threshold = self.threshold_adaptation.update(
+                self.threshold, current_time
+            )
+
         return np.float32(1.0)
 
     def forward(
