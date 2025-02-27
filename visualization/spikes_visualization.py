@@ -86,7 +86,7 @@ class SpikesVisualization:
     ):
         potentials_lists = list(zip(*potentials_lists))
         cmap = plt.cm.get_cmap("viridis", len(potentials_lists))
-        times = np.min((np.array(times), 1.0))
+        times = np.minimum(np.array(times), 1.0)
         for idx, potentials in enumerate(potentials_lists):
             plt.plot(
                 times,
