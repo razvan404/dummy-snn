@@ -34,14 +34,14 @@ class IntegrateAndFireOptimizedLayer(SpikingLayer):
             threshold_adaptation=threshold_adaptation,
         )
 
-        self.threshold = threshold_initialization.initialize(
+        self.thresholds = threshold_initialization.initialize(
             threshold, shape=(num_outputs,)
         )
         self.threshold_adaptation = threshold_adaptation
 
         self.membrane_potentials = np.zeros(num_outputs, dtype=np.float32)
         self.refractory_times = np.zeros(num_outputs, dtype=np.float32)
-        self.weights = np.abs(np.random.rand(num_outputs, num_inputs)) * 0.1
+        self.weights = np.abs(np.random.rand(num_outputs, num_inputs))
         self.refractory_period = refractory_period
 
         self._spike_times = np.ones(num_outputs, dtype=np.float32) * np.inf
@@ -60,7 +60,7 @@ class IntegrateAndFireOptimizedLayer(SpikingLayer):
         self.membrane_potentials[active_neurons] += np.sum(
             self.weights[active_neurons] * incoming_spikes, axis=1
         )
-        spiking_neurons = active_neurons & (self.membrane_potentials >= self.threshold)
+        spiking_neurons = active_neurons & (self.membrane_potentials >= self.thresholds)
 
         self.membrane_potentials[spiking_neurons] = 0.0
         self._spike_times[spiking_neurons & np.isinf(self._spike_times)] = current_time
@@ -84,8 +84,8 @@ class IntegrateAndFireOptimizedLayer(SpikingLayer):
             )
 
         if self.threshold_adaptation:
-            self.threshold = self.threshold_adaptation.update(
-                self.threshold, self._spike_times
+            self.thresholds = self.threshold_adaptation.update(
+                self.thresholds, self._spike_times
             )
 
     def reset(self):

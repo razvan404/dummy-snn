@@ -56,7 +56,7 @@ class TestOptimizedIntegrateAndFireLayer(unittest.TestCase):
         self.optimized_layer.weights = np.array(
             [neuron.weights for neuron in self.layer.neurons]
         )
-        self.optimized_layer.threshold = np.array(
+        self.optimized_layer.thresholds = np.array(
             [neuron.threshold for neuron in self.layer.neurons]
         )
         self.max_iter = 100
@@ -75,7 +75,7 @@ class TestOptimizedIntegrateAndFireLayer(unittest.TestCase):
 
         print(
             [neuron.threshold for neuron in self.layer.neurons],
-            self.optimized_layer.threshold,
+            self.optimized_layer.thresholds,
         )
         print("Incoming spikes:", incoming_spikes)
         print("Target spike times:", target_spike_times)
@@ -90,7 +90,7 @@ class TestOptimizedIntegrateAndFireLayer(unittest.TestCase):
 
             np.testing.assert_array_almost_equal(
                 [neuron.threshold for neuron in self.layer.neurons],
-                self.optimized_layer.threshold,
+                self.optimized_layer.thresholds,
                 err_msg=f"Threshold do not match between layers (iter={iteration}).",
             )
 
@@ -156,7 +156,7 @@ class TestOptimizedIntegrateAndFireLayer(unittest.TestCase):
             print(
                 "Thresholds",
                 np.array([neuron.threshold for neuron in self.layer.neurons]),
-                self.optimized_layer.threshold,
+                self.optimized_layer.thresholds,
             )
 
             np.testing.assert_array_almost_equal(
@@ -167,7 +167,7 @@ class TestOptimizedIntegrateAndFireLayer(unittest.TestCase):
 
             np.testing.assert_array_almost_equal(
                 [neuron.threshold for neuron in self.layer.neurons],
-                self.optimized_layer.threshold,
+                self.optimized_layer.thresholds,
                 err_msg=f"Threshold after backward do not match between layers (iter={iteration}).",
             )
 

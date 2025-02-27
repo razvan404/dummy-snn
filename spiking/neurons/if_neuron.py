@@ -27,7 +27,7 @@ class IntegrateAndFireNeuron(SpikingNeuron):
 
         self.refractory_period = refractory_period
         self.refractory_time = 0.0
-        self.weights = np.abs(np.random.rand(self.num_inputs)) * 0.1
+        self.weights = np.abs(np.random.rand(self.num_inputs))
 
         self._spike_times = []
 
