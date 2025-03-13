@@ -24,11 +24,11 @@ class TestOptimizedIntegrateAndFireLayer(unittest.TestCase):
         self.target_timestamp = 0.7
         self.falez_adaptation = FalezAdaptation(
             self.min_threshold,
-            threshold_learning_rate=2e-2,
+            learning_rate=2e-2,
             target_timestamp=self.target_timestamp,
         )
         self.competitive_falez_adaptation = CompetitiveFalezAdaptation(
-            self.min_threshold, threshold_learning_rate=2e-2
+            self.min_threshold, learning_rate=2e-2
         )
 
         self.layer = IntegrateAndFireLayer(

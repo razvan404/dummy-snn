@@ -7,12 +7,12 @@ class CompetitiveFalezAdaptation(ThresholdAdaptation):
     def __init__(
         self,
         min_threshold: float,
-        threshold_learning_rate: float,
+        learning_rate: float,
         decay_factor: float = 1.0,
     ):
         super().__init__()
         self.min_threshold = min_threshold
-        self.learning_rate = threshold_learning_rate
+        self.learning_rate = learning_rate
         self.decay_factor = decay_factor
 
     def _learning_rate_step(self):

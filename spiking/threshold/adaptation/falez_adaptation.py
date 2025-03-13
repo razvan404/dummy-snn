@@ -8,12 +8,12 @@ class FalezAdaptation(ThresholdAdaptation):
         self,
         min_threshold: float,
         target_timestamp: float,
-        threshold_learning_rate: float,
+        learning_rate: float,
         decay_factor: float = 1.0,
     ):
         super().__init__()
         self.min_threshold = min_threshold
-        self.learning_rate = threshold_learning_rate
+        self.learning_rate = learning_rate
         self.target_timestamp = target_timestamp
         self.decay_factor = decay_factor
 
