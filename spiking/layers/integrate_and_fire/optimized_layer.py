@@ -78,15 +78,20 @@ class IntegrateAndFireOptimizedLayer(SpikingLayer):
             if self.competition_mechanism
             else range(self.num_outputs)
         )
+
+        loss = 0
         for neuron_idx in neurons_to_learn:
-            self.weights[neuron_idx] = self.learning_mechanism.update_weights(
+            updated_weights = self.learning_mechanism.update_weights(
                 self.weights[neuron_idx], pre_spike_times, self._spike_times[neuron_idx]
             )
+            loss += np.mean(np.abs(self.weights[neuron_idx] - updated_weights))
+            self.weights[neuron_idx] = updated_weights
 
         if self.threshold_adaptation:
             self.thresholds = self.threshold_adaptation.update(
                 self.thresholds, self._spike_times
             )
+        return loss / len(neurons_to_learn) if len(neurons_to_learn) > 0 else 0
 
     def reset(self):
         self.membrane_potentials.fill(0.0)

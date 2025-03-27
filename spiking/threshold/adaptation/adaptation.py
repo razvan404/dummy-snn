@@ -8,3 +8,6 @@ class ThresholdAdaptation(ABC):
     def update(
         self, current_threshold: np.ndarray, spike_times: np.ndarray
     ) -> np.ndarray: ...
+
+    @abstractmethod
+    def learning_rate_step(self): ...

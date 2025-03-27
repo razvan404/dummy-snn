@@ -17,7 +17,7 @@ class FalezAdaptation(ThresholdAdaptation):
         self.target_timestamp = target_timestamp
         self.decay_factor = decay_factor
 
-    def _learning_rate_step(self):
+    def learning_rate_step(self):
         self.learning_rate *= self.decay_factor
 
     def update(
@@ -27,5 +27,4 @@ class FalezAdaptation(ThresholdAdaptation):
         threshold_delta[np.isfinite(spike_times)] = self.learning_rate * (
             spike_times[np.isfinite(spike_times)] - self.target_timestamp
         )
-        self._learning_rate_step()
         return current_thresholds - threshold_delta

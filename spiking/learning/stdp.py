@@ -26,7 +26,7 @@ class STDP(LearningMechanism):
         self.lr = lr
         self.decay_factor = decay_factor
 
-    def _learning_rate_step(self):
+    def learning_rate_step(self):
         self.lr *= self.decay_factor
 
     def update_weights(
@@ -46,5 +46,4 @@ class STDP(LearningMechanism):
         dw[depression] = -np.exp(delta_t[depression] / self.tau_post)
 
         updated_weights = np.clip(weights + self.lr * dw, 0, 1)
-        self._learning_rate_step()
         return updated_weights

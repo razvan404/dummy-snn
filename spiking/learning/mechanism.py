@@ -11,3 +11,6 @@ class LearningMechanism(ABC):
         pre_spike_times: np.ndarray,
         post_spike_times: np.ndarray,
     ) -> np.ndarray: ...
+
+    @abstractmethod
+    def learning_rate_step(self): ...

@@ -15,13 +15,14 @@ class CompetitiveFalezAdaptation(ThresholdAdaptation):
         self.learning_rate = learning_rate
         self.decay_factor = decay_factor
 
-    def _learning_rate_step(self):
+    def learning_rate_step(self):
         self.learning_rate *= self.decay_factor
 
     def update(
         self, current_thresholds: np.ndarray, spike_times: np.ndarray
     ) -> np.ndarray:
         winner_index = np.argmin(spike_times)
+        # TODO: check for winner infinity, also make this random
 
         threshold_updates = np.ones(len(current_thresholds)) * (
             -self.learning_rate / len(spike_times)
@@ -31,5 +32,4 @@ class CompetitiveFalezAdaptation(ThresholdAdaptation):
             self.min_threshold, current_thresholds + threshold_updates
         )
 
-        self._learning_rate_step()
         return updated_thresholds

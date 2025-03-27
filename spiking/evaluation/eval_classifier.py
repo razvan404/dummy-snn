@@ -66,7 +66,9 @@ class SpikingClassifierEvaluator:
         plt.grid()
         plt.show()
 
-    def train_classifier_and_compute_metrics(self, classifier=None):
+    def train_classifier_and_compute_metrics(
+        self, classifier=None, visualize: bool = False
+    ):
         if classifier is None:
             classifier = SVC()
 
@@ -90,8 +92,11 @@ class SpikingClassifierEvaluator:
         print(f"Recall: {recall:.2f}")
         print(f"F1 Score: {f1:.2f}")
 
-        sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="Blues")
-        plt.xlabel("Predicted Labels")
-        plt.ylabel("True Labels")
-        plt.title("Confusion Matrix")
-        plt.show()
+        if visualize:
+            sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="Blues")
+            plt.xlabel("Predicted Labels")
+            plt.ylabel("True Labels")
+            plt.title("Confusion Matrix")
+            plt.show()
+
+        return accuracy, precision, recall, f1
