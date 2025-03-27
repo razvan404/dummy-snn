@@ -24,6 +24,7 @@ class CompetitiveFalezAdaptation(ThresholdAdaptation):
     ) -> np.ndarray:
         winner_index = choose_random_winner(spike_times)
 
+        # N - 1 to make the sum of the differences equal to 0
         threshold_updates = np.ones(len(current_thresholds)) * (
             -self.learning_rate / (len(current_thresholds) - 1)
         )
