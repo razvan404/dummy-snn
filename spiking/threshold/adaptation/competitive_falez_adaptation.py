@@ -1,6 +1,7 @@
 import numpy as np
 
 from .adaptation import ThresholdAdaptation
+from ...utils import choose_random_winner
 
 
 class CompetitiveFalezAdaptation(ThresholdAdaptation):
@@ -21,13 +22,13 @@ class CompetitiveFalezAdaptation(ThresholdAdaptation):
     def update(
         self, current_thresholds: np.ndarray, spike_times: np.ndarray
     ) -> np.ndarray:
-        winner_index = np.argmin(spike_times)
-        # TODO: check for winner infinity, also make this random
+        winner_index = choose_random_winner(spike_times)
 
         threshold_updates = np.ones(len(current_thresholds)) * (
-            -self.learning_rate / len(spike_times)
+            -self.learning_rate / (len(current_thresholds) - 1)
         )
-        threshold_updates[winner_index] = self.learning_rate
+        if winner_index is not None:
+            threshold_updates[winner_index] = self.learning_rate
         updated_thresholds = np.maximum(
             self.min_threshold, current_thresholds + threshold_updates
         )
