@@ -20,7 +20,7 @@ class Dataloader(ABC):
         return identity_permutation
 
     def iterate(
-        self, batch_size: int, shuffle: bool = False
+        self, batch_size: int = 1, shuffle: bool = False
     ) -> Generator[T, None, None]:
         dataset_len = self.__len__()
         iter_permutation = self.__permutation(dataset_len, shuffle)
