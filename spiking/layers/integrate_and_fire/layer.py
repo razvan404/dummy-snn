@@ -70,7 +70,9 @@ class IntegrateAndFireLayer(SpikingLayer):
         if self.threshold_adaptation:
             thresholds = np.array([neuron.threshold for neuron in self.neurons])
             updated_thresholds = self.threshold_adaptation.update(
-                thresholds, self._spike_times
+                thresholds,
+                self._spike_times,
+                neurons_to_learn=neurons_to_learn,
             )
             for neuron_idx, neuron in enumerate(self.neurons):
                 neuron.threshold = updated_thresholds[neuron_idx]

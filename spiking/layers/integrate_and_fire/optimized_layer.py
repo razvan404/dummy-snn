@@ -89,7 +89,9 @@ class IntegrateAndFireOptimizedLayer(SpikingLayer):
 
         if self.threshold_adaptation:
             self.thresholds = self.threshold_adaptation.update(
-                self.thresholds, self._spike_times
+                self.thresholds,
+                self._spike_times,
+                neurons_to_learn=neurons_to_learn,
             )
         return loss / len(neurons_to_learn) if len(neurons_to_learn) > 0 else 0
 

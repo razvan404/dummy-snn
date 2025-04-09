@@ -21,7 +21,7 @@ class FalezAdaptation(ThresholdAdaptation):
         self.learning_rate *= self.decay_factor
 
     def update(
-        self, current_thresholds: np.ndarray, spike_times: np.ndarray
+        self, current_thresholds: np.ndarray, spike_times: np.ndarray, **kwargs
     ) -> np.ndarray:
         threshold_delta = np.zeros_like(current_thresholds)
         threshold_delta[np.isfinite(spike_times)] = self.learning_rate * (

@@ -20,9 +20,11 @@ class CompetitiveFalezAdaptation(ThresholdAdaptation):
         self.learning_rate *= self.decay_factor
 
     def update(
-        self, current_thresholds: np.ndarray, spike_times: np.ndarray
+        self, current_thresholds: np.ndarray, spike_times: np.ndarray, **kwargs
     ) -> np.ndarray:
-        winner_index = choose_random_winner(spike_times)
+        if (neurons_to_learn := kwargs.get("neurons_to_learn")) is None:
+            raise ValueError("`neurons_to_learn` must be provided.")
+        winner_index = choose_random_winner(spike_times[neurons_to_learn])
 
         # N - 1 to make the sum of the differences equal to 0
         threshold_updates = np.ones(len(current_thresholds)) * (
