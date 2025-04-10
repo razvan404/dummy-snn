@@ -76,7 +76,7 @@ class IntegrateAndFireOptimizedLayer(SpikingLayer):
         neurons_to_learn = (
             self.competition_mechanism.neurons_to_learn(self._spike_times)
             if self.competition_mechanism
-            else range(self.num_outputs)
+            else np.where(np.isfinite(self._spike_times))[0]
         )
 
         loss = 0

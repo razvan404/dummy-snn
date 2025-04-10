@@ -1,7 +1,6 @@
 import numpy as np
 
 from .adaptation import ThresholdAdaptation
-from ...utils import choose_random_winner
 
 
 class CompetitiveFalezAdaptation(ThresholdAdaptation):
@@ -24,16 +23,15 @@ class CompetitiveFalezAdaptation(ThresholdAdaptation):
     ) -> np.ndarray:
         if (neurons_to_learn := kwargs.get("neurons_to_learn")) is None:
             raise ValueError("`neurons_to_learn` must be provided.")
-        winner_index = choose_random_winner(spike_times[neurons_to_learn])
 
-        # N - 1 to make the sum of the differences equal to 0
-        threshold_updates = np.ones(len(current_thresholds)) * (
-            -self.learning_rate / (len(current_thresholds) - 1)
-        )
-        if winner_index is not None:
-            threshold_updates[winner_index] = self.learning_rate
+        winners_divisor = len(neurons_to_learn)
+        losers_divisor = len(current_thresholds) - len(neurons_to_learn)
+
+        threshold_updates = np.ones(len(current_thresholds))
+        threshold_updates[~neurons_to_learn] *= -self.learning_rate / losers_divisor
+        threshold_updates[neurons_to_learn] *= self.learning_rate / winners_divisor
+
         updated_thresholds = np.maximum(
             self.min_threshold, current_thresholds + threshold_updates
         )
-
         return updated_thresholds
