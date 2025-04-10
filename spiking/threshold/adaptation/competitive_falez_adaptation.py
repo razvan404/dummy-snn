@@ -24,12 +24,19 @@ class CompetitiveFalezAdaptation(ThresholdAdaptation):
         if (neurons_to_learn := kwargs.get("neurons_to_learn")) is None:
             raise ValueError("`neurons_to_learn` must be provided.")
 
-        winners_divisor = len(neurons_to_learn)
-        losers_divisor = len(current_thresholds) - len(neurons_to_learn)
+        winners_neurons = neurons_to_learn
+        winners_divisor = len(winners_neurons)
+
+        losers_neurons = np.setdiff1d(
+            np.arange(len(current_thresholds)), winners_neurons
+        )
+        losers_divisor = len(losers_neurons)
 
         threshold_updates = np.ones(len(current_thresholds))
-        threshold_updates[~neurons_to_learn] *= -self.learning_rate / losers_divisor
-        threshold_updates[neurons_to_learn] *= self.learning_rate / winners_divisor
+        if len(winners_neurons) > 0:
+            threshold_updates[winners_neurons] *= self.learning_rate / winners_divisor
+        if len(losers_neurons) > 0:
+            threshold_updates[losers_neurons] *= -self.learning_rate / losers_divisor
 
         updated_thresholds = np.maximum(
             self.min_threshold, current_thresholds + threshold_updates
