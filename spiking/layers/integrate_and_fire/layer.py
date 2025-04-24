@@ -1,14 +1,15 @@
-import numpy as np
+import torch
 
 from spiking.layers.layer import SpikingLayer
 from spiking.competition import CompetitionMechanism
 from spiking.learning import LearningMechanism
-from spiking.neurons import IntegrateAndFireNeuron
 from spiking.threshold import (
     ThresholdInitialization,
     ThresholdAdaptation,
     ConstantInitialization,
 )
+
+from ..neurons import IntegrateAndFireNeuron
 
 
 class IntegrateAndFireLayer(SpikingLayer):
@@ -22,6 +23,7 @@ class IntegrateAndFireLayer(SpikingLayer):
         refractory_period: float = 1.0,
         threshold_initialization: ThresholdInitialization | None = None,
         threshold_adaptation: ThresholdAdaptation | None = None,
+        device: torch.device = torch.device("cpu"),
     ):
         if threshold_initialization is None:
             threshold_initialization = ConstantInitialization()
@@ -34,41 +36,52 @@ class IntegrateAndFireLayer(SpikingLayer):
             threshold_initialization=threshold_initialization,
             threshold_adaptation=threshold_adaptation,
         )
+
+        self.device = device
         self.neurons = [
             IntegrateAndFireNeuron(
                 num_inputs=num_inputs,
                 learning_mechanism=learning_mechanism,
                 threshold=threshold_initialization.initialize(threshold),
                 refractory_period=refractory_period,
+                device=self.device,
             )
             for _ in range(num_outputs)
         ]
-        self._spike_times = np.ones(self.num_outputs, dtype=np.float32) * np.inf
 
-    def forward(self, incoming_spikes: np.ndarray, current_time: float, dt: float):
-        spikes = np.zeros(self.num_outputs, dtype=np.float32)
+        self._spike_times = torch.full(
+            (self.num_outputs,), float("inf"), dtype=torch.float32, device=self.device
+        )
+
+    def forward(
+        self, incoming_spikes: torch.Tensor, current_time: float, dt: float
+    ) -> torch.Tensor:
+        spikes = torch.zeros(self.num_outputs, dtype=torch.float32, device=self.device)
 
         for neuron_idx, neuron in enumerate(self.neurons):
-            neuron_spike = neuron.forward(
-                incoming_spikes=incoming_spikes, current_time=current_time, dt=dt
-            )
-            if neuron_spike == 1.0 and np.isinf(self._spike_times[neuron_idx]):
+            spike = neuron.forward(incoming_spikes, current_time, dt)
+            if spike == 1.0 and torch.isinf(self._spike_times[neuron_idx]):
                 self._spike_times[neuron_idx] = current_time
                 spikes[neuron_idx] = 1.0
 
         return spikes
 
-    def backward(self, pre_spike_times: np.ndarray):
+    def backward(self, pre_spike_times: torch.Tensor):
         neurons_to_learn = (
             self.competition_mechanism.neurons_to_learn(self._spike_times)
             if self.competition_mechanism
             else range(0, self.num_outputs)
         )
+
         for neuron_idx in neurons_to_learn:
             self.neurons[neuron_idx].backward(pre_spike_times)
 
         if self.threshold_adaptation:
-            thresholds = np.array([neuron.threshold for neuron in self.neurons])
+            thresholds = torch.tensor(
+                [neuron.threshold for neuron in self.neurons],
+                dtype=torch.float32,
+                device=self.device,
+            )
             updated_thresholds = self.threshold_adaptation.update(
                 thresholds,
                 self._spike_times,
@@ -80,7 +93,7 @@ class IntegrateAndFireLayer(SpikingLayer):
     def reset(self):
         for neuron in self.neurons:
             neuron.reset()
-        self._spike_times = np.ones(self.num_outputs, dtype=np.float32) * np.inf
+        self._spike_times = torch.fill_(float("inf"))
 
     @property
     def spike_times(self):

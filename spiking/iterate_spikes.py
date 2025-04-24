@@ -1,27 +1,26 @@
-import numpy as np
-
+import torch
 from .spike import Spike
 
 
-def iterate_spikes(spikes: list[Spike], shape: (int, int, int)):
+def iterate_spikes(spikes: list[Spike], shape: tuple[int, int, int]):
     """
     Iterates through a list of spikes.
-    :param spikes: list of spikes.
-    :param shape: the shape of the spikes.
-    :return: a generator that generates tuples containing (incoming_spikes, current_time, delta_time)
+    :param spikes: list of Spike objects (must be sorted by time).
+    :param shape: tuple defining the shape of the spike volume.
+    :return: generator yielding (incoming_spikes, current_time, delta_time)
     """
     spike_idx = 0
     prev_time = 0.0
 
     while spike_idx < len(spikes):
         current_time = spikes[spike_idx].time
-        incoming_spikes = np.zeros(shape, dtype=np.float32)
+        incoming_spikes = torch.zeros(shape, dtype=torch.float32)
 
         while (
             spike_idx < len(spikes)
             and (spike := spikes[spike_idx]).time <= current_time
         ):
-            incoming_spikes[spike.z, spike.x, spike.y] = 1.0
+            incoming_spikes[spike.z, spike.y, spike.x] = 1.0
             spike_idx += 1
 
         yield incoming_spikes, current_time, current_time - prev_time

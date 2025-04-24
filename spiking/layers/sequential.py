@@ -1,7 +1,5 @@
-import numpy as np
+import torch
 
-from spiking.competition import CompetitionMechanism
-from spiking.learning import LearningMechanism
 from spiking.spiking_module import SpikingModule
 
 
@@ -20,12 +18,12 @@ class SpikingSequential(SpikingModule):
     def spike_times(self):
         return self.layers[-1].spike_times
 
-    def forward(self, incoming_spikes: np.ndarray, current_time: float, dt: float):
+    def forward(self, incoming_spikes: torch.Tensor, current_time: float, dt: float):
         for layer in self.layers:
             incoming_spikes = layer.forward(incoming_spikes, current_time, dt)
         return incoming_spikes
 
-    def backward(self, pre_spike_times: np.ndarray):
+    def backward(self, pre_spike_times: torch.Tensor):
         for layer in self.layers:
             layer.backward(pre_spike_times)
             pre_spike_times = layer.spike_times

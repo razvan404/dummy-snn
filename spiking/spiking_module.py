@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-import numpy as np
+import torch
 
 
 class SpikingModule(ABC):
@@ -12,13 +12,17 @@ class SpikingModule(ABC):
 
     @property
     @abstractmethod
-    def spike_times(self): ...
+    def spike_times(self):
+        pass
 
     @abstractmethod
-    def forward(self, incoming_spikes: np.ndarray, current_time: float, dt: float): ...
+    def forward(self, incoming_spikes: torch.Tensor, current_time: float, dt: float):
+        pass
 
     @abstractmethod
-    def backward(self, pre_spike_times: np.ndarray): ...
+    def backward(self, pre_spike_times: torch.Tensor):
+        pass
 
     @abstractmethod
-    def reset(self): ...
+    def reset(self):
+        pass

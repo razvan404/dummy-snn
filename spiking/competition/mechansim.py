@@ -1,7 +1,8 @@
 from abc import ABC
 
-import numpy as np
+import torch
 
 
 class CompetitionMechanism(ABC):
-    def neurons_to_learn(self, spike_times: np.ndarray) -> np.ndarray: ...
+    def neurons_to_learn(self, spike_times: torch.Tensor) -> torch.Tensor:
+        pass

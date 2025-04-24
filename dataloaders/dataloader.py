@@ -7,10 +7,12 @@ T = TypeVar("T")
 
 class Dataloader(ABC):
     @abstractmethod
-    def __len__(self) -> int: ...
+    def __len__(self) -> int:
+        pass
 
     @abstractmethod
-    def __getitem__(self, idx: int) -> T: ...
+    def __getitem__(self, idx: int) -> T:
+        pass
 
     @classmethod
     def __permutation(cls, length: int, shuffle: bool):

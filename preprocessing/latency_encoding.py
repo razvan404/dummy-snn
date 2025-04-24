@@ -1,7 +1,7 @@
-import numpy as np
+import torch
 
 
-def apply_latency_encoding(input_data: np.ndarray):
-    times = np.maximum(0.0, 1.0 - input_data)
-    times[times == 1.0] = np.inf
+def apply_latency_encoding(input_data: torch.Tensor) -> torch.Tensor:
+    times = torch.clamp(1.0 - input_data, min=0.0)
+    times[times == 1.0] = float("inf")
     return times

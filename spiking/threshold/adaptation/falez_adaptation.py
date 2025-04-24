@@ -1,5 +1,4 @@
-import numpy as np
-
+import torch
 from .adaptation import ThresholdAdaptation
 
 
@@ -21,10 +20,17 @@ class FalezAdaptation(ThresholdAdaptation):
         self.learning_rate *= self.decay_factor
 
     def update(
-        self, current_thresholds: np.ndarray, spike_times: np.ndarray, **kwargs
-    ) -> np.ndarray:
-        threshold_delta = np.zeros_like(current_thresholds)
-        threshold_delta[np.isfinite(spike_times)] = self.learning_rate * (
-            spike_times[np.isfinite(spike_times)] - self.target_timestamp
+        self, current_thresholds: torch.Tensor, spike_times: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
+        threshold_delta = torch.zeros_like(current_thresholds)
+
+        finite_mask = torch.isfinite(spike_times)
+        threshold_delta[finite_mask] = self.learning_rate * (
+            spike_times[finite_mask] - self.target_timestamp
         )
-        return current_thresholds - threshold_delta
+
+        updated_thresholds = current_thresholds - threshold_delta
+        return torch.maximum(
+            updated_thresholds,
+            torch.tensor(self.min_threshold, device=current_thresholds.device),
+        )

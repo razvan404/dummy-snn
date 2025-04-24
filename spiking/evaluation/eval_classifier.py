@@ -3,6 +3,7 @@ from typing import Literal
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import torch
 from sklearn.decomposition import PCA
 from sklearn.metrics import (
     accuracy_score,
@@ -43,8 +44,8 @@ class SpikingClassifierEvaluator:
                 self.model.forward(
                     incoming_spikes.flatten(), current_time=current_time, dt=dt
                 )
-            X.append(np.clip(1.0 - self.model.spike_times, 0, 1.0))
-            # TODO: take formula (10) into consideration
+            X.append(torch.clamp(1.0 - self.model.spike_times, min=0, max=1.0).numpy())
+            # TODO: take formula (10) into consideration for when the adaptation technique is the same one
             y.append(label)
             self.model.reset()
         return np.array(X), np.array(y)

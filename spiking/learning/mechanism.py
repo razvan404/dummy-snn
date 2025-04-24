@@ -1,16 +1,18 @@
 from abc import ABC, abstractmethod
 
-import numpy as np
+import torch
 
 
 class LearningMechanism(ABC):
     @abstractmethod
     def update_weights(
         self,
-        weight: np.ndarray,
-        pre_spike_times: np.ndarray,
-        post_spike_times: np.ndarray,
-    ) -> np.ndarray: ...
+        pre_spike_times: torch.Tensor,
+        weight: torch.Tensor,
+        post_spike_times: torch.Tensor,
+    ) -> torch.Tensor:
+        pass
 
     @abstractmethod
-    def learning_rate_step(self): ...
+    def learning_rate_step(self):
+        pass
