@@ -1,6 +1,5 @@
 import torch
 
-from spiking.layers.layer import SpikingLayer
 from spiking.competition import CompetitionMechanism
 from spiking.learning import LearningMechanism
 from spiking.threshold import (
@@ -8,6 +7,9 @@ from spiking.threshold import (
     ThresholdAdaptation,
     ConstantInitialization,
 )
+
+from ..layer import SpikingLayer
+from ..surrogate_spike import SurrogateSpike
 
 
 class IntegrateAndFireOptimizedLayer(SpikingLayer):
@@ -68,16 +70,28 @@ class IntegrateAndFireOptimizedLayer(SpikingLayer):
         current_time: float,
         active_neurons: torch.Tensor,
     ) -> torch.Tensor:
+        surrogate_spikes = torch.zeros_like(self.membrane_potentials)
+
+        if not active_neurons.any():
+            return surrogate_spikes
+
         input_contrib = torch.sum(self.weights[active_neurons] * incoming_spikes, dim=1)
         self.membrane_potentials[active_neurons] += input_contrib
-        spiking_neurons = active_neurons & (self.membrane_potentials >= self.thresholds)
 
-        self.membrane_potentials[spiking_neurons] = 0.0
-        unspiked_neurons = spiking_neurons & torch.isinf(self._spike_times)
+        potentials = self.membrane_potentials[active_neurons]
+        thresholds = self.thresholds[active_neurons]
+
+        spikes_active = SurrogateSpike.apply(potentials, thresholds)
+        surrogate_spikes[active_neurons] = spikes_active
+
+        spiking_mask_full = surrogate_spikes > 0.0
+        self.membrane_potentials[spiking_mask_full] = 0.0
+
+        unspiked_neurons = spiking_mask_full & torch.isinf(self._spike_times)
         self._spike_times[unspiked_neurons] = current_time
-        self.refractory_times[spiking_neurons] = self.refractory_period
+        self.refractory_times[spiking_mask_full] = self.refractory_period
 
-        return spiking_neurons.float()
+        return surrogate_spikes
 
     def forward(
         self, incoming_spikes: torch.Tensor, current_time: float, dt: float

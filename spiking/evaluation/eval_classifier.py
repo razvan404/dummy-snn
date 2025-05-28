@@ -1,21 +1,17 @@
 from typing import Literal
 
+import torch
+import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-import torch
+from sklearn.base import TransformerMixin, ClassifierMixin
 from sklearn.decomposition import PCA
-from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    confusion_matrix,
-)
+
 from sklearn.svm import SVC
 
 from dataloaders import Dataloader
 from spiking import SpikingModule, iterate_spikes
+from spiking.evaluation.eval_utils import compute_metrics
 
 
 class SpikingClassifierEvaluator:
@@ -50,12 +46,16 @@ class SpikingClassifierEvaluator:
             self.model.reset()
         return np.array(X), np.array(y)
 
-    def plot_reduced_dataset(self, split: Literal["train", "val"]):
+    def plot_reduced_dataset(
+        self, split: Literal["train", "val"], reducer: TransformerMixin | None = None
+    ):
         X = self.X_train if split == "train" else self.X_test
         y = self.y_train if split == "train" else self.y_test
 
-        pca = PCA(n_components=2)
-        X_pca = pca.fit_transform(X)
+        if not reducer:
+            reducer = PCA(n_components=2)
+            reducer.fit(X)
+        X_pca = reducer.transform(X)
 
         scatter = plt.scatter(
             X_pca[:, 0], X_pca[:, 1], c=y, cmap="viridis", edgecolor="k", alpha=0.7
@@ -67,37 +67,43 @@ class SpikingClassifierEvaluator:
         plt.grid()
         plt.show()
 
-    def train_classifier_and_compute_metrics(
-        self, classifier=None, visualize: bool = False
+        return reducer
+
+    def _predict(
+        self, classifier: ClassifierMixin | nn.Module, split: Literal["train", "val"]
+    ):
+        set = self.X_train if split == "train" else self.X_test
+        if isinstance(classifier, nn.Module):
+            classifier.eval()
+            with torch.no_grad():
+                X = torch.tensor(set).float()
+                y_pred = classifier(X).argmax(dim=1).numpy()
+        elif isinstance(classifier, ClassifierMixin):
+            y_pred = classifier.predict(set)
+        else:
+            raise TypeError(
+                "Classifier must be a PyTorch model or a Scikit-learn classifier."
+            )
+        return y_pred
+
+    def eval_classifier(
+        self, classifier: ClassifierMixin | nn.Module = None, train: bool = False
     ):
         if classifier is None:
-            classifier = SVC()
+            classifier = SVC(kernel="linear")
 
-        classifier.fit(self.X_train, self.y_train)
+        if train:
+            if isinstance(classifier, ClassifierMixin):
+                classifier.fit(self.X_train, self.y_train)
+            else:
+                raise TypeError(
+                    "Classifier must be a Scikit-learn classifier for training."
+                )
 
-        print(
-            "Train accuracy:",
-            accuracy_score(self.y_train, classifier.predict(self.X_train)),
-        )
+        print("Train metrics:")
+        y_pred = self._predict(classifier, split="train")
+        compute_metrics(y_pred, self.y_train, visualize=True)
 
-        y_pred = classifier.predict(self.X_test)
-
-        accuracy = accuracy_score(self.y_test, y_pred)
-        precision = precision_score(self.y_test, y_pred, average="macro")
-        recall = recall_score(self.y_test, y_pred, average="macro")
-        f1 = f1_score(self.y_test, y_pred, average="macro")
-        conf_matrix = confusion_matrix(self.y_test, y_pred)
-
-        print(f"Accuracy: {accuracy:.2f}")
-        print(f"Precision: {precision:.2f}")
-        print(f"Recall: {recall:.2f}")
-        print(f"F1 Score: {f1:.2f}")
-
-        if visualize:
-            sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="Blues")
-            plt.xlabel("Predicted Labels")
-            plt.ylabel("True Labels")
-            plt.title("Confusion Matrix")
-            plt.show()
-
-        return accuracy, precision, recall, f1
+        print("Validation metrics:")
+        y_pred = self._predict(classifier, split="val")
+        compute_metrics(y_pred, self.y_test, visualize=True)

@@ -93,7 +93,7 @@ class IntegrateAndFireLayer(SpikingLayer):
     def reset(self):
         for neuron in self.neurons:
             neuron.reset()
-        self._spike_times = torch.fill_(float("inf"))
+        self._spike_times.fill_(float("inf"))
 
     @property
     def spike_times(self):

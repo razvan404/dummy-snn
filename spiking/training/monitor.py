@@ -24,10 +24,17 @@ class Monitor:
     def current_neurons_activity(self) -> torch.Tensor:
         spike_times = self.model.spike_times
         finite_mask = torch.isfinite(spike_times)
-        finite_indices = torch.nonzero(finite_mask, as_tuple=False)
+        finite_spike_times = spike_times[finite_mask]
 
-        sorted_finite = torch.argsort(spike_times[finite_mask])[:20]
-        return finite_indices[sorted_finite]
+        if finite_spike_times.numel() == 0:
+            return torch.tensor([], dtype=torch.long, device=self.model.device)
+
+        topk_indices = torch.topk(
+            -finite_spike_times, k=min(20, finite_spike_times.numel())
+        ).indices
+        finite_indices = torch.nonzero(finite_mask, as_tuple=False).flatten()
+
+        return finite_indices[topk_indices]
 
     def log(self, *, loss: float) -> float:
         self.weight_diffs.append(loss)
@@ -47,7 +54,7 @@ class Monitor:
         return self.thresholds["mean"][-1]
 
     def most_active_neurons(self, num_neurons: int = 20) -> torch.Tensor:
-        return torch.argsort(self.neurons_activity, descending=True)[:num_neurons]
+        return torch.topk(self.model.thresholds, num_neurons).indices
 
     def plot_weight_evolution(self, title: str = None):
         plt.plot(self.weight_diffs)
