@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
@@ -56,12 +57,28 @@ class Monitor:
     def most_active_neurons(self, num_neurons: int = 20) -> torch.Tensor:
         return torch.topk(self.model.thresholds, num_neurons).indices
 
-    def plot_weight_evolution(self, title: str = None):
-        plt.plot(self.weight_diffs)
+    def plot_weight_evolution(self, title: str = None, window_size: int = 100):
+        plt.scatter(
+            np.arange(len(self.weight_diffs)), self.weight_diffs, s=1, label="Losses"
+        )
+
+        if len(self.weight_diffs) >= window_size:
+            moving_avg = np.convolve(
+                self.weight_diffs, np.ones(window_size) / window_size, mode="valid"
+            )
+            plt.plot(
+                np.arange(window_size - 1, len(self.weight_diffs)),
+                moving_avg,
+                label=f"Moving Average (window={window_size})",
+                linewidth=1,
+                color="r",
+            )
+
         if title:
             plt.title(title)
         plt.xlabel("Training Step")
         plt.ylabel("Loss")
+        plt.legend()
         plt.show()
 
     def plot_thresholds_evolution(self, title: str = None):

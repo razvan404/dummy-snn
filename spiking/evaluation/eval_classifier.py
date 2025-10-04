@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from sklearn.base import TransformerMixin, ClassifierMixin
 from sklearn.decomposition import PCA
 
-from sklearn.svm import SVC
+from sklearn.svm import LinearSVC
 
 from dataloaders import Dataloader
 from spiking import SpikingModule, iterate_spikes
@@ -87,10 +87,14 @@ class SpikingClassifierEvaluator:
         return y_pred
 
     def eval_classifier(
-        self, classifier: ClassifierMixin | nn.Module = None, train: bool = False
+        self,
+        classifier: ClassifierMixin | nn.Module = None,
+        train: bool = False,
+        visualize: bool = True,
+        verbose: bool = True,
     ):
         if classifier is None:
-            classifier = SVC(kernel="linear")
+            classifier = LinearSVC(max_iter=20000)
 
         if train:
             if isinstance(classifier, ClassifierMixin):
@@ -100,10 +104,18 @@ class SpikingClassifierEvaluator:
                     "Classifier must be a Scikit-learn classifier for training."
                 )
 
-        print("Train metrics:")
+        if verbose:
+            print("Train metrics:")
         y_pred = self._predict(classifier, split="train")
-        compute_metrics(y_pred, self.y_train, visualize=True)
+        train_metrics = compute_metrics(
+            self.y_train, y_pred, visualize=visualize, verbose=verbose
+        )
 
-        print("Validation metrics:")
+        if verbose:
+            print("\nValidation metrics:")
         y_pred = self._predict(classifier, split="val")
-        compute_metrics(y_pred, self.y_test, visualize=True)
+        val_metrics = compute_metrics(
+            self.y_test, y_pred, visualize=visualize, verbose=verbose
+        )
+
+        return train_metrics, val_metrics

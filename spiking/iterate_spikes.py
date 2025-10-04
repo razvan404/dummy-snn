@@ -20,7 +20,7 @@ def iterate_spikes(spikes: list[Spike], shape: tuple[int, int, int]):
             spike_idx < len(spikes)
             and (spike := spikes[spike_idx]).time <= current_time
         ):
-            incoming_spikes[spike.z, spike.y, spike.x] = 1.0
+            incoming_spikes[spike.z, spike.y, spike.x] = 1.0  # TODO: local patches here
             spike_idx += 1
 
         yield incoming_spikes, current_time, current_time - prev_time

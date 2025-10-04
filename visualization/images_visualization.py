@@ -24,7 +24,7 @@ class ImagesVisualization:
         plt.figure(figsize=FIG_SIZE)
         plt.axis("off")
         if title:
-            plt.title(title)
+            plt.suptitle(title, fontsize=16)
         for idx, image in enumerate(images):
             plt.subplot(nrows, ncols, idx + 1)
             plt.imshow(image, cmap=cmap)
