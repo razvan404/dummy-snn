@@ -29,7 +29,7 @@ class CompetitiveFalezAdaptation(ThresholdAdaptation):
         winners_neurons = neurons_to_learn
         winners_divisor = len(winners_neurons)
 
-        all_indices = torch.arange(len(current_thresholds))
+        all_indices = torch.arange(len(current_thresholds)).to(spike_times.device)
         losers_neurons = all_indices[~torch.isin(all_indices, winners_neurons)]
         losers_divisor = len(losers_neurons)
 

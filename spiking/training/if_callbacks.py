@@ -96,6 +96,7 @@ class IntegrateAndFireCallbacks(CallbacksInterface):
                 plt.show()
             else:
                 plt.savefig(f"{self.figures_dir}/{split}-e{self.epoch}.png")
+                plt.close()
 
         self.membrane_potentials = []
         self.membrane_potentials_times = []

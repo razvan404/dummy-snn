@@ -1,6 +1,7 @@
 import json
 
 import numpy as np
+import torch
 import tqdm
 from matplotlib import pyplot as plt
 from torch.utils.data import random_split, DataLoader
@@ -61,6 +62,7 @@ def save_visualizations(monitor: TrainingMonitor, figures_dir: str):
     plt.subplot(1, 2, 2)
     monitor.plot_weight_evolution("val", title="Validation split")
     plt.savefig(f"{figures_dir}/weight_evolution.png")
+    plt.close()
 
     plt.figure(figsize=(12, 5))
     plt.suptitle("Network evolution")
@@ -69,6 +71,7 @@ def save_visualizations(monitor: TrainingMonitor, figures_dir: str):
     plt.subplot(1, 2, 2)
     monitor.plot_neurons_activity()
     plt.savefig(f"{figures_dir}/network_evolution.png")
+    plt.close()
 
     monitor.visualize_weights(
         IMAGE_SHAPE,
@@ -76,6 +79,7 @@ def save_visualizations(monitor: TrainingMonitor, figures_dir: str):
         ncols=8,
     )
     plt.savefig(f"{figures_dir}/weights.png")
+    plt.close()
 
 
 def eval_snn(
@@ -102,6 +106,7 @@ def eval_snn(
 
     if figures_dir is not None:
         plt.savefig(f"{figures_dir}/reduced_data.png")
+        plt.close()
     else:
         plt.show()
 
@@ -113,6 +118,7 @@ def eval_snn(
 
     if figures_dir is not None:
         plt.savefig(f"{figures_dir}/confusion_matrices.png")
+        plt.close()
     else:
         plt.show()
 
@@ -120,6 +126,9 @@ def eval_snn(
 
 
 def train_one_layer(exp_name: str, setup: dict):
+    np.random.seed(setup["seed"])
+    torch.manual_seed(setup["seed"])
+
     train_loader, val_loader, test_loader, num_inputs = load_datasets()
     num_outputs = setup["num_outputs"]
 
@@ -140,6 +149,7 @@ def train_one_layer(exp_name: str, setup: dict):
         trainer.step_loader(val_loader, split="val")
         trainer.step_epoch()
 
+    model = trainer.model.cpu()
     save_visualizations(callbacks.monitor, figures_dir)
     train_metrics, val_metrics = eval_snn(
         model,
@@ -175,6 +185,7 @@ if __name__ == "__main__":
             "dataset": "mnist",
             "num_epochs": 20,
             "num_outputs": 36,
+            "seed": 42,
             "threshold.initialization": (
                 "normal",
                 {

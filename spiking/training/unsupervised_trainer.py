@@ -13,7 +13,8 @@ class UnsupervisedTrainer:
         image_shape: (int, int, int),
         callbacks: CallbacksInterface | None = None,
     ):
-        self.model = model
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.model = model.to(self.device)
         self.image_shape = image_shape
         self.callbacks = callbacks
 
@@ -31,7 +32,7 @@ class UnsupervisedTrainer:
             spikes, shape=self.image_shape
         ):
             output_spikes = self.model.forward(
-                incoming_spikes.flatten(), current_time, dt
+                incoming_spikes.flatten().to(self.device), current_time, dt
             )
             if self.callbacks and self.callbacks.callback_step_spike(
                 batch_idx, current_time, output_spikes, split
@@ -39,11 +40,13 @@ class UnsupervisedTrainer:
                 continue
             if torch.any(output_spikes == 1.0):
                 break
-        pre_spike_times = times.flatten()
+        pre_spike_times = times.flatten().to(self.device)
         dw = self.model.backward(pre_spike_times)
 
         if self.callbacks:
-            self.callbacks.callback_step(batch_idx, pre_spike_times, dw, label, split)
+            self.callbacks.callback_step(
+                batch_idx, pre_spike_times.cpu(), dw, label, split
+            )
         self.model.reset()
         return dw
 

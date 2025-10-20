@@ -23,7 +23,7 @@ class TrainingMonitor:
         self.neurons_activity = torch.zeros(self.model.num_outputs, dtype=torch.float32)
 
     def current_neurons_activity(self) -> torch.Tensor:
-        spike_times = self.model.spike_times
+        spike_times = self.model.spike_times.cpu()
         finite_mask = torch.isfinite(spike_times)
         finite_spike_times = spike_times[finite_mask]
 
