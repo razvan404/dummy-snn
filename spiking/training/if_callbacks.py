@@ -43,15 +43,15 @@ class IntegrateAndFireCallbacks(CallbacksInterface):
             self.membrane_potentials.append(
                 [
                     (
-                        self.model.thresholds[idx]
+                        self.model.thresholds[idx].cpu()
                         if output_spike[idx]
-                        else self.model.membrane_potentials[idx]
+                        else self.model.membrane_potentials[idx].cpu()
                     )
                     for idx in range(self.model.num_outputs)
                 ]
             )
             self.membrane_potentials_times.append(current_time)
-        self.membrane_potentials.append(self.model.membrane_potentials.clone())
+        self.membrane_potentials.append(self.model.membrane_potentials.cpu())
         self.membrane_potentials_times.append(current_time)
 
         return True
@@ -77,8 +77,8 @@ class IntegrateAndFireCallbacks(CallbacksInterface):
 
         plt.subplot(2, 4, 1 + 2 * batch_idx)
         SpikesVisualization.plot_pre_post_spikes(
-            pre_spike_times.numpy(),
-            post_spike_times.numpy(),
+            pre_spike_times.cpu().numpy(),
+            post_spike_times.cpu().numpy(),
             title=f"Pre- vs Post-synaptic. digit {label}",
             unique_colors=True,
         )
