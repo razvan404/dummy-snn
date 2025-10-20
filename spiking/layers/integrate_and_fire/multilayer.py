@@ -3,11 +3,10 @@ from spiking.learning import LearningMechanism
 from spiking.threshold import (
     ThresholdInitialization,
     ThresholdAdaptation,
-    ConstantInitialization,
 )
 
 from ..sequential import SpikingSequential
-from .optimized_layer import IntegrateAndFireOptimizedLayer
+from .layer import IntegrateAndFireLayer
 
 
 class IntegrateAndFireMultilayer(SpikingSequential):
@@ -18,22 +17,15 @@ class IntegrateAndFireMultilayer(SpikingSequential):
         num_outputs: int,
         learning_mechanism: LearningMechanism,
         competition_mechanism: CompetitionMechanism | None = None,
-        threshold: float | list[float] = 1.0,
         refractory_period: float = 1.0,
         threshold_initialization: ThresholdInitialization | None = None,
-        threshold_adaptation: ThresholdAdaptation | None = ConstantInitialization(),
+        threshold_adaptation: ThresholdAdaptation | None = None,
     ):
-        if isinstance(threshold, list):
-            assert len(threshold) == len(num_hidden) + 1
-        else:
-            threshold = [threshold for _ in range(len(num_hidden) + 1)]
-
         layers = [
-            IntegrateAndFireOptimizedLayer(
+            IntegrateAndFireLayer(
                 num_inputs=num_inputs,
                 num_outputs=num_outputs if len(num_hidden) == 0 else num_hidden[0],
                 learning_mechanism=learning_mechanism,
-                threshold=threshold[0],
                 refractory_period=refractory_period,
                 threshold_initialization=threshold_initialization,
                 threshold_adaptation=threshold_adaptation,
@@ -45,12 +37,11 @@ class IntegrateAndFireMultilayer(SpikingSequential):
                 num_hidden[i + 1] if i < len(num_hidden) - 1 else num_outputs
             )
             layers.append(
-                IntegrateAndFireOptimizedLayer(
+                IntegrateAndFireLayer(
                     num_inputs=layer_inputs,
                     num_outputs=layer_outputs,
                     learning_mechanism=learning_mechanism,
                     competition_mechanism=competition_mechanism,
-                    threshold=threshold[i + 1],
                     refractory_period=refractory_period,
                 )
             )

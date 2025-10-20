@@ -2,13 +2,15 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-from ..layers import IntegrateAndFireOptimizedLayer
+from spiking import SpikingModule
 
 
-class Monitor:
-    def __init__(self, model: IntegrateAndFireOptimizedLayer):
+class TrainingMonitor:
+    def __init__(self, model: SpikingModule, splits: list[str] | None = None):
+        if splits is None:
+            splits = ["train", "val", "test"]
         self.model = model
-        self.weight_diffs = []
+        self.weight_diffs = {split: [] for split in splits}
 
         self.some_threshold_indices = [1, 10, 56, 99]
         self.thresholds = {
@@ -18,9 +20,7 @@ class Monitor:
             **{f"idx_{idx}": [] for idx in self.some_threshold_indices},
         }
 
-        self.neurons_activity = torch.zeros(
-            self.model.num_outputs, dtype=torch.float32, device=self.model.device
-        )
+        self.neurons_activity = torch.zeros(self.model.num_outputs, dtype=torch.float32)
 
     def current_neurons_activity(self) -> torch.Tensor:
         spike_times = self.model.spike_times
@@ -28,7 +28,7 @@ class Monitor:
         finite_spike_times = spike_times[finite_mask]
 
         if finite_spike_times.numel() == 0:
-            return torch.tensor([], dtype=torch.long, device=self.model.device)
+            return torch.tensor([], dtype=torch.long)
 
         topk_indices = torch.topk(
             -finite_spike_times, k=min(20, finite_spike_times.numel())
@@ -37,8 +37,11 @@ class Monitor:
 
         return finite_indices[topk_indices]
 
-    def log(self, *, loss: float) -> float:
-        self.weight_diffs.append(loss)
+    def log(self, *, split: str, dw: float):
+        self.weight_diffs[split].append(dw)
+
+        if split != "train":
+            return
 
         thresholds = self.model.thresholds
         self.thresholds["mean"].append(thresholds.mean().item())
@@ -52,22 +55,27 @@ class Monitor:
         active = self.current_neurons_activity()
         self.neurons_activity[active] += 1.0
 
-        return self.thresholds["mean"][-1]
-
     def most_active_neurons(self, num_neurons: int = 20) -> torch.Tensor:
         return torch.topk(self.model.thresholds, num_neurons).indices
 
-    def plot_weight_evolution(self, title: str = None, window_size: int = 100):
+    def plot_weight_evolution(
+        self, split: str, title: str = None, window_size: int = 100
+    ):
         plt.scatter(
-            np.arange(len(self.weight_diffs)), self.weight_diffs, s=1, label="Losses"
+            np.arange(len(self.weight_diffs[split])),
+            self.weight_diffs[split],
+            s=1,
+            label="Losses",
         )
 
-        if len(self.weight_diffs) >= window_size:
+        if len(self.weight_diffs[split]) >= window_size:
             moving_avg = np.convolve(
-                self.weight_diffs, np.ones(window_size) / window_size, mode="valid"
+                self.weight_diffs[split],
+                np.ones(window_size) / window_size,
+                mode="valid",
             )
             plt.plot(
-                np.arange(window_size - 1, len(self.weight_diffs)),
+                np.arange(window_size - 1, len(self.weight_diffs[split])),
                 moving_avg,
                 label=f"Moving Average (window={window_size})",
                 linewidth=1,
@@ -76,10 +84,9 @@ class Monitor:
 
         if title:
             plt.title(title)
-        plt.xlabel("Training Step")
-        plt.ylabel("Loss")
+        plt.xlabel(f"{split} step")
+        plt.ylabel("loss")
         plt.legend()
-        plt.show()
 
     def plot_thresholds_evolution(self, title: str = None):
         for metric, values in self.thresholds.items():
@@ -95,7 +102,6 @@ class Monitor:
         plt.xlabel("Training Step")
         plt.ylabel("Threshold Value")
         plt.legend()
-        plt.show()
 
     def plot_neurons_activity(self):
         indices = torch.arange(self.model.num_outputs).cpu().numpy()
@@ -105,4 +111,23 @@ class Monitor:
         plt.xlabel("Neuron Index")
         plt.ylabel("Activity")
         plt.title("Neuron Activity Bar Plot")
-        plt.show()
+
+    def visualize_weights(
+        self, image_shape: tuple[int, int], neurons_indices=None, ncols: int = 4
+    ):
+        if neurons_indices is None:
+            neurons_indices = range(self.model.num_outputs)
+
+        nrows = (len(neurons_indices) - 1) // ncols + 1
+        plt.figure(figsize=(ncols * 2, nrows * 2))
+        plt.suptitle("Weights")
+        for idx, neuron_idx in enumerate(neurons_indices, start=1):
+            img = self.model.weights[neuron_idx].reshape((2, *image_shape))
+            padding = torch.zeros((1, *image_shape), device=img.device)
+            img = torch.cat([img, padding], dim=0)
+            img = img.permute(1, 2, 0).detach().cpu().numpy()
+
+            plt.subplot(nrows, ncols, idx)
+            plt.title(str(int(neuron_idx)))
+            plt.axis("off")
+            plt.imshow(img)

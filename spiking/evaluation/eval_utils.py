@@ -30,6 +30,5 @@ def compute_metrics(
         plt.xlabel("Predicted Labels")
         plt.ylabel("True Labels")
         plt.title("Confusion Matrix")
-        plt.show()
 
-    return accuracy, precision, recall, f1
+    return {"accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1}

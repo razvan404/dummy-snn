@@ -8,8 +8,8 @@ from sklearn.base import TransformerMixin, ClassifierMixin
 from sklearn.decomposition import PCA
 
 from sklearn.svm import LinearSVC
+from torch.utils.data import DataLoader
 
-from dataloaders import Dataloader
 from spiking import SpikingModule, iterate_spikes
 from spiking.evaluation.eval_utils import compute_metrics
 
@@ -18,8 +18,8 @@ class SpikingClassifierEvaluator:
     def __init__(
         self,
         model: SpikingModule,
-        train_dataloader: Dataloader,
-        validation_dataloader: Dataloader,
+        train_dataloader: DataLoader,
+        validation_dataloader: DataLoader,
         shape: (int, int, int),
     ):
         self.shape = shape
@@ -29,11 +29,9 @@ class SpikingClassifierEvaluator:
             validation_dataloader
         )
 
-    def _dataloader_to_spike_times(self, arg_dataloader: Dataloader):
+    def _dataloader_to_spike_times(self, arg_dataloader: DataLoader):
         X, y = [], []
-        for batch_idx, (spikes, label, _) in enumerate(
-            arg_dataloader.iterate(batch_size=1), start=1
-        ):
+        for batch_idx, (spikes, label, _) in enumerate(arg_dataloader, start=1):
             for incoming_spikes, current_time, dt in iterate_spikes(
                 spikes, shape=self.shape
             ):
@@ -65,7 +63,6 @@ class SpikingClassifierEvaluator:
         plt.xlabel("Principal Component 1")
         plt.ylabel("Principal Component 2")
         plt.grid()
-        plt.show()
 
         return reducer
 
@@ -107,6 +104,9 @@ class SpikingClassifierEvaluator:
         if verbose:
             print("Train metrics:")
         y_pred = self._predict(classifier, split="train")
+
+        if visualize:
+            plt.subplot(1, 2, 1)
         train_metrics = compute_metrics(
             self.y_train, y_pred, visualize=visualize, verbose=verbose
         )
@@ -114,6 +114,9 @@ class SpikingClassifierEvaluator:
         if verbose:
             print("\nValidation metrics:")
         y_pred = self._predict(classifier, split="val")
+
+        if visualize:
+            plt.subplot(1, 2, 2)
         val_metrics = compute_metrics(
             self.y_test, y_pred, visualize=visualize, verbose=verbose
         )

@@ -1,7 +1,10 @@
 import torch
+
 from .adaptation import ThresholdAdaptation
+from spiking.registry import registry
 
 
+@registry.register("threshold.adaptation", "competitive_falez")
 class CompetitiveFalezAdaptation(ThresholdAdaptation):
     def __init__(
         self,

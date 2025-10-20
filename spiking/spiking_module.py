@@ -1,12 +1,14 @@
 from abc import ABC, abstractmethod
 
 import torch
+import torch.nn as nn
 
 
-class SpikingModule(ABC):
+class SpikingModule(nn.Module, ABC):
     __slots__ = ["num_inputs", "num_outputs"]
 
     def __init__(self, num_inputs: int, num_outputs: int):
+        super().__init__()
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
 
