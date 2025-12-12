@@ -18,6 +18,7 @@ class TrainingMonitor:
             "min": [],
             "max": [],
             **{f"idx_{idx}": [] for idx in self.some_threshold_indices},
+            "list": [],
         }
 
         self.neurons_activity = torch.zeros(self.model.num_outputs, dtype=torch.float32)
@@ -47,6 +48,7 @@ class TrainingMonitor:
         self.thresholds["mean"].append(thresholds.mean().item())
         self.thresholds["min"].append(thresholds.min().item())
         self.thresholds["max"].append(thresholds.max().item())
+        self.thresholds["list"].append(thresholds.tolist())
 
         for idx in self.some_threshold_indices:
             if idx < len(thresholds):
@@ -94,7 +96,11 @@ class TrainingMonitor:
             width = 1.5 if metric.startswith("idx_") else 2
             alpha = 0.9 if metric.startswith("idx_") else 1.0
             plt.plot(
-                values, label=metric, linestyle=style, linewidth=width, alpha=alpha
+                values,
+                label=metric if metric != "list" else None,
+                linestyle=style,
+                linewidth=width,
+                alpha=alpha,
             )
 
         if title:

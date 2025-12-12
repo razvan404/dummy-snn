@@ -4,7 +4,10 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from preprocessing import apply_difference_of_gaussians_filter, apply_latency_encoding
+from spiking.preprocessing import (
+    apply_difference_of_gaussians_filter,
+    apply_latency_encoding,
+)
 from spiking import convert_to_spikes
 
 

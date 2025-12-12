@@ -29,8 +29,10 @@ class SpikingClassifierEvaluator:
             validation_dataloader
         )
 
+    @torch.no_grad()
     def _dataloader_to_spike_times(self, arg_dataloader: DataLoader):
         X, y = [], []
+        self.model.eval()
         for batch_idx, (spikes, label, _) in enumerate(arg_dataloader, start=1):
             for incoming_spikes, current_time, dt in iterate_spikes(
                 spikes, shape=self.shape

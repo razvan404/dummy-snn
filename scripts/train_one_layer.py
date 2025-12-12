@@ -89,38 +89,44 @@ def eval_snn(
     val_loader: DataLoader,
     classifier=None,
     train: bool = True,
+    visualize: bool = True,
     figures_dir: str | None = None,
     verbose: bool = False,
 ):
     evaluator = SpikingClassifierEvaluator(
         model, train_loader, val_loader, shape=(2, *IMAGE_SHAPE)
     )
-    print(f"{evaluator.X_train.shape = }, {evaluator.y_train.shape = }")
-    print(f"{evaluator.X_test.shape = }, {evaluator.y_test.shape = }")
+    if verbose:
+        print(f"{evaluator.X_train.shape = }, {evaluator.y_train.shape = }")
+        print(f"{evaluator.X_test.shape = }, {evaluator.y_test.shape = }")
 
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
-    reducer = evaluator.plot_reduced_dataset("train")
-    plt.subplot(1, 2, 2)
-    evaluator.plot_reduced_dataset("val", reducer=reducer)
+    if visualize:
+        plt.figure(figsize=(12, 5))
+        plt.subplot(1, 2, 1)
+        reducer = evaluator.plot_reduced_dataset("train")
+        plt.subplot(1, 2, 2)
+        evaluator.plot_reduced_dataset("val", reducer=reducer)
 
-    if figures_dir is not None:
-        plt.savefig(f"{figures_dir}/reduced_data.png")
-        plt.close()
-    else:
-        plt.show()
+        if figures_dir is not None:
+            plt.savefig(f"{figures_dir}/reduced_data.png")
+            plt.close()
+        else:
+            plt.show()
 
-    plt.figure(figsize=(12, 5))
-    plt.suptitle("Confusion Matrices")
+    if visualize:
+        plt.figure(figsize=(12, 5))
+        plt.suptitle("Confusion Matrices")
+
     train_metrics, val_metrics = evaluator.eval_classifier(
-        classifier=classifier, train=train, visualize=False, verbose=verbose
+        classifier=classifier, train=train, visualize=visualize, verbose=verbose
     )
 
-    if figures_dir is not None:
-        plt.savefig(f"{figures_dir}/confusion_matrices.png")
-        plt.close()
-    else:
-        plt.show()
+    if visualize:
+        if figures_dir is not None:
+            plt.savefig(f"{figures_dir}/confusion_matrices.png")
+            plt.close()
+        else:
+            plt.show()
 
     return train_metrics, val_metrics
 
@@ -162,6 +168,8 @@ def train_one_layer(exp_name: str, setup: dict):
         json.dump(setup, f, indent=4)
     with open(f"{logs_dir}/metrics.json", "w") as f:
         json.dump({"train": train_metrics, "validation": val_metrics}, f, indent=4)
+    with open(f"{logs_dir}/thresholds.json", "w") as f:
+        json.dump(callbacks.monitor.thresholds["list"], f)
 
     save_model(model, f"{logs_dir}/model.pth")
     print(f"Experiment {exp_name} finished.")
@@ -176,16 +184,19 @@ if __name__ == "__main__":
     max_pre_spike_time = 1.0
 
     min_threshold = 1.0
-    avg_threshold = 25.0
     std_dev_threshold = 1.0
 
+    seed = 42
+    outs = 100
+    avg_threshold = 105.6
+
     train_one_layer(
-        exp_name="test",
+        exp_name=f"model_th{avg_threshold}_seed{seed}_outs{outs}",
         setup={
             "dataset": "mnist",
             "num_epochs": 20,
-            "num_outputs": 36,
-            "seed": 42,
+            "num_outputs": outs,
+            "seed": seed,
             "threshold.initialization": (
                 "normal",
                 {
