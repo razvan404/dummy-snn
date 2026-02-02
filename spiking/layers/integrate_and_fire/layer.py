@@ -50,6 +50,9 @@ class IntegrateAndFireLayer(SpikingLayer):
             "_spike_times", torch.full((num_outputs,), float("inf"), dtype=dtype)
         )
 
+        self.updatable_weights = True
+        self.updatable_thresholds = True
+
     def _update_refractory(self, dt: float) -> torch.Tensor:
         active_neurons = self.refractory_times == 0
         self.refractory_times[~active_neurons] = torch.clamp(
@@ -108,10 +111,10 @@ class IntegrateAndFireLayer(SpikingLayer):
             total_dw += torch.mean(
                 torch.abs(self.weights[idx] - updated_weights)
             ).item()
-            if self.training:
+            if self.training and self.updatable_weights:
                 self.weights[idx].copy_(updated_weights)
 
-        if self.threshold_adaptation and self.training:
+        if self.threshold_adaptation and self.training and self.updatable_thresholds:
             self.thresholds.copy_(
                 self.threshold_adaptation.update(
                     self.thresholds,

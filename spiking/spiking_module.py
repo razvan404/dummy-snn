@@ -5,8 +5,6 @@ import torch.nn as nn
 
 
 class SpikingModule(nn.Module, ABC):
-    __slots__ = ["num_inputs", "num_outputs"]
-
     def __init__(self, num_inputs: int, num_outputs: int):
         super().__init__()
         self.num_inputs = num_inputs

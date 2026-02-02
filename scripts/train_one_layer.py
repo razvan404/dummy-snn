@@ -1,3 +1,4 @@
+import argparse
 import json
 
 import numpy as np
@@ -175,54 +176,74 @@ def train_one_layer(exp_name: str, setup: dict):
     print(f"Experiment {exp_name} finished.")
 
 
+def get_default_setup(seed: int, num_outputs: int = 100, num_epochs: int = 100):
+    """Return default training setup with given seed."""
+    return {
+        "dataset": "mnist",
+        "num_epochs": num_epochs,
+        "num_outputs": num_outputs,
+        "seed": seed,
+        "threshold.initialization": (
+            "normal",
+            {
+                "avg_threshold": 25.6,
+                "min_threshold": 1.0,
+                "std_dev": 1.0,
+            },
+        ),
+        "threshold.adaptation": (
+            "competitive_falez",
+            {
+                "min_threshold": 1.0,
+                "learning_rate": 5.0,
+                "decay_factor": 1.0,
+            },
+        ),
+        "learning_mechanism": (
+            "stdp",
+            {
+                "tau_pre": 0.1,
+                "tau_post": 0.1,
+                "max_pre_spike_time": 1.0,
+                "learning_rate": 0.1,
+                "decay_factor": 1.0,
+            },
+        ),
+        "competition_mechanism": ("wta", {}),
+    }
+
+
 if __name__ == "__main__":
-    decay_lambda = 1.0
-    weights_lr0 = 0.1
-    adapt_lr0 = 5.0
-
-    tau = 0.1
-    max_pre_spike_time = 1.0
-
-    min_threshold = 1.0
-    std_dev_threshold = 1.0
-
-    seed = 42
-    outs = 100
-    avg_threshold = 105.6
-
-    train_one_layer(
-        exp_name=f"model_th{avg_threshold}_seed{seed}_outs{outs}",
-        setup={
-            "dataset": "mnist",
-            "num_epochs": 20,
-            "num_outputs": outs,
-            "seed": seed,
-            "threshold.initialization": (
-                "normal",
-                {
-                    "avg_threshold": avg_threshold,
-                    "min_threshold": min_threshold,
-                    "std_dev": std_dev_threshold,
-                },
-            ),
-            "threshold.adaptation": (
-                "competitive_falez",
-                {
-                    "min_threshold": min_threshold,
-                    "learning_rate": adapt_lr0,
-                    "decay_factor": decay_lambda,
-                },
-            ),
-            "learning_mechanism": (
-                "stdp",
-                {
-                    "tau_pre": tau,
-                    "tau_post": tau,
-                    "max_pre_spike_time": max_pre_spike_time,
-                    "learning_rate": weights_lr0,
-                    "decay_factor": decay_lambda,
-                },
-            ),
-            "competition_mechanism": ("wta", {}),
-        },
+    parser = argparse.ArgumentParser(description="Train a single-layer SNN")
+    parser.add_argument(
+        "--exp-name",
+        type=str,
+        required=True,
+        help="Experiment name (used for output directory)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed (default: 42)",
+    )
+    parser.add_argument(
+        "--num-outputs",
+        type=int,
+        default=100,
+        help="Number of output neurons (default: 100)",
+    )
+    parser.add_argument(
+        "--num-epochs",
+        type=int,
+        default=100,
+        help="Number of training epochs (default: 100)",
+    )
+    args = parser.parse_args()
+
+    setup = get_default_setup(
+        seed=args.seed,
+        num_outputs=args.num_outputs,
+        num_epochs=args.num_epochs,
+    )
+    train_one_layer(exp_name=args.exp_name, setup=setup)
