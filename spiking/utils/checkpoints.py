@@ -1,16 +1,14 @@
 import os
-import pickle
+
+import torch
 
 from spiking.spiking_module import SpikingModule
 
 
 def save_model(model: SpikingModule, path: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as file:
-        pickle.dump(model, file)
+    torch.save(model, path)
 
 
 def load_model(path: str):
-    with open(path, "rb") as file:
-        model = pickle.load(file)
-    return model
+    return torch.load(path, weights_only=False)

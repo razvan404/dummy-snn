@@ -1,37 +1,22 @@
 import torch
 import torch.nn as nn
 
-from spiking.competition import CompetitionMechanism
-from spiking.learning import LearningMechanism
-from spiking.threshold import (
-    ThresholdInitialization,
-    ThresholdAdaptation,
-)
+from spiking.spiking_module import SpikingModule
+from spiking.threshold import ThresholdInitialization
 
-from ..layer import SpikingLayer
-from ..surrogate_spike import SurrogateSpike
+from .surrogate_spike import SurrogateSpike
 
 
-class IntegrateAndFireLayer(SpikingLayer):
+class IntegrateAndFireLayer(SpikingModule):
     def __init__(
         self,
         num_inputs: int,
         num_outputs: int,
-        learning_mechanism: LearningMechanism,
         threshold_initialization: ThresholdInitialization,
-        competition_mechanism: CompetitionMechanism | None = None,
         refractory_period: float = 1.0,
-        threshold_adaptation: ThresholdAdaptation | None = None,
         dtype: torch.dtype = torch.float32,
     ):
-        super().__init__(
-            num_inputs=num_inputs,
-            num_outputs=num_outputs,
-            learning_mechanism=learning_mechanism,
-            competition_mechanism=competition_mechanism,
-            threshold_initialization=threshold_initialization,
-            threshold_adaptation=threshold_adaptation,
-        )
+        super().__init__(num_inputs=num_inputs, num_outputs=num_outputs)
 
         self.refractory_period = refractory_period
 
@@ -49,9 +34,6 @@ class IntegrateAndFireLayer(SpikingLayer):
         self.register_buffer(
             "_spike_times", torch.full((num_outputs,), float("inf"), dtype=dtype)
         )
-
-        self.updatable_weights = True
-        self.updatable_thresholds = True
 
     def _update_refractory(self, dt: float) -> torch.Tensor:
         active_neurons = self.refractory_times == 0
@@ -94,36 +76,6 @@ class IntegrateAndFireLayer(SpikingLayer):
     ) -> torch.Tensor:
         active_neurons = self._update_refractory(dt)
         return self._update_potential(incoming_spikes, current_time, active_neurons)
-
-    def backward(self, pre_spike_times: torch.Tensor) -> float:
-        neurons_to_learn = (
-            self.competition_mechanism.neurons_to_learn(self._spike_times)
-            if self.competition_mechanism
-            else torch.nonzero(torch.isfinite(self._spike_times), as_tuple=False)
-        )
-
-        total_dw = 0.0
-        for neuron_idx in neurons_to_learn:
-            idx = neuron_idx.item()
-            updated_weights = self.learning_mechanism.update_weights(
-                self.weights[idx], pre_spike_times, self._spike_times[idx]
-            )
-            total_dw += torch.mean(
-                torch.abs(self.weights[idx] - updated_weights)
-            ).item()
-            if self.training and self.updatable_weights:
-                self.weights[idx].copy_(updated_weights)
-
-        if self.threshold_adaptation and self.training and self.updatable_thresholds:
-            self.thresholds.copy_(
-                self.threshold_adaptation.update(
-                    self.thresholds,
-                    self._spike_times,
-                    neurons_to_learn=neurons_to_learn,
-                )
-            )
-
-        return total_dw / len(neurons_to_learn) if len(neurons_to_learn) > 0 else 0.0
 
     def reset(self):
         self.membrane_potentials.zero_()

@@ -6,22 +6,11 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from sklearn.svm import LinearSVC
-from torch.utils.data import DataLoader
 
-from datasets.mnist import MnistDataset
-
-
-def set_seed(seed: int):
-    """Set random seed for reproducibility."""
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-
-
-from spiking.evaluation import SpikingClassifierEvaluator
-from spiking.postlearning import STDPThresholdOptimizer
+from scripts.common import set_seed, evaluate_model, create_dataset
+from spiking.learning import Learner
+from spiking.threshold import PlasticityBalanceAdaptation
+from spiking.training import UnsupervisedTrainer
 from spiking.utils import load_model, save_model
 
 IMAGE_SHAPE = (16, 16)
@@ -89,20 +78,6 @@ def plot_convergence(mean_deltas: list[float], output_dir: str):
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "convergence.png"), dpi=150)
     plt.close()
-
-
-def evaluate_model(model, train_loader, val_loader):
-    """Evaluate model and return metrics."""
-    model = model.cpu()
-    evaluator = SpikingClassifierEvaluator(
-        model, train_loader, val_loader, shape=(2, *IMAGE_SHAPE)
-    )
-    classifier = LinearSVC(max_iter=20000)
-    classifier.fit(evaluator.X_train, evaluator.y_train)
-    train_metrics, val_metrics = evaluator.eval_classifier(
-        classifier=classifier, train=False, visualize=False, verbose=False
-    )
-    return train_metrics, val_metrics
 
 
 def plot_comparison(all_metrics: dict, output_dir: str):
@@ -216,14 +191,11 @@ def main():
     output_dir = args.output_dir or os.path.dirname(args.model_path)
     os.makedirs(output_dir, exist_ok=True)
 
-    train_dataset = MnistDataset("data/mnist-subset", "train", image_shape=IMAGE_SHAPE)
-    val_dataset = MnistDataset("data/mnist-subset", "test", image_shape=IMAGE_SHAPE)
-    train_loader = DataLoader(train_dataset, batch_size=None, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=None, shuffle=False)
+    train_loader, val_loader = create_dataset("mnist_subset", IMAGE_SHAPE)
 
     print("\nEvaluating model BEFORE post-training...")
     before_train, before_val = evaluate_model(
-        copy.deepcopy(model), train_loader, val_loader
+        copy.deepcopy(model), train_loader, val_loader, image_shape=(2, *IMAGE_SHAPE)
     )
     print(f"  Train accuracy: {before_train['accuracy']:.4f}")
     print(f"  Val accuracy: {before_val['accuracy']:.4f}")
@@ -231,28 +203,49 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    optimizer = STDPThresholdOptimizer(
+    adaptation = PlasticityBalanceAdaptation(
         learning_rate=args.learning_rate,
         min_threshold=args.min_threshold,
         max_threshold=args.max_threshold,
+    )
+    learner = Learner(model, learning_mechanism=None, threshold_adaptation=adaptation)
+    trainer = UnsupervisedTrainer(
+        model=model,
+        learner=learner,
+        image_shape=(2, *IMAGE_SHAPE),
+        early_stopping=False,
     )
 
     print(f"\nRunning STDP threshold optimization...")
     print(f"  Learning rate: {args.learning_rate}")
     print(f"  Threshold range: [{args.min_threshold}, {args.max_threshold}]")
 
-    history = optimizer.optimize(
-        model,
-        train_loader,
-        image_shape=(2, *IMAGE_SHAPE),
-        num_epochs=args.num_epochs,
-        convergence_threshold=args.convergence_threshold,
-        verbose=True,
-        debug=args.debug,
-    )
+    history = {
+        "mean_delta": [],
+        "thresholds": [model.thresholds.detach().cpu().clone()],
+    }
+
+    for epoch in range(args.num_epochs):
+        thresholds_before = model.thresholds.detach().clone()
+
+        trainer.step_loader(train_loader, split="train")
+
+        threshold_deltas = (model.thresholds - thresholds_before).abs()
+        mean_delta = threshold_deltas.mean().item()
+        history["mean_delta"].append(mean_delta)
+        history["thresholds"].append(model.thresholds.detach().cpu().clone())
+
+        print(
+            f"Epoch {epoch + 1}/{args.num_epochs}: "
+            f"mean |delta| = {mean_delta:.6f}"
+        )
+
+        if mean_delta < args.convergence_threshold:
+            print(f"Converged at epoch {epoch + 1}")
+            break
 
     print("\nEvaluating model AFTER post-training...")
-    after_train, after_val = evaluate_model(model, train_loader, val_loader)
+    after_train, after_val = evaluate_model(model, train_loader, val_loader, image_shape=(2, *IMAGE_SHAPE))
     print(f"  Train accuracy: {after_train['accuracy']:.4f}")
     print(f"  Val accuracy: {after_val['accuracy']:.4f}")
 

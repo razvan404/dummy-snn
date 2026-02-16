@@ -2,23 +2,45 @@ import torch
 from torch.utils.data import DataLoader
 
 from spiking import iterate_spikes, Spike
+from spiking.layers.sequential import SpikingSequential
+from spiking.learning.learner import Learner
 from spiking.spiking_module import SpikingModule
-from .callbacks_interface import CallbacksInterface
+from .monitor import TrainingMonitor
 
 
 class UnsupervisedTrainer:
     def __init__(
         self,
         model: SpikingModule,
+        learner: Learner,
         image_shape: (int, int, int),
-        callbacks: CallbacksInterface | None = None,
+        monitor: TrainingMonitor | None = None,
+        early_stopping: bool = True,
     ):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
+        self.learner = learner
         self.image_shape = image_shape
-        self.callbacks = callbacks
+        self.monitor = monitor
+        self.early_stopping = early_stopping
 
-    @torch.no_grad()
+    def _get_pre_spike_times(self, input_spike_times: torch.Tensor) -> torch.Tensor:
+        """Return pre-synaptic spike times for the learner's layer.
+
+        For a single layer or the first layer in a sequential model, returns
+        the input spike times. For deeper layers, returns the previous layer's
+        spike times (set during the forward pass).
+        """
+        if not isinstance(self.model, SpikingSequential):
+            return input_spike_times
+        try:
+            layer_idx = self.model.layers.index(self.learner.layer)
+        except ValueError:
+            raise ValueError("Learner's layer is not part of the model's layers")
+        if layer_idx == 0:
+            return input_spike_times
+        return self.model.layers[layer_idx - 1].spike_times
+
     def step_batch(
         self,
         batch_idx: int,
@@ -34,19 +56,14 @@ class UnsupervisedTrainer:
             output_spikes = self.model.forward(
                 incoming_spikes.flatten().to(self.device), current_time, dt
             )
-            if self.callbacks and self.callbacks.callback_step_spike(
-                batch_idx, current_time, output_spikes, split
-            ):
-                continue
-            if torch.any(output_spikes == 1.0):
+            if self.early_stopping and torch.any(output_spikes == 1.0):
                 break
-        pre_spike_times = times.flatten().to(self.device)
-        dw = self.model.backward(pre_spike_times)
+        input_spike_times = times.flatten().to(self.device)
+        pre_spike_times = self._get_pre_spike_times(input_spike_times)
+        dw = self.learner.step(pre_spike_times)
 
-        if self.callbacks:
-            self.callbacks.callback_step(
-                batch_idx, pre_spike_times.cpu(), dw, label, split
-            )
+        if self.monitor:
+            self.monitor.log(split=split, dw=dw)
         self.model.reset()
         return dw
 
@@ -59,5 +76,4 @@ class UnsupervisedTrainer:
             self.step_batch(batch_idx, spikes, times, label, split=split)
 
     def step_epoch(self):
-        self.model.threshold_adaptation.learning_rate_step()
-        self.model.learning_mechanism.learning_rate_step()
+        self.learner.learning_rate_step()

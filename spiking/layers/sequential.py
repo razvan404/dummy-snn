@@ -23,11 +23,6 @@ class SpikingSequential(SpikingModule):
             incoming_spikes = layer.forward(incoming_spikes, current_time, dt)
         return incoming_spikes
 
-    def backward(self, pre_spike_times: torch.Tensor):
-        for layer in self.layers:
-            layer.backward(pre_spike_times)
-            pre_spike_times = layer.spike_times
-
     def reset(self):
         for layer in self.layers:
             layer.reset()

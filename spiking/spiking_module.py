@@ -20,9 +20,5 @@ class SpikingModule(nn.Module, ABC):
         pass
 
     @abstractmethod
-    def backward(self, pre_spike_times: torch.Tensor):
-        pass
-
-    @abstractmethod
     def reset(self):
         pass

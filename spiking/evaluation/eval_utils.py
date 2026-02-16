@@ -10,25 +10,20 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
-def compute_metrics(
-    y_real: np.ndarray, y_pred: np.ndarray, visualize: bool, verbose: bool
-):
-    accuracy = accuracy_score(y_real, y_pred)
-    precision = precision_score(y_real, y_pred, average="macro")
-    recall = recall_score(y_real, y_pred, average="macro")
-    f1 = f1_score(y_real, y_pred, average="macro")
-    conf_matrix = confusion_matrix(y_real, y_pred)
+def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+    """Compute classification metrics. Pure computation, no side effects."""
+    return {
+        "accuracy": accuracy_score(y_true, y_pred),
+        "precision": precision_score(y_true, y_pred, average="macro"),
+        "recall": recall_score(y_true, y_pred, average="macro"),
+        "f1": f1_score(y_true, y_pred, average="macro"),
+    }
 
-    if verbose:
-        print(f"Accuracy: {accuracy:.2f}")
-        print(f"Precision: {precision:.2f}")
-        print(f"Recall: {recall:.2f}")
-        print(f"F1 Score: {f1:.2f}")
 
-    if visualize:
-        sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="Blues")
-        plt.xlabel("Predicted Labels")
-        plt.ylabel("True Labels")
-        plt.title("Confusion Matrix")
-
-    return {"accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1}
+def plot_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray):
+    """Plot confusion matrix on the current matplotlib axes."""
+    conf_matrix = confusion_matrix(y_true, y_pred)
+    sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="Blues")
+    plt.xlabel("Predicted Labels")
+    plt.ylabel("True Labels")
+    plt.title("Confusion Matrix")

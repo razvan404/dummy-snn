@@ -4,8 +4,8 @@ from .adaptation import ThresholdAdaptation
 from spiking.registry import registry
 
 
-@registry.register("threshold.adaptation", "competitive_falez")
-class CompetitiveFalezAdaptation(ThresholdAdaptation):
+@registry.register("threshold.adaptation", "competitive")
+class CompetitiveThresholdAdaptation(ThresholdAdaptation):
     def __init__(
         self,
         min_threshold: float,

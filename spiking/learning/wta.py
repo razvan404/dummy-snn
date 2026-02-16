@@ -1,6 +1,6 @@
 import torch
 
-from .mechansim import CompetitionMechanism
+from .competition import CompetitionMechanism
 from spiking.registry import registry
 from spiking.utils import choose_random_winner
 

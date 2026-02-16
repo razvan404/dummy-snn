@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 
 import numpy as np
 import torch
@@ -7,19 +8,23 @@ import tqdm
 from matplotlib import pyplot as plt
 from torch.utils.data import random_split, DataLoader
 
-from datasets.mnist import MnistDataset
-from spiking.evaluation import SpikingClassifierEvaluator
+from scripts.common import create_dataset
+from spiking.evaluation import (
+    extract_features,
+    compute_metrics,
+    plot_confusion_matrix,
+    plot_reduced_features,
+)
 from spiking.layers import IntegrateAndFireLayer
+from spiking.learning import Learner
 from spiking.registry import registry
-from spiking.training.if_callbacks import IntegrateAndFireCallbacks
-from spiking.training.monitor import TrainingMonitor
-from spiking.training.unsupervised_trainer import UnsupervisedTrainer
+from spiking.training import UnsupervisedTrainer, TrainingMonitor
 from spiking.utils import save_model
 
 IMAGE_SHAPE = (16, 16)
 
 
-def create_model(setup: dict, num_inputs: int, num_outputs: int):
+def create_model_and_learner(setup: dict, num_inputs: int, num_outputs: int):
     def load(name: str):
         return registry.create(name, *setup[name])
 
@@ -28,29 +33,31 @@ def create_model(setup: dict, num_inputs: int, num_outputs: int):
     learning_mechanism = load("learning_mechanism")
     competition_mechanism = load("competition_mechanism")
 
-    return IntegrateAndFireLayer(
+    model = IntegrateAndFireLayer(
         num_inputs=num_inputs,
         num_outputs=num_outputs,
-        learning_mechanism=learning_mechanism,
         threshold_initialization=threshold_initialization,
-        competition_mechanism=competition_mechanism,
-        threshold_adaptation=threshold_adaptation,
         refractory_period=np.inf,
     )
+    learner = Learner(
+        model,
+        learning_mechanism,
+        competition=competition_mechanism,
+        threshold_adaptation=threshold_adaptation,
+    )
+    return model, learner
 
 
 def load_datasets():
-    dataset = MnistDataset("data/mnist-subset", "train", image_shape=IMAGE_SHAPE)
-    test_dataloader = MnistDataset("data/mnist-subset", "test", image_shape=IMAGE_SHAPE)
+    train_loader, test_loader = create_dataset("mnist_subset", IMAGE_SHAPE)
 
     max_x, max_y = IMAGE_SHAPE
     max_z = 2
     max_input_spikes = max_x * max_y * max_z
 
-    train_dataset, val_dataset = random_split(dataset, [0.8, 0.2])
+    train_dataset, val_dataset = random_split(train_loader.dataset, [0.8, 0.2])
     train_loader = DataLoader(train_dataset, batch_size=None, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=None, shuffle=False)
-    test_loader = DataLoader(test_dataloader, batch_size=None, shuffle=False)
 
     return train_loader, val_loader, test_loader, max_input_spikes
 
@@ -94,19 +101,22 @@ def eval_snn(
     figures_dir: str | None = None,
     verbose: bool = False,
 ):
-    evaluator = SpikingClassifierEvaluator(
-        model, train_loader, val_loader, shape=(2, *IMAGE_SHAPE)
-    )
+    from sklearn.svm import LinearSVC
+
+    shape = (2, *IMAGE_SHAPE)
+    X_train, y_train = extract_features(model, train_loader, shape)
+    X_test, y_test = extract_features(model, val_loader, shape)
+
     if verbose:
-        print(f"{evaluator.X_train.shape = }, {evaluator.y_train.shape = }")
-        print(f"{evaluator.X_test.shape = }, {evaluator.y_test.shape = }")
+        print(f"{X_train.shape = }, {y_train.shape = }")
+        print(f"{X_test.shape = }, {y_test.shape = }")
 
     if visualize:
         plt.figure(figsize=(12, 5))
         plt.subplot(1, 2, 1)
-        reducer = evaluator.plot_reduced_dataset("train")
+        reducer = plot_reduced_features(X_train, y_train, "Train Data Visualized with PCA")
         plt.subplot(1, 2, 2)
-        evaluator.plot_reduced_dataset("val", reducer=reducer)
+        plot_reduced_features(X_test, y_test, "Val Data Visualized with PCA", reducer=reducer)
 
         if figures_dir is not None:
             plt.savefig(f"{figures_dir}/reduced_data.png")
@@ -114,15 +124,32 @@ def eval_snn(
         else:
             plt.show()
 
+    if classifier is None:
+        classifier = LinearSVC(max_iter=20000)
+    if train:
+        classifier.fit(X_train, y_train)
+
+    y_train_pred = classifier.predict(X_train)
+    y_test_pred = classifier.predict(X_test)
+    train_metrics = compute_metrics(y_train, y_train_pred)
+    val_metrics = compute_metrics(y_test, y_test_pred)
+
+    if verbose:
+        print("Train metrics:")
+        for k, v in train_metrics.items():
+            print(f"  {k}: {v:.2f}")
+        print("Validation metrics:")
+        for k, v in val_metrics.items():
+            print(f"  {k}: {v:.2f}")
+
     if visualize:
         plt.figure(figsize=(12, 5))
         plt.suptitle("Confusion Matrices")
+        plt.subplot(1, 2, 1)
+        plot_confusion_matrix(y_train, y_train_pred)
+        plt.subplot(1, 2, 2)
+        plot_confusion_matrix(y_test, y_test_pred)
 
-    train_metrics, val_metrics = evaluator.eval_classifier(
-        classifier=classifier, train=train, visualize=visualize, verbose=verbose
-    )
-
-    if visualize:
         if figures_dir is not None:
             plt.savefig(f"{figures_dir}/confusion_matrices.png")
             plt.close()
@@ -139,25 +166,24 @@ def train_one_layer(exp_name: str, setup: dict):
     train_loader, val_loader, test_loader, num_inputs = load_datasets()
     num_outputs = setup["num_outputs"]
 
-    model = create_model(setup, num_inputs, num_outputs)
+    model, learner = create_model_and_learner(setup, num_inputs, num_outputs)
 
     logs_dir = f"logs/{exp_name}"
     figures_dir = f"{logs_dir}/figures"
 
-    callbacks = IntegrateAndFireCallbacks(model, figures_dir=figures_dir)
+    os.makedirs(figures_dir, exist_ok=True)
+    monitor = TrainingMonitor(model)
 
     for epoch in tqdm.trange(setup["num_epochs"]):
-        callbacks.epoch = epoch
-
         trainer = UnsupervisedTrainer(
-            model, image_shape=(2, *IMAGE_SHAPE), callbacks=callbacks
+            model, learner, image_shape=(2, *IMAGE_SHAPE), monitor=monitor
         )
         trainer.step_loader(train_loader, split="train")
         trainer.step_loader(val_loader, split="val")
         trainer.step_epoch()
 
     model = trainer.model.cpu()
-    save_visualizations(callbacks.monitor, figures_dir)
+    save_visualizations(monitor, figures_dir)
     train_metrics, val_metrics = eval_snn(
         model,
         train_loader=train_loader,
@@ -170,7 +196,7 @@ def train_one_layer(exp_name: str, setup: dict):
     with open(f"{logs_dir}/metrics.json", "w") as f:
         json.dump({"train": train_metrics, "validation": val_metrics}, f, indent=4)
     with open(f"{logs_dir}/thresholds.json", "w") as f:
-        json.dump(callbacks.monitor.thresholds["list"], f)
+        json.dump(monitor.thresholds["list"], f)
 
     save_model(model, f"{logs_dir}/model.pth")
     print(f"Experiment {exp_name} finished.")
@@ -179,7 +205,7 @@ def train_one_layer(exp_name: str, setup: dict):
 def get_default_setup(seed: int, num_outputs: int = 100, num_epochs: int = 100):
     """Return default training setup with given seed."""
     return {
-        "dataset": "mnist",
+        "dataset": "mnist_subset",
         "num_epochs": num_epochs,
         "num_outputs": num_outputs,
         "seed": seed,
@@ -192,7 +218,7 @@ def get_default_setup(seed: int, num_outputs: int = 100, num_epochs: int = 100):
             },
         ),
         "threshold.adaptation": (
-            "competitive_falez",
+            "competitive",
             {
                 "min_threshold": 1.0,
                 "learning_rate": 5.0,

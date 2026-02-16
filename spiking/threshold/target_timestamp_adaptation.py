@@ -4,8 +4,8 @@ from .adaptation import ThresholdAdaptation
 from spiking.registry import registry
 
 
-@registry.register("threshold.adaptation", "falez")
-class FalezAdaptation(ThresholdAdaptation):
+@registry.register("threshold.adaptation", "target_timestamp")
+class TargetTimestampAdaptation(ThresholdAdaptation):
     def __init__(
         self,
         min_threshold: float,
