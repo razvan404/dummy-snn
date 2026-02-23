@@ -1,3 +1,6 @@
+# ABOUTME: Post-training threshold tuning using PlasticityBalanceAdaptation.
+# ABOUTME: Runnable via python -m applications.single_layer.post_train_thresholds model.pth.
+
 import argparse
 import copy
 import json
@@ -7,13 +10,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from scripts.common import set_seed, evaluate_model, create_dataset
+from applications.common import set_seed, evaluate_model
+from applications.datasets import create_dataset
+from applications.single_layer.visualize import plot_comparison
 from spiking.learning import Learner
 from spiking.threshold import PlasticityBalanceAdaptation
 from spiking.training import UnsupervisedTrainer
 from spiking.utils import load_model, save_model
-
-IMAGE_SHAPE = (16, 16)
 
 
 def plot_thresholds_evolution(
@@ -77,49 +80,6 @@ def plot_convergence(mean_deltas: list[float], output_dir: str):
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "convergence.png"), dpi=150)
-    plt.close()
-
-
-def plot_comparison(all_metrics: dict, output_dir: str):
-    """Plot comparison of before/after metrics."""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-    metrics_names = ["accuracy", "precision", "recall", "f1"]
-    config_names = list(all_metrics.keys())
-    colors = ["steelblue", "darkorange"]
-    x = np.arange(len(metrics_names))
-    width = 0.35
-
-    ax = axes[0]
-    for idx, config in enumerate(config_names):
-        vals = [all_metrics[config]["train"][m] for m in metrics_names]
-        offset = (idx - 0.5) * width
-        ax.bar(x + offset, vals, width, label=config, color=colors[idx])
-        for i, v in enumerate(vals):
-            ax.text(i + offset, v + 0.01, f"{v:.2f}", ha="center", fontsize=8)
-    ax.set_ylabel("Score")
-    ax.set_title("Train Metrics")
-    ax.set_xticks(x)
-    ax.set_xticklabels(metrics_names)
-    ax.legend()
-    ax.set_ylim(0, 1.15)
-
-    ax = axes[1]
-    for idx, config in enumerate(config_names):
-        vals = [all_metrics[config]["val"][m] for m in metrics_names]
-        offset = (idx - 0.5) * width
-        ax.bar(x + offset, vals, width, label=config, color=colors[idx])
-        for i, v in enumerate(vals):
-            ax.text(i + offset, v + 0.01, f"{v:.2f}", ha="center", fontsize=8)
-    ax.set_ylabel("Score")
-    ax.set_title("Validation Metrics")
-    ax.set_xticks(x)
-    ax.set_xticklabels(metrics_names)
-    ax.legend()
-    ax.set_ylim(0, 1.15)
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "performance_comparison.png"), dpi=150)
     plt.close()
 
 
@@ -191,11 +151,13 @@ def main():
     output_dir = args.output_dir or os.path.dirname(args.model_path)
     os.makedirs(output_dir, exist_ok=True)
 
-    train_loader, val_loader = create_dataset("mnist_subset", IMAGE_SHAPE)
+    train_loader, val_loader = create_dataset("mnist_subset")
+    image_shape = train_loader.dataset.image_shape
+    spike_shape = (2, *image_shape)
 
     print("\nEvaluating model BEFORE post-training...")
     before_train, before_val = evaluate_model(
-        copy.deepcopy(model), train_loader, val_loader, image_shape=(2, *IMAGE_SHAPE)
+        copy.deepcopy(model), train_loader, val_loader, image_shape=spike_shape
     )
     print(f"  Train accuracy: {before_train['accuracy']:.4f}")
     print(f"  Val accuracy: {before_val['accuracy']:.4f}")
@@ -212,7 +174,7 @@ def main():
     trainer = UnsupervisedTrainer(
         model=model,
         learner=learner,
-        image_shape=(2, *IMAGE_SHAPE),
+        image_shape=spike_shape,
         early_stopping=False,
     )
 
@@ -245,7 +207,7 @@ def main():
             break
 
     print("\nEvaluating model AFTER post-training...")
-    after_train, after_val = evaluate_model(model, train_loader, val_loader, image_shape=(2, *IMAGE_SHAPE))
+    after_train, after_val = evaluate_model(model, train_loader, val_loader, image_shape=spike_shape)
     print(f"  Train accuracy: {after_train['accuracy']:.4f}")
     print(f"  Val accuracy: {after_val['accuracy']:.4f}")
 

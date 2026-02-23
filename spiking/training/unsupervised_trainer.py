@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import torch
 from torch.utils.data import DataLoader
 
@@ -5,7 +7,6 @@ from spiking import iterate_spikes, Spike
 from spiking.layers.sequential import SpikingSequential
 from spiking.learning.learner import Learner
 from spiking.spiking_module import SpikingModule
-from .monitor import TrainingMonitor
 
 
 class UnsupervisedTrainer:
@@ -14,14 +15,14 @@ class UnsupervisedTrainer:
         model: SpikingModule,
         learner: Learner,
         image_shape: (int, int, int),
-        monitor: TrainingMonitor | None = None,
+        on_batch_end: Callable[[int, float, str], None] | None = None,
         early_stopping: bool = True,
     ):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
         self.learner = learner
         self.image_shape = image_shape
-        self.monitor = monitor
+        self.on_batch_end = on_batch_end
         self.early_stopping = early_stopping
 
     def _get_pre_spike_times(self, input_spike_times: torch.Tensor) -> torch.Tensor:
@@ -62,8 +63,8 @@ class UnsupervisedTrainer:
         pre_spike_times = self._get_pre_spike_times(input_spike_times)
         dw = self.learner.step(pre_spike_times)
 
-        if self.monitor:
-            self.monitor.log(split=split, dw=dw)
+        if self.on_batch_end:
+            self.on_batch_end(batch_idx, dw, split)
         self.model.reset()
         return dw
 
