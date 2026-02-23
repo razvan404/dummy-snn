@@ -1,9 +1,7 @@
 import torch
 from spiking.learning.mechanism import LearningMechanism
-from spiking.registry import registry
 
 
-@registry.register("learning_mechanism", "stdp")
 class STDP(LearningMechanism):
     def __init__(
         self,

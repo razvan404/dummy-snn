@@ -4,8 +4,6 @@ from spiking.spiking_module import SpikingModule
 
 
 class SpikingSequential(SpikingModule):
-    __slots__ = ["layers"]
-
     def __init__(self, *layers: SpikingModule):
         self.layers = list(layers)
         assert len(self.layers) >= 1

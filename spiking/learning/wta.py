@@ -1,11 +1,9 @@
 import torch
 
 from .competition import CompetitionMechanism
-from spiking.registry import registry
 from spiking.utils import choose_random_winner
 
 
-@registry.register("competition_mechanism", "wta")
 class WinnerTakesAll(CompetitionMechanism):
     def neurons_to_learn(self, spiking_times: torch.Tensor) -> torch.Tensor:
         winner_idx = choose_random_winner(spiking_times)

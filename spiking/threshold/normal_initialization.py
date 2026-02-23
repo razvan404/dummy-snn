@@ -1,10 +1,8 @@
 import torch
 
 from .initialization import ThresholdInitialization
-from spiking.registry import registry
 
 
-@registry.register("threshold.initialization", "normal")
 class NormalInitialization(ThresholdInitialization):
     def __init__(
         self, avg_threshold: float, min_threshold: float, std_dev: float = 0.1

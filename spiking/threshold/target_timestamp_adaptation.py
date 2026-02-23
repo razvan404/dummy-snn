@@ -1,10 +1,8 @@
 import torch
 
 from .adaptation import ThresholdAdaptation
-from spiking.registry import registry
 
 
-@registry.register("threshold.adaptation", "target_timestamp")
 class TargetTimestampAdaptation(ThresholdAdaptation):
     def __init__(
         self,

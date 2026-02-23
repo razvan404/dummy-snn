@@ -1,10 +1,8 @@
 import torch
 
 from .initialization import ThresholdInitialization
-from spiking.registry import registry
 
 
-@registry.register("threshold.initialization", "constant")
 class ConstantInitialization(ThresholdInitialization):
     def __init__(self, threshold: float):
         super().__init__()
