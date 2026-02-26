@@ -24,9 +24,12 @@ def iterate_spikes(times: torch.Tensor, shape=None):
     offsets = torch.zeros(len(unique_times) + 1, dtype=torch.long)
     offsets[1:] = torch.cumsum(counts, dim=0)
 
+    # Pre-allocated and reused via .zero_() each timestep.
+    # Callers must consume the yielded view before the next iteration.
+    frame = torch.zeros_like(flat)
     prev_time = 0.0
     for i in range(len(unique_times)):
-        frame = torch.zeros_like(flat)
+        frame.zero_()
         frame[sorted_indices[offsets[i]:offsets[i + 1]]] = 1.0
         current_time = unique_times[i].item()
         yield frame.view(times.shape), current_time, current_time - prev_time

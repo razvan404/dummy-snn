@@ -3,7 +3,7 @@ from collections.abc import Callable
 import torch
 from torch.utils.data import DataLoader
 
-from spiking import iterate_spikes, Spike
+from spiking import iterate_spikes
 from spiking.layers.sequential import SpikingSequential
 from spiking.learning.learner import Learner
 from spiking.spiking_module import SpikingModule
@@ -45,23 +45,23 @@ class UnsupervisedTrainer:
     def step_batch(
         self,
         batch_idx: int,
-        spikes: list[Spike],
         times: torch.Tensor,
         label: str | None,
         /,
         split: str = "train",
     ):
-        for incoming_spikes, current_time, dt in iterate_spikes(
-            spikes, shape=self.image_shape
-        ):
-            output_spikes = self.model.forward(
-                incoming_spikes.flatten().to(self.device), current_time, dt
-            )
-            if self.early_stopping and torch.any(output_spikes == 1.0):
-                break
-        input_spike_times = times.flatten().to(self.device)
-        pre_spike_times = self._get_pre_spike_times(input_spike_times)
-        dw = self.learner.step(pre_spike_times)
+        flat_times = times.flatten().to(self.device)
+        with torch.no_grad():
+            for incoming_spikes, current_time, dt in iterate_spikes(flat_times):
+                output_spikes = self.model.forward(
+                    incoming_spikes, current_time, dt
+                )
+                if self.early_stopping and torch.any(output_spikes == 1.0):
+                    break
+        dw = 0.0
+        if self.model.training:
+            pre_spike_times = self._get_pre_spike_times(flat_times)
+            dw = self.learner.step(pre_spike_times)
 
         if self.on_batch_end:
             self.on_batch_end(batch_idx, dw, split)
@@ -73,8 +73,8 @@ class UnsupervisedTrainer:
             self.model.train()
         else:
             self.model.eval()
-        for batch_idx, (spikes, label, times) in enumerate(loader):
-            self.step_batch(batch_idx, spikes, times, label, split=split)
+        for batch_idx, (times, label) in enumerate(loader):
+            self.step_batch(batch_idx, times, label, split=split)
 
     def step_epoch(self):
         self.learner.learning_rate_step()

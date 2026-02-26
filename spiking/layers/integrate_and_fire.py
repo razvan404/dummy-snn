@@ -34,12 +34,13 @@ class IntegrateAndFireLayer(SpikingModule):
         self.register_buffer(
             "_spike_times", torch.full((num_outputs,), float("inf"), dtype=dtype)
         )
+        self.register_buffer(
+            "_output_spikes", torch.zeros((num_outputs,), dtype=dtype)
+        )
 
     def _update_refractory(self, dt: float) -> torch.Tensor:
         active_neurons = self.refractory_times == 0
-        self.refractory_times[~active_neurons] = torch.clamp(
-            self.refractory_times[~active_neurons] - dt, min=0.0
-        )
+        self.refractory_times.sub_(dt).clamp_(min=0.0)
         return active_neurons
 
     def _update_potential(
@@ -48,10 +49,10 @@ class IntegrateAndFireLayer(SpikingModule):
         current_time: float,
         active_neurons: torch.Tensor,
     ) -> torch.Tensor:
-        surrogate_spikes = torch.zeros_like(self.membrane_potentials)
+        self._output_spikes.zero_()
 
         if not active_neurons.any():
-            return surrogate_spikes
+            return self._output_spikes
 
         input_contrib = torch.sum(self.weights[active_neurons] * incoming_spikes, dim=1)
         self.membrane_potentials[active_neurons] += input_contrib
@@ -59,17 +60,20 @@ class IntegrateAndFireLayer(SpikingModule):
         potentials = self.membrane_potentials[active_neurons]
         thresholds = self.thresholds[active_neurons]
 
-        spikes_active = SurrogateSpike.apply(potentials, thresholds)
-        surrogate_spikes[active_neurons] = spikes_active
+        if torch.is_grad_enabled():
+            spikes_active = SurrogateSpike.apply(potentials, thresholds)
+        else:
+            spikes_active = (potentials >= thresholds).float()
+        self._output_spikes[active_neurons] = spikes_active
 
-        spiking_mask_full = surrogate_spikes > 0.0
+        spiking_mask_full = self._output_spikes > 0.0
         self.membrane_potentials[spiking_mask_full] = 0.0
 
         unspiked_neurons = spiking_mask_full & torch.isinf(self._spike_times)
         self._spike_times[unspiked_neurons] = current_time
         self.refractory_times[spiking_mask_full] = self.refractory_period
 
-        return surrogate_spikes
+        return self._output_spikes
 
     def forward(
         self, incoming_spikes: torch.Tensor, current_time: float, dt: float
@@ -81,6 +85,7 @@ class IntegrateAndFireLayer(SpikingModule):
         self.membrane_potentials.zero_()
         self.refractory_times.zero_()
         self._spike_times.fill_(float("inf"))
+        self._output_spikes.zero_()
 
     @property
     def spike_times(self) -> torch.Tensor:

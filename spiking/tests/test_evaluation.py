@@ -241,7 +241,8 @@ class TestIterateSpikes:
 
         # Two pixels spike at t=0.1, one at t=0.3, one is inf (no spike)
         times = torch.tensor([[[0.1, 0.3], [0.1, float("inf")]]])
-        results = list(iterate_spikes(times))
+        # Clone frames because iterate_spikes reuses an internal buffer.
+        results = [(f.clone(), t, d) for f, t, d in iterate_spikes(times)]
 
         assert len(results) == 2
 

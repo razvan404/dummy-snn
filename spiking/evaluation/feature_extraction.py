@@ -18,9 +18,10 @@ def extract_features(
     """
     X, y = [], []
     model.eval()
-    for spikes, label, _ in dataloader:
-        for incoming_spikes, current_time, dt in iterate_spikes(spikes, shape=shape):
-            model.forward(incoming_spikes.flatten(), current_time=current_time, dt=dt)
+    for times, label in dataloader:
+        flat_times = times.flatten()
+        for incoming_spikes, current_time, dt in iterate_spikes(flat_times):
+            model.forward(incoming_spikes, current_time=current_time, dt=dt)
             if torch.all(torch.isfinite(model.spike_times)):
                 break
         X.append(torch.clamp(1.0 - model.spike_times, min=0, max=1.0).numpy())
