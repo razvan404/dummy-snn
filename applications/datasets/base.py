@@ -5,6 +5,7 @@ from torch.utils.data import Dataset
 from spiking.preprocessing import (
     apply_difference_of_gaussians_filter,
     apply_latency_encoding,
+    discretize_times,
 )
 
 
@@ -27,7 +28,9 @@ class SpikeEncodingDataset(Dataset):
 
         self.all_times = torch.stack(
             [
-                apply_latency_encoding(apply_difference_of_gaussians_filter(img))
+                discretize_times(
+                    apply_latency_encoding(apply_difference_of_gaussians_filter(img))
+                )
                 for img in self.inputs
             ]
         )

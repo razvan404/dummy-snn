@@ -6,10 +6,12 @@ from spiking import SpikingModule
 
 
 class TrainingMonitor:
-    def __init__(self, model: SpikingModule, splits: list[str] | None = None):
+    def __init__(self, model: SpikingModule, splits: list[str] | None = None, log_interval: int = 1):
         if splits is None:
             splits = ["train", "val", "test"]
         self.model = model
+        self.log_interval = log_interval
+        self._batch_count = 0
         self.weight_diffs = {split: [] for split in splits}
 
         self.some_threshold_indices = [1, 10, 56, 99]
@@ -44,15 +46,19 @@ class TrainingMonitor:
         if split != "train":
             return
 
-        thresholds = self.model.thresholds
-        self.thresholds["mean"].append(thresholds.mean().item())
-        self.thresholds["min"].append(thresholds.min().item())
-        self.thresholds["max"].append(thresholds.max().item())
-        self.thresholds["list"].append(thresholds.tolist())
+        should_log_thresholds = self._batch_count % self.log_interval == 0
+        self._batch_count += 1
 
-        for idx in self.some_threshold_indices:
-            if idx < len(thresholds):
-                self.thresholds[f"idx_{idx}"].append(thresholds[idx].item())
+        if should_log_thresholds:
+            thresholds = self.model.thresholds
+            self.thresholds["mean"].append(thresholds.mean().item())
+            self.thresholds["min"].append(thresholds.min().item())
+            self.thresholds["max"].append(thresholds.max().item())
+            self.thresholds["list"].append(thresholds.tolist())
+
+            for idx in self.some_threshold_indices:
+                if idx < len(thresholds):
+                    self.thresholds[f"idx_{idx}"].append(thresholds[idx].item())
 
         active = self.current_neurons_activity()
         self.neurons_activity[active] += 1.0

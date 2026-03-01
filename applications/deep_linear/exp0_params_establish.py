@@ -97,7 +97,7 @@ def run(dataset: str, *, num_epochs: int = 10):
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
     num_inputs = math.prod(spike_shape)
-    avg_threshold = num_inputs / 15
+    avg_threshold = num_inputs / 20
 
     base_dir = f"logs/{dataset}/layer_1/params_establish"
     train_steps = len(train_loader)
@@ -141,13 +141,14 @@ def run(dataset: str, *, num_epochs: int = 10):
                 if split != "train":
                     return
                 dynamics["weight_diffs"].append(dw)
-                dynamics["thresholds_mean"].append(layer.thresholds.mean().item())
-                dynamics["thresholds_min"].append(layer.thresholds.min().item())
-                dynamics["thresholds_max"].append(layer.thresholds.max().item())
+                if idx % 100 == 0:
+                    dynamics["thresholds_mean"].append(layer.thresholds.mean().item())
+                    dynamics["thresholds_min"].append(layer.thresholds.min().item())
+                    dynamics["thresholds_max"].append(layer.thresholds.max().item())
                 activity[torch.isfinite(layer.spike_times)] += 1
                 for neuron_idx in learner.neurons_to_learn:
                     win_counts[neuron_idx.item()] += 1
-                if idx % 10 == 0:
+                if idx % 100 == 0:
                     pbar.set_postfix_str(
                         f"seed={seed} epoch={epoch[0]}/{num_epochs} {idx+1}/{train_steps}"
                     )

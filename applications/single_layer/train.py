@@ -40,7 +40,7 @@ def train_one_layer(exp_name: str, setup: dict):
     figures_dir = f"{logs_dir}/figures"
 
     os.makedirs(figures_dir, exist_ok=True)
-    monitor = TrainingMonitor(model)
+    monitor = TrainingMonitor(model, log_interval=100)
 
     train(
         model,
@@ -48,7 +48,6 @@ def train_one_layer(exp_name: str, setup: dict):
         train_loader,
         setup["num_epochs"],
         image_shape=spike_shape,
-        val_loader=val_loader,
         on_batch_end=lambda batch_idx, dw, split: monitor.log(split=split, dw=dw),
     )
 
