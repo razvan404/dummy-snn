@@ -52,11 +52,7 @@ class IntegrateAndFireLayer(SpikingModule):
         if not active_neurons.any():
             return self._output_spikes
 
-        spike_indices = incoming_spikes.nonzero(as_tuple=True)[0]
-        if len(spike_indices) == 0:
-            return self._output_spikes
-
-        input_contrib = self.weights[active_neurons][:, spike_indices].sum(dim=1)
+        input_contrib = torch.sum(self.weights[active_neurons] * incoming_spikes, dim=1)
         self.membrane_potentials[active_neurons] += input_contrib
 
         potentials = self.membrane_potentials[active_neurons]

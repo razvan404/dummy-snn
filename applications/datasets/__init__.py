@@ -13,8 +13,8 @@ def create_dataset(name: str) -> tuple[DataLoader, DataLoader]:
     Access the dataset's native image shape via train_loader.dataset.image_shape.
     """
     if name == "mnist_subset":
-        train_dataset = MnistSubsetDataset("data/mnist-subset", "train")
-        test_dataset = MnistSubsetDataset("data/mnist-subset", "test")
+        train_dataset = MnistSubsetDataset("data/mnist-subset", "train", image_shape=(16, 16))
+        test_dataset = MnistSubsetDataset("data/mnist-subset", "test", image_shape=(16, 16))
     elif name == "mnist":
         train_dataset = MnistDataset("data", "train")
         test_dataset = MnistDataset("data", "test")
