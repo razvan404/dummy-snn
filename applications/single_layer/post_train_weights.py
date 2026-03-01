@@ -238,12 +238,10 @@ def main():
         total_neurons_spiked = 0
         total_samples = 0
 
-        for spikes, label, times in train_loader:
+        for times, label in train_loader:
             model.reset()
 
-            for incoming_spikes, current_time, dt in iterate_spikes(
-                spikes, shape=spike_shape
-            ):
+            for incoming_spikes, current_time, dt in iterate_spikes(times):
                 model.forward(
                     incoming_spikes.flatten().to(device), current_time, dt
                 )

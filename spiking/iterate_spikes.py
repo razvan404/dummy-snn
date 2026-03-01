@@ -15,22 +15,25 @@ def iterate_spikes(times: torch.Tensor, shape=None):
         return
 
     valid_times = flat[valid_indices]
-    unique_times, inverse = torch.unique(valid_times, return_inverse=True, sorted=True)
+    sorted_times, sort_order = valid_times.sort()
+    sorted_indices = valid_indices[sort_order]
 
-    # Group valid indices by their time bucket
-    sorted_order = torch.argsort(inverse)
-    sorted_indices = valid_indices[sorted_order]
-    counts = torch.bincount(inverse, minlength=len(unique_times))
+    unique_times, counts = torch.unique_consecutive(sorted_times, return_counts=True)
     offsets = torch.zeros(len(unique_times) + 1, dtype=torch.long)
-    offsets[1:] = torch.cumsum(counts, dim=0)
+    offsets[1:] = counts.cumsum(dim=0)
 
-    # Pre-allocated and reused via .zero_() each timestep.
+    # Pre-allocated frame reused each timestep. Only indices set on the
+    # previous iteration are zeroed, keeping cost at O(K) instead of O(N).
     # Callers must consume the yielded view before the next iteration.
     frame = torch.zeros_like(flat)
     prev_time = 0.0
+    prev_indices = sorted_indices[offsets[0] : offsets[1]]  # will be zeroed on 2nd iter
     for i in range(len(unique_times)):
-        frame.zero_()
-        frame[sorted_indices[offsets[i]:offsets[i + 1]]] = 1.0
+        cur_indices = sorted_indices[offsets[i] : offsets[i + 1]]
+        if i > 0:
+            frame[prev_indices] = 0.0
+        frame[cur_indices] = 1.0
         current_time = unique_times[i].item()
         yield frame.view(times.shape), current_time, current_time - prev_time
         prev_time = current_time
+        prev_indices = cur_indices

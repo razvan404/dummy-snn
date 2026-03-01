@@ -34,9 +34,7 @@ class IntegrateAndFireLayer(SpikingModule):
         self.register_buffer(
             "_spike_times", torch.full((num_outputs,), float("inf"), dtype=dtype)
         )
-        self.register_buffer(
-            "_output_spikes", torch.zeros((num_outputs,), dtype=dtype)
-        )
+        self.register_buffer("_output_spikes", torch.zeros((num_outputs,), dtype=dtype))
 
     def _update_refractory(self, dt: float) -> torch.Tensor:
         active_neurons = self.refractory_times == 0
@@ -54,7 +52,11 @@ class IntegrateAndFireLayer(SpikingModule):
         if not active_neurons.any():
             return self._output_spikes
 
-        input_contrib = torch.sum(self.weights[active_neurons] * incoming_spikes, dim=1)
+        spike_indices = incoming_spikes.nonzero(as_tuple=True)[0]
+        if len(spike_indices) == 0:
+            return self._output_spikes
+
+        input_contrib = self.weights[active_neurons][:, spike_indices].sum(dim=1)
         self.membrane_potentials[active_neurons] += input_contrib
 
         potentials = self.membrane_potentials[active_neurons]

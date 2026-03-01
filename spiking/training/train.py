@@ -17,6 +17,7 @@ def train(
     *,
     val_loader: DataLoader | None = None,
     on_batch_end: Callable[[int, float, str], None] | None = None,
+    on_epoch_end: Callable[[int, int], None] | None = None,
     early_stopping: bool = True,
     progress: bool = True,
 ):
@@ -33,3 +34,5 @@ def train(
         if val_loader:
             trainer.step_loader(val_loader, split="val")
         trainer.step_epoch()
+        if on_epoch_end:
+            on_epoch_end(epoch + 1, num_epochs)

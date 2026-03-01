@@ -1,3 +1,7 @@
+import json
+import os
+import re
+
 import numpy as np
 import torch
 
@@ -42,3 +46,41 @@ def aggregate_metrics(all_metrics: list[dict]) -> dict:
                 "std": float(np.std(values)),
             }
     return summary
+
+
+def merge_seed_results(directory: str):
+    """Scan seed_*/metrics.json under directory, produce merged_results.json and summary.json.
+
+    merged_results.json: {"seeds": [1,2,...], "train": {"accuracy": [...], ...}, "validation": {...}}
+    summary.json: mean/std per metric via aggregate_metrics().
+    """
+    seed_dirs = []
+    for name in os.listdir(directory):
+        match = re.match(r"^seed_(\d+)$", name)
+        if match and os.path.isdir(os.path.join(directory, name)):
+            seed_dirs.append((int(match.group(1)), name))
+    seed_dirs.sort(key=lambda x: x[0])
+
+    all_metrics = []
+    seeds = []
+    for seed_num, dirname in seed_dirs:
+        metrics_path = os.path.join(directory, dirname, "metrics.json")
+        with open(metrics_path) as f:
+            all_metrics.append(json.load(f))
+        seeds.append(seed_num)
+
+    # Build merged: {"seeds": [...], "train": {"accuracy": [...], ...}, ...}
+    splits = all_metrics[0].keys()
+    metric_keys = all_metrics[0][next(iter(splits))].keys()
+    merged = {"seeds": seeds}
+    for split in splits:
+        merged[split] = {}
+        for key in metric_keys:
+            merged[split][key] = [m[split][key] for m in all_metrics]
+
+    with open(os.path.join(directory, "merged_results.json"), "w") as f:
+        json.dump(merged, f, indent=4)
+
+    summary = aggregate_metrics(all_metrics)
+    with open(os.path.join(directory, "summary.json"), "w") as f:
+        json.dump(summary, f, indent=4)

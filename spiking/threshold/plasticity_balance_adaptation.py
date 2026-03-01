@@ -11,12 +11,14 @@ class PlasticityBalanceAdaptation(ThresholdAdaptation):
         decay_factor: float = 1.0,
         min_threshold: float = 1.0,
         max_threshold: float = 100.0,
+        sign_only: bool = False,
     ):
         self.tau = tau
         self.learning_rate = learning_rate
         self.decay_factor = decay_factor
         self.min_threshold = min_threshold
         self.max_threshold = max_threshold
+        self.sign_only = sign_only
 
     def learning_rate_step(self):
         self.learning_rate *= self.decay_factor
@@ -68,7 +70,11 @@ class PlasticityBalanceAdaptation(ThresholdAdaptation):
                 neuron_weights, pre_spike_times, post_spike_time
             )
 
-            threshold_deltas[idx] = self.learning_rate * balance
+            if self.sign_only:
+                direction = 1.0 if balance > 0 else (-1.0 if balance < 0 else 0.0)
+                threshold_deltas[idx] = self.learning_rate * direction
+            else:
+                threshold_deltas[idx] = self.learning_rate * balance
 
         new_thresholds = current_thresholds + threshold_deltas
         return torch.clamp(new_thresholds, self.min_threshold, self.max_threshold)

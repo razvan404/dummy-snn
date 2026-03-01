@@ -1,6 +1,4 @@
 from .iterate_spikes import iterate_spikes
-from .spike import Spike
-from .spike_convertor import convert_to_spikes
 from .spiking_module import SpikingModule
 
 from .layers import IntegrateAndFireLayer, IntegrateAndFireMultilayer, SpikingSequential
@@ -19,8 +17,6 @@ from .utils import save_model, load_model
 
 __all__ = [
     "iterate_spikes",
-    "Spike",
-    "convert_to_spikes",
     "SpikingModule",
     "IntegrateAndFireLayer",
     "IntegrateAndFireMultilayer",

@@ -32,14 +32,13 @@ class STDP(LearningMechanism):
     ) -> torch.Tensor:
         pre_spike_times = torch.clamp(pre_spike_times, max=self.max_pre_spike_time)
         delta_t = post_spike_times - pre_spike_times
+        abs_delta = delta_t.abs()
 
-        dw = torch.zeros_like(weights)
-
-        potentiation_mask = delta_t > 0
-        depression_mask = delta_t < 0
-
-        dw[potentiation_mask] = torch.exp(-delta_t[potentiation_mask] / self.tau_pre)
-        dw[depression_mask] = -torch.exp(delta_t[depression_mask] / self.tau_post)
+        dw = torch.where(
+            delta_t > 0,
+            torch.exp(-abs_delta / self.tau_pre),
+            torch.where(delta_t < 0, -torch.exp(-abs_delta / self.tau_post), delta_t),
+        )
 
         updated_weights = weights + self.learning_rate * dw
         return torch.clamp(updated_weights, *self.weights_interval)

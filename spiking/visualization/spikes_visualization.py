@@ -1,7 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-from spiking import Spike
+from spiking.spike import Spike
 
 
 class SpikesVisualization:

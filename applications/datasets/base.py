@@ -6,7 +6,6 @@ from spiking.preprocessing import (
     apply_difference_of_gaussians_filter,
     apply_latency_encoding,
 )
-from spiking import convert_to_spikes
 
 
 class SpikeEncodingDataset(Dataset):
@@ -26,6 +25,13 @@ class SpikeEncodingDataset(Dataset):
                 mode="nearest",
             ).squeeze(1)
 
+        self.all_times = torch.stack(
+            [
+                apply_latency_encoding(apply_difference_of_gaussians_filter(img))
+                for img in self.inputs
+            ]
+        )
+
     @property
     def image_shape(self) -> tuple[int, int]:
         """Return (H, W) of the stored images."""
@@ -35,11 +41,4 @@ class SpikeEncodingDataset(Dataset):
         return len(self.inputs)
 
     def __getitem__(self, idx: int):
-        image = self.inputs[idx]
-        label = self.outputs[idx]
-
-        dog_image = apply_difference_of_gaussians_filter(image)
-        times = apply_latency_encoding(dog_image)
-        spikes = convert_to_spikes(times)
-
-        return spikes, label, times
+        return self.all_times[idx], self.outputs[idx]
