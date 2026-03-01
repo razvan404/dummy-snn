@@ -1,0 +1,51 @@
+import argparse
+import sys
+from pathlib import Path
+
+from tqdm import tqdm
+
+from applications.common import merge_seed_results
+from applications.datasets import create_dataset
+from applications.deep_linear.random_thresholds import random_thresholds
+
+SEEDS = [200, 201, 202, 203, 204]
+
+
+def run(dataset: str):
+    base_dir = Path(f"logs/{dataset}/layer_1")
+    model_paths = [
+        p
+        for p in sorted(base_dir.rglob("model.pth"))
+        if "pbtr" not in p.parts and "random_thresh" not in p.parts
+    ]
+    if not model_paths:
+        print(f"No models found under {base_dir}/")
+        sys.exit(0)
+
+    train_loader, val_loader = create_dataset(dataset)
+    spike_shape = (2, *train_loader.dataset.image_shape)
+
+    total = len(model_paths) * len(SEEDS)
+    with tqdm(total=total, desc="Exp 4: random threshold control") as pbar:
+        for model_path in model_paths:
+            seed_dir = model_path.parent
+            ctrl_dir = seed_dir / "random_thresh"
+            for seed in SEEDS:
+                pbar.set_postfix_str(f"{seed_dir.name} seed={seed}")
+                random_thresholds(
+                    model_path=str(model_path),
+                    dataset_loaders=(train_loader, val_loader),
+                    spike_shape=spike_shape,
+                    seed=seed,
+                    output_dir=str(ctrl_dir / f"seed_{seed}"),
+                )
+                pbar.update(1)
+            merge_seed_results(str(ctrl_dir))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Exp 4: random threshold control")
+    parser.add_argument("dataset", type=str)
+    args = parser.parse_args()
+
+    run(args.dataset)
