@@ -150,7 +150,7 @@ def run(dataset: str, *, num_epochs: int = 10):
                     win_counts[neuron_idx.item()] += 1
                 if idx % 100 == 0:
                     pbar.set_postfix_str(
-                        f"seed={seed} epoch={epoch[0]}/{num_epochs} {idx+1}/{train_steps}"
+                        f"seed={seed} epoch={epoch[0]}/{num_epochs} {idx+1}/{train_steps} dw={dw:.4f}"
                     )
 
             train(
