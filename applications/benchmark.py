@@ -5,9 +5,10 @@ from collections.abc import Callable
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 
-from applications.common import set_seed, evaluate_model, aggregate_metrics
+from applications.common import set_seed, aggregate_metrics
 from spiking.evaluation import (
     extract_features,
+    evaluate_classifier,
     plot_reduced_features,
     plot_confusion_matrix,
 )
@@ -19,11 +20,8 @@ from spiking.utils import save_model
 DEFAULT_SEEDS = list(range(1, 11))
 
 
-def _save_seed_plots(model, train_loader, val_loader, image_shape, figures_dir: str):
+def _save_seed_plots(X_train, y_train, X_val, y_val, figures_dir: str):
     from sklearn.svm import LinearSVC
-
-    X_train, y_train = extract_features(model, train_loader, image_shape)
-    X_val, y_val = extract_features(model, val_loader, image_shape)
 
     clf = LinearSVC(max_iter=10000)
     clf.fit(X_train, y_train)
@@ -95,11 +93,11 @@ def benchmark_architecture(
             progress=True,
         )
 
-        train_metrics, val_metrics = evaluate_model(
-            model,
-            train_loader,
-            val_loader,
-            image_shape,
+        model = model.cpu()
+        X_train, y_train = extract_features(model, train_loader, image_shape)
+        X_val, y_val = extract_features(model, val_loader, image_shape)
+        train_metrics, val_metrics = evaluate_classifier(
+            X_train, y_train, X_val, y_val
         )
 
         metrics = {"train": train_metrics, "validation": val_metrics}
@@ -110,7 +108,7 @@ def benchmark_architecture(
         figures_dir = f"{seed_dir}/figures"
         os.makedirs(figures_dir, exist_ok=True)
 
-        _save_seed_plots(model, train_loader, val_loader, image_shape, figures_dir)
+        _save_seed_plots(X_train, y_train, X_val, y_val, figures_dir)
 
         save_model(model, f"{seed_dir}/model.pth")
         with open(f"{seed_dir}/metrics.json", "w") as f:

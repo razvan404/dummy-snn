@@ -17,7 +17,7 @@ SEEDS = [1, 2, 3, 4, 5]
 STEP = 2.5
 
 
-def run(dataset: str, *, num_epochs: int = 30):
+def run(dataset: str, *, num_epochs: int = 10):
     center = DATASET_CENTERS[dataset]
     low = max(0.0, center - 25)
     high = center + 25
@@ -65,7 +65,7 @@ if __name__ == "__main__":
         description="Exp 1: competitive-only threshold sweep"
     )
     parser.add_argument("dataset", choices=list(DATASET_CENTERS))
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=10)
     args = parser.parse_args()
 
     run(args.dataset, num_epochs=args.epochs)

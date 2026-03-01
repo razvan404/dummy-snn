@@ -27,6 +27,7 @@ class Learner:
     @torch.no_grad()
     def step(self, pre_spike_times: torch.Tensor) -> float:
         neurons_to_learn = self._select_neurons()
+        self.neurons_to_learn = neurons_to_learn
 
         total_dw = 0.0
         if self.learning_mechanism:

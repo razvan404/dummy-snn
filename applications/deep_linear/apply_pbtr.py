@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 
 from applications.common import set_seed, evaluate_model
 from applications.datasets import create_dataset
+from applications.deep_linear.training_plots import save_threshold_distribution
 from applications.deep_linear.visualize_weights import save_weight_figure
 from spiking import (
     Learner,
@@ -14,6 +15,7 @@ from spiking import (
     load_model,
     save_model,
 )
+from spiking.layers import SpikingSequential
 
 
 def apply_pbtr(
@@ -46,8 +48,10 @@ def apply_pbtr(
         ),
     )
 
+    sub_model = SpikingSequential(*model.layers[: layer_idx + 1])
+
     train(
-        model,
+        sub_model,
         learner,
         train_loader,
         num_epochs,
@@ -57,7 +61,7 @@ def apply_pbtr(
         progress=False,
     )
 
-    train_m, val_m = evaluate_model(model, train_loader, val_loader, spike_shape)
+    train_m, val_m = evaluate_model(sub_model, train_loader, val_loader, spike_shape)
 
     os.makedirs(output_dir, exist_ok=True)
     save_model(model, f"{output_dir}/model.pth")
@@ -65,6 +69,10 @@ def apply_pbtr(
     metrics = {"train": train_m, "validation": val_m}
     with open(f"{output_dir}/metrics.json", "w") as f:
         json.dump(metrics, f, indent=4)
+
+    save_threshold_distribution(
+        layer.thresholds, f"{output_dir}/threshold_distribution.png"
+    )
 
     if layer_idx == 0:
         save_weight_figure(layer, spike_shape, f"{output_dir}/weights.png")

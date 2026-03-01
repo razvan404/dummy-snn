@@ -13,7 +13,7 @@ from spiking import (
 from spiking.training import UnsupervisedTrainer
 
 
-NUM_INPUTS = 1568
+NUM_INPUTS = 512
 NUM_OUTPUTS = 1024
 NUM_SAMPLES = 200
 NUM_WARMUP = 5

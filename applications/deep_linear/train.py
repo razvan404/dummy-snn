@@ -3,12 +3,17 @@ import json
 import math
 import os
 
+import torch
 from torch.utils.data import DataLoader
 
 from applications.common import set_seed, evaluate_model
 from applications.datasets import create_dataset
 from applications import default_hyperparams
 from applications.deep_linear.model import create_model, ARCHITECTURE
+from applications.deep_linear.training_plots import (
+    save_winner_counts,
+    save_threshold_distribution,
+)
 from applications.deep_linear.visualize_weights import save_weight_figure
 from spiking import (
     Learner,
@@ -21,6 +26,7 @@ from spiking import (
     save_model,
     load_model,
 )
+from spiking.layers import SpikingSequential
 
 
 def train_layer(
@@ -74,25 +80,38 @@ def train_layer(
             ]
         )
 
+    layer = model.layers[layer_idx]
+
     learner = Learner(
-        model.layers[layer_idx],
+        layer,
         learning_mechanism=STDP(**default_hyperparams.STDP),
         competition=WinnerTakesAll(),
         threshold_adaptation=adaptation,
     )
 
+    win_counts = torch.zeros(layer.num_outputs)
+
+    def _tracking_callback(idx, dw, split):
+        if split == "train":
+            for neuron_idx in learner.neurons_to_learn:
+                win_counts[neuron_idx.item()] += 1
+        if on_batch_end is not None:
+            on_batch_end(idx, dw, split)
+
+    sub_model = SpikingSequential(*model.layers[: layer_idx + 1])
+
     train(
-        model,
+        sub_model,
         learner,
         train_loader,
         num_epochs,
         image_shape=spike_shape,
-        on_batch_end=on_batch_end,
+        on_batch_end=_tracking_callback,
         on_epoch_end=on_epoch_end,
         progress=False,
     )
 
-    train_m, val_m = evaluate_model(model, train_loader, val_loader, spike_shape)
+    train_m, val_m = evaluate_model(sub_model, train_loader, val_loader, spike_shape)
 
     os.makedirs(output_dir, exist_ok=True)
     save_model(model, f"{output_dir}/model.pth")
@@ -111,6 +130,13 @@ def train_layer(
         setup_info["t_objective"] = t_objective
     with open(f"{output_dir}/setup.json", "w") as f:
         json.dump(setup_info, f, indent=4)
+
+    with open(f"{output_dir}/winner_counts.json", "w") as f:
+        json.dump(win_counts.tolist(), f)
+    save_winner_counts(win_counts, f"{output_dir}/winner_counts.png")
+    save_threshold_distribution(
+        layer.thresholds, f"{output_dir}/threshold_distribution.png"
+    )
 
     if layer_idx == 0:
         save_weight_figure(model.layers[0], spike_shape, f"{output_dir}/weights.png")

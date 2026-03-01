@@ -1,5 +1,6 @@
 import json
 import os
+from unittest.mock import patch
 
 import torch
 import pytest
@@ -121,6 +122,76 @@ class TestTrainLayer:
         model = load_model(str(tmp_path / "model.pth"))
         assert isinstance(model, IntegrateAndFireMultilayer)
 
+    def test_saves_winner_counts_and_threshold_distribution(self, tmp_path, fake_loaders):
+        from applications.deep_linear.train import train_layer
+
+        train_layer(
+            dataset_loaders=fake_loaders,
+            spike_shape=SPIKE_SHAPE,
+            seed=1,
+            avg_threshold=5.0,
+            output_dir=str(tmp_path),
+            num_epochs=1,
+            architecture=TINY_ARCHITECTURE,
+        )
+        assert (tmp_path / "winner_counts.json").exists()
+        assert (tmp_path / "winner_counts.png").exists()
+        assert (tmp_path / "threshold_distribution.png").exists()
+
+        with open(tmp_path / "winner_counts.json") as f:
+            counts = json.load(f)
+        assert isinstance(counts, list)
+        assert len(counts) == TINY_ARCHITECTURE[0]
+
+    def test_trains_sub_model_for_layer_0(self, tmp_path, fake_loaders):
+        """train_layer should pass a sub-model (not the full model) to train()."""
+        from applications.deep_linear.train import train_layer
+
+        captured = {}
+
+        def capture_train(model, *args, **kwargs):
+            captured["model"] = model
+
+        with patch("applications.deep_linear.train.train", side_effect=capture_train):
+            with patch("applications.deep_linear.train.evaluate_model", return_value=({}, {})):
+                train_layer(
+                    dataset_loaders=fake_loaders,
+                    spike_shape=SPIKE_SHAPE,
+                    seed=1,
+                    avg_threshold=5.0,
+                    output_dir=str(tmp_path),
+                    num_epochs=1,
+                    architecture=TINY_ARCHITECTURE,
+                    layer_idx=0,
+                )
+
+        assert len(captured["model"].layers) == 1
+
+    def test_evaluates_sub_model_for_layer_0(self, tmp_path, fake_loaders):
+        """train_layer should pass a sub-model to evaluate_model()."""
+        from applications.deep_linear.train import train_layer
+
+        captured = {}
+
+        def capture_eval(model, *args, **kwargs):
+            captured["model"] = model
+            return {"accuracy": 0.0}, {"accuracy": 0.0}
+
+        with patch("applications.deep_linear.train.train"):
+            with patch("applications.deep_linear.train.evaluate_model", side_effect=capture_eval):
+                train_layer(
+                    dataset_loaders=fake_loaders,
+                    spike_shape=SPIKE_SHAPE,
+                    seed=1,
+                    avg_threshold=5.0,
+                    output_dir=str(tmp_path),
+                    num_epochs=1,
+                    architecture=TINY_ARCHITECTURE,
+                    layer_idx=0,
+                )
+
+        assert len(captured["model"].layers) == 1
+
 
 class TestApplyPbtr:
     @pytest.fixture()
@@ -185,6 +256,65 @@ class TestApplyPbtr:
             num_epochs=1,
         )
         assert os.path.exists(f"{output_dir}/weights.png")
+
+    def test_saves_threshold_distribution(self, tmp_path, trained_model_path, fake_loaders):
+        from applications.deep_linear.apply_pbtr import apply_pbtr
+
+        output_dir = str(tmp_path / "pbtr_output")
+        apply_pbtr(
+            model_path=trained_model_path,
+            dataset_loaders=fake_loaders,
+            spike_shape=SPIKE_SHAPE,
+            seed=100,
+            output_dir=output_dir,
+            num_epochs=1,
+        )
+        assert os.path.exists(f"{output_dir}/threshold_distribution.png")
+
+    def test_trains_sub_model_for_layer_0(self, tmp_path, trained_model_path, fake_loaders):
+        """apply_pbtr should pass a sub-model (not the full model) to train()."""
+        from applications.deep_linear.apply_pbtr import apply_pbtr
+
+        captured = {}
+
+        def capture_train(model, *args, **kwargs):
+            captured["model"] = model
+
+        with patch("applications.deep_linear.apply_pbtr.train", side_effect=capture_train):
+            with patch("applications.deep_linear.apply_pbtr.evaluate_model", return_value=({}, {})):
+                apply_pbtr(
+                    model_path=trained_model_path,
+                    dataset_loaders=fake_loaders,
+                    spike_shape=SPIKE_SHAPE,
+                    seed=100,
+                    output_dir=str(tmp_path / "pbtr_sub"),
+                    num_epochs=1,
+                )
+
+        assert len(captured["model"].layers) == 1
+
+    def test_evaluates_sub_model_for_layer_0(self, tmp_path, trained_model_path, fake_loaders):
+        """apply_pbtr should pass a sub-model to evaluate_model()."""
+        from applications.deep_linear.apply_pbtr import apply_pbtr
+
+        captured = {}
+
+        def capture_eval(model, *args, **kwargs):
+            captured["model"] = model
+            return {"accuracy": 0.0}, {"accuracy": 0.0}
+
+        with patch("applications.deep_linear.apply_pbtr.train"):
+            with patch("applications.deep_linear.apply_pbtr.evaluate_model", side_effect=capture_eval):
+                apply_pbtr(
+                    model_path=trained_model_path,
+                    dataset_loaders=fake_loaders,
+                    spike_shape=SPIKE_SHAPE,
+                    seed=100,
+                    output_dir=str(tmp_path / "pbtr_sub_eval"),
+                    num_epochs=1,
+                )
+
+        assert len(captured["model"].layers) == 1
 
 
 class TestRandomThresholds:

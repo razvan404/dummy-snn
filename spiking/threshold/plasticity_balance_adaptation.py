@@ -59,22 +59,25 @@ class PlasticityBalanceAdaptation(ThresholdAdaptation):
         threshold_deltas = torch.zeros_like(current_thresholds)
 
         spiked_mask = torch.isfinite(spike_times)
-        spiked_indices = torch.nonzero(spiked_mask, as_tuple=True)[0]
+        if not spiked_mask.any():
+            return current_thresholds.clone()
 
-        for neuron_idx in spiked_indices:
-            idx = neuron_idx.item()
-            post_spike_time = spike_times[idx].item()
-            neuron_weights = weights[idx]
+        spiked_post = spike_times[spiked_mask].unsqueeze(1)  # (K, 1)
+        spiked_w = weights[spiked_mask]  # (K, N)
+        delta_t = spiked_post - pre_spike_times.unsqueeze(0)  # (K, N)
 
-            balance = self.compute_balance(
-                neuron_weights, pre_spike_times, post_spike_time
-            )
+        potentiation_mask = delta_t > 0
+        depression_mask = delta_t < 0
+        exp_decay = torch.exp(-delta_t.abs() / self.tau)
 
-            if self.sign_only:
-                direction = 1.0 if balance > 0 else (-1.0 if balance < 0 else 0.0)
-                threshold_deltas[idx] = self.learning_rate * direction
-            else:
-                threshold_deltas[idx] = self.learning_rate * balance
+        pot = (spiked_w * potentiation_mask * exp_decay).sum(dim=1)
+        dep = (spiked_w * depression_mask * exp_decay).sum(dim=1)
+        balance = pot - dep
+
+        if self.sign_only:
+            threshold_deltas[spiked_mask] = self.learning_rate * balance.sign()
+        else:
+            threshold_deltas[spiked_mask] = self.learning_rate * balance
 
         new_thresholds = current_thresholds + threshold_deltas
         return torch.clamp(new_thresholds, self.min_threshold, self.max_threshold)
