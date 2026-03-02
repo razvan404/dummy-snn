@@ -21,6 +21,13 @@ class SpikingSequential(SpikingModule):
             incoming_spikes = layer.forward(incoming_spikes, current_time, dt)
         return incoming_spikes
 
+    def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
+        """Chain analytical spike time computation through all layers."""
+        times = input_times
+        for layer in self.layers:
+            times = layer.infer_spike_times(times)
+        return times
+
     def reset(self):
         for layer in self.layers:
             layer.reset()

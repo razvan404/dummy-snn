@@ -141,14 +141,14 @@ def run(dataset: str, *, num_epochs: int = 10):
                 if split != "train":
                     return
                 dynamics["weight_diffs"].append(dw)
-                if idx % 100 == 0:
+                if idx % 200 == 0:
                     dynamics["thresholds_mean"].append(layer.thresholds.mean().item())
                     dynamics["thresholds_min"].append(layer.thresholds.min().item())
                     dynamics["thresholds_max"].append(layer.thresholds.max().item())
                 activity[torch.isfinite(layer.spike_times)] += 1
                 for neuron_idx in learner.neurons_to_learn:
                     win_counts[neuron_idx.item()] += 1
-                if idx % 100 == 0:
+                if idx % 200 == 0:
                     pbar.set_postfix_str(
                         f"seed={seed} epoch={epoch[0]}/{num_epochs} {idx+1}/{train_steps} dw={dw:.4f}"
                     )

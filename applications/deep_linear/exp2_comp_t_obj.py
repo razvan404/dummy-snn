@@ -45,7 +45,7 @@ def run(dataset: str, *, num_epochs: int = 30):
                         pbar.set_postfix_str(
                             f"t_obj={t_obj} seed={seed} {split} {idx+1}/{steps[split]}"
                         )
-                        if idx % 100 == 0
+                        if idx % 200 == 0
                         else None
                     ),
                 )

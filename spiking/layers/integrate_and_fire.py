@@ -85,6 +85,38 @@ class IntegrateAndFireLayer(SpikingModule):
         self._spike_times.fill_(float("inf"))
         self._output_spikes.zero_()
 
+    @torch.no_grad()
+    def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
+        """Compute first spike times analytically without mutating model state."""
+        result = torch.full((self.num_outputs,), float("inf"), dtype=input_times.dtype)
+
+        finite_mask = torch.isfinite(input_times)
+        if not finite_mask.any():
+            return result
+
+        finite_indices = torch.nonzero(finite_mask, as_tuple=True)[0]
+        finite_times = input_times[finite_indices]
+
+        sorted_times, sort_order = finite_times.sort()
+        sorted_indices = finite_indices[sort_order]
+
+        # Cumulative membrane potential in sorted spike-time order
+        sorted_weights = self.weights[:, sorted_indices]
+        cum_potentials = sorted_weights.cumsum(dim=1)
+
+        # Only check threshold at group boundaries (simultaneous spikes)
+        unique_times, counts = torch.unique_consecutive(sorted_times, return_counts=True)
+        group_end_indices = counts.cumsum(dim=0) - 1
+
+        cum_at_boundaries = cum_potentials[:, group_end_indices]
+        crossed = cum_at_boundaries >= self.thresholds.unsqueeze(1)
+
+        any_crossed = crossed.any(dim=1)
+        first_crossing = crossed.float().argmax(dim=1)
+        result[any_crossed] = unique_times[first_crossing[any_crossed]]
+
+        return result
+
     @property
     def spike_times(self) -> torch.Tensor:
         return self._spike_times

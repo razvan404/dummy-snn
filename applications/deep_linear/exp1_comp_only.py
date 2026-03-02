@@ -51,7 +51,7 @@ def run(dataset: str, *, num_epochs: int = 10):
                         pbar.set_postfix_str(
                             f"thresh={thresh} seed={seed} epoch={epoch[0]}/{num_epochs} {idx+1}/{train_steps}"
                         )
-                        if idx % 100 == 0
+                        if idx % 200 == 0
                         else None
                     ),
                     on_epoch_end=lambda e, _total: epoch.__setitem__(0, e + 1),

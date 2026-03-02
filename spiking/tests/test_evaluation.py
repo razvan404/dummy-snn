@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from spiking.layers.integrate_and_fire import IntegrateAndFireLayer
-from spiking.threshold import NormalInitialization
+from spiking.threshold import ConstantInitialization, NormalInitialization
 
 
 def make_layer(num_inputs=10, num_outputs=5, avg_threshold=5.0):
@@ -89,18 +89,49 @@ class TestExtractFeatures:
         # After processing, spike_times should be reset (all inf)
         assert torch.all(torch.isinf(layer.spike_times))
 
-    def test_early_stopping_breaks_when_all_spiked(self):
-        """Model with very low thresholds should trigger early stopping."""
+    def test_matches_iterative_forward_pass(self):
+        """extract_features results must match the iterative forward-pass loop."""
+        from spiking import iterate_spikes
         from spiking.evaluation.feature_extraction import extract_features
 
         torch.manual_seed(42)
         shape = (2, 4, 4)
         num_inputs = 2 * 4 * 4
-        # Very low thresholds so all neurons spike early
+        layer = make_layer(num_inputs=num_inputs, num_outputs=5)
+        dataset = FakeDataset(num_samples=5, shape=shape)
+
+        # Compute expected features using iterative forward pass
+        expected_X = []
+        layer.eval()
+        with torch.no_grad():
+            for i in range(len(dataset)):
+                times, label = dataset[i]
+                flat_times = times.flatten()
+                for incoming_spikes, current_time, dt in iterate_spikes(flat_times):
+                    layer.forward(incoming_spikes, current_time=current_time, dt=dt)
+                    if torch.all(torch.isfinite(layer.spike_times)):
+                        break
+                expected_X.append(
+                    torch.clamp(1.0 - layer.spike_times, min=0, max=1.0).numpy()
+                )
+                layer.reset()
+        expected_X = np.array(expected_X)
+
+        loader = DataLoader(dataset, batch_size=None, shuffle=False)
+        actual_X, _ = extract_features(layer, loader, shape)
+
+        np.testing.assert_allclose(actual_X, expected_X, atol=1e-6)
+
+    def test_uses_analytical_path_without_forward_calls(self):
+        """extract_features should use infer_spike_times, not iterative forward."""
+        from spiking.evaluation.feature_extraction import extract_features
+
+        torch.manual_seed(42)
+        shape = (2, 4, 4)
+        num_inputs = 2 * 4 * 4
         layer = make_layer(num_inputs=num_inputs, num_outputs=3, avg_threshold=0.01)
         loader = make_fake_dataloader(num_samples=2, shape=shape)
 
-        # Count how many times forward is called
         original_forward = layer.forward
         call_count = [0]
 
@@ -109,27 +140,11 @@ class TestExtractFeatures:
             return original_forward(*args, **kwargs)
 
         layer.forward = counting_forward
-        X_early, _ = extract_features(layer, loader, shape)
+        extract_features(layer, loader, shape)
 
-        # Reset and run with high thresholds (no early stopping possible)
-        layer_high = make_layer(
-            num_inputs=num_inputs, num_outputs=3, avg_threshold=100.0
-        )
-        loader2 = make_fake_dataloader(num_samples=2, shape=shape)
-        original_forward2 = layer_high.forward
-        call_count_high = [0]
-
-        def counting_forward2(*args, **kwargs):
-            call_count_high[0] += 1
-            return original_forward2(*args, **kwargs)
-
-        layer_high.forward = counting_forward2
-        extract_features(layer_high, loader2, shape)
-
-        # Low-threshold model should have fewer forward calls due to early stopping
-        assert call_count[0] < call_count_high[0], (
-            f"Early stopping should reduce forward calls: "
-            f"low_thresh={call_count[0]} vs high_thresh={call_count_high[0]}"
+        assert call_count[0] == 0, (
+            f"extract_features should use analytical path, "
+            f"but forward was called {call_count[0]} times"
         )
 
 
@@ -214,6 +229,121 @@ class TestEvaluateClassifier:
         assert isinstance(train_metrics, dict)
         assert isinstance(val_metrics, dict)
 
+
+class TestInferSpikeTimes:
+    def _make_layer_with_params(self, weights, thresholds, refractory_period=float("inf")):
+        """Create a layer with exact weights and thresholds."""
+        layer = IntegrateAndFireLayer(
+            num_inputs=weights.shape[1],
+            num_outputs=weights.shape[0],
+            threshold_initialization=ConstantInitialization(1.0),
+            refractory_period=refractory_period,
+        )
+        with torch.no_grad():
+            layer.weights.copy_(weights)
+            layer.thresholds.copy_(thresholds)
+        return layer
+
+    def test_single_neuron_crosses_threshold(self):
+        weights = torch.tensor([[2.0]])
+        thresholds = torch.tensor([1.0])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        result = layer.infer_spike_times(torch.tensor([0.5]))
+
+        assert result.shape == (1,)
+        assert result[0].item() == pytest.approx(0.5)
+
+    def test_below_threshold_returns_inf(self):
+        weights = torch.tensor([[0.5]])
+        thresholds = torch.tensor([1.0])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        result = layer.infer_spike_times(torch.tensor([0.3]))
+
+        assert torch.isinf(result[0])
+
+    def test_cumulative_crossing(self):
+        weights = torch.tensor([[0.6, 0.6]])
+        thresholds = torch.tensor([1.0])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        result = layer.infer_spike_times(torch.tensor([0.1, 0.3]))
+
+        # After t=0.1: V = 0.6 < 1.0
+        # After t=0.3: V = 1.2 >= 1.0 → spike at 0.3
+        assert result[0].item() == pytest.approx(0.3)
+
+    def test_simultaneous_inputs_grouped(self):
+        weights = torch.tensor([[0.6, 0.6]])
+        thresholds = torch.tensor([1.0])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        result = layer.infer_spike_times(torch.tensor([0.2, 0.2]))
+
+        # Both arrive at t=0.2: V = 1.2 >= 1.0 → spike at 0.2
+        assert result[0].item() == pytest.approx(0.2)
+
+    def test_all_inf_inputs_returns_all_inf(self):
+        weights = torch.tensor([[1.0, 1.0]])
+        thresholds = torch.tensor([0.5])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        result = layer.infer_spike_times(torch.tensor([float("inf"), float("inf")]))
+
+        assert torch.all(torch.isinf(result))
+
+    def test_equivalence_with_iterative_forward(self):
+        """Analytical spike times must match iterative forward pass."""
+        from spiking import iterate_spikes
+
+        for seed in range(5):
+            torch.manual_seed(seed)
+            layer = make_layer(num_inputs=32, num_outputs=10, avg_threshold=5.0)
+            input_times = torch.rand(32)
+
+            # Iterative forward pass
+            layer.reset()
+            for incoming_spikes, current_time, dt in iterate_spikes(input_times):
+                layer.forward(incoming_spikes, current_time=current_time, dt=dt)
+            iterative_times = layer.spike_times.clone()
+            layer.reset()
+
+            # Analytical
+            analytical_times = layer.infer_spike_times(input_times)
+
+            assert torch.allclose(iterative_times, analytical_times, atol=1e-6), (
+                f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
+            )
+
+    def test_sequential_equivalence(self):
+        """Multi-layer analytical must match iterative."""
+        from spiking import iterate_spikes
+        from spiking.layers.sequential import SpikingSequential
+
+        for seed in range(5):
+            torch.manual_seed(seed)
+            layer1 = make_layer(num_inputs=32, num_outputs=16, avg_threshold=5.0)
+            layer2 = make_layer(num_inputs=16, num_outputs=10, avg_threshold=5.0)
+            model = SpikingSequential(layer1, layer2)
+
+            input_times = torch.rand(32)
+
+            # Iterative
+            model.reset()
+            for incoming_spikes, current_time, dt in iterate_spikes(input_times):
+                model.forward(incoming_spikes, current_time=current_time, dt=dt)
+                if torch.all(torch.isfinite(model.spike_times)):
+                    break
+            iterative_times = model.spike_times.clone()
+            model.reset()
+
+            # Analytical
+            analytical_times = model.infer_spike_times(input_times)
+
+            assert torch.allclose(iterative_times, analytical_times, atol=1e-6), (
+                f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
+            )
 
 class TestIterateSpikes:
     def test_yields_one_entry_per_unique_time(self):
