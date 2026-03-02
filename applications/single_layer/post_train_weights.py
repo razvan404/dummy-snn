@@ -207,7 +207,7 @@ def main():
     print(f"  Train accuracy: {before_train['accuracy']:.4f}")
     print(f"  Val accuracy: {before_val['accuracy']:.4f}")
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
     model = model.to(device)
 
     stdp = STDP(
@@ -242,9 +242,7 @@ def main():
             model.reset()
 
             for incoming_spikes, current_time, dt in iterate_spikes(times):
-                model.forward(
-                    incoming_spikes.flatten().to(device), current_time, dt
-                )
+                model.forward(incoming_spikes.flatten().to(device), current_time, dt)
 
             spiked_mask = torch.isfinite(model.spike_times)
             spike_counts += spiked_mask.cpu().long()
@@ -259,9 +257,7 @@ def main():
             model.reset()
 
         mean_dw = sum(epoch_dw) / len(epoch_dw) if epoch_dw else 0
-        avg_spiked = (
-            total_neurons_spiked / total_samples if total_samples > 0 else 0
-        )
+        avg_spiked = total_neurons_spiked / total_samples if total_samples > 0 else 0
 
         history["mean_dw"].append(mean_dw)
         history["weights"].append(model.weights.detach().cpu().clone())
@@ -287,7 +283,9 @@ def main():
         print("  Thresholds unchanged (as expected)")
 
     print("\nEvaluating model AFTER post-training...")
-    after_train, after_val = evaluate_model(model, train_loader, val_loader, image_shape=spike_shape)
+    after_train, after_val = evaluate_model(
+        model, train_loader, val_loader, image_shape=spike_shape
+    )
     print(f"  Train accuracy: {after_train['accuracy']:.4f}")
     print(f"  Val accuracy: {after_val['accuracy']:.4f}")
 
@@ -296,7 +294,9 @@ def main():
 
     plot_weights_evolution(history["weights"], output_dir)
     plot_convergence(history["mean_dw"], output_dir)
-    plot_neuron_weights(model_cpu.weights, history["spike_counts"], output_dir, image_shape)
+    plot_neuron_weights(
+        model_cpu.weights, history["spike_counts"], output_dir, image_shape
+    )
 
     all_metrics = {
         "Before": {"train": before_train, "val": before_val},

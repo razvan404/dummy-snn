@@ -162,7 +162,7 @@ def main():
     print(f"  Train accuracy: {before_train['accuracy']:.4f}")
     print(f"  Val accuracy: {before_val['accuracy']:.4f}")
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
     model = model.to(device)
 
     adaptation = PlasticityBalanceAdaptation(
@@ -198,8 +198,7 @@ def main():
         history["thresholds"].append(model.thresholds.detach().cpu().clone())
 
         print(
-            f"Epoch {epoch + 1}/{args.num_epochs}: "
-            f"mean |delta| = {mean_delta:.6f}"
+            f"Epoch {epoch + 1}/{args.num_epochs}: " f"mean |delta| = {mean_delta:.6f}"
         )
 
         if mean_delta < args.convergence_threshold:
@@ -207,7 +206,9 @@ def main():
             break
 
     print("\nEvaluating model AFTER post-training...")
-    after_train, after_val = evaluate_model(model, train_loader, val_loader, image_shape=spike_shape)
+    after_train, after_val = evaluate_model(
+        model, train_loader, val_loader, image_shape=spike_shape
+    )
     print(f"  Train accuracy: {after_train['accuracy']:.4f}")
     print(f"  Val accuracy: {after_val['accuracy']:.4f}")
 

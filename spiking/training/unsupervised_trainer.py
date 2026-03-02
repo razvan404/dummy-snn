@@ -18,7 +18,7 @@ class UnsupervisedTrainer:
         on_batch_end: Callable[[int, float, str], None] | None = None,
         early_stopping: bool = True,
     ):
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")
         self.model = model.to(self.device)
         self.learner = learner
         self.image_shape = image_shape
@@ -53,9 +53,7 @@ class UnsupervisedTrainer:
         flat_times = times.flatten().to(self.device)
         with torch.no_grad():
             for incoming_spikes, current_time, dt in iterate_spikes(flat_times):
-                output_spikes = self.model.forward(
-                    incoming_spikes, current_time, dt
-                )
+                output_spikes = self.model.forward(incoming_spikes, current_time, dt)
                 if self.early_stopping and torch.any(output_spikes == 1.0):
                     break
         dw = 0.0
