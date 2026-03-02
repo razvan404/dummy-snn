@@ -122,6 +122,75 @@ class TestExtractFeatures:
 
         np.testing.assert_allclose(actual_X, expected_X, atol=1e-6)
 
+    def test_without_t_target_uses_linear_inversion(self):
+        """Without t_target, features = clamp(1 - spike_times, 0, 1)."""
+        from spiking.evaluation.feature_extraction import extract_features
+
+        torch.manual_seed(42)
+        shape = (2, 4, 4)
+        num_inputs = 2 * 4 * 4
+        layer = make_layer(num_inputs=num_inputs, num_outputs=5)
+        loader = make_fake_dataloader(num_samples=3, shape=shape)
+
+        X_default, _ = extract_features(layer, loader, shape)
+        X_none, _ = extract_features(layer, loader, shape, t_target=None)
+
+        np.testing.assert_array_equal(X_default, X_none)
+
+    def test_with_t_target_uses_eq10(self):
+        """With t_target, features = clamp(1 - (t - t_target) / (1 - t_target), 0, 1)."""
+        from spiking.evaluation.feature_extraction import extract_features
+
+        torch.manual_seed(42)
+        shape = (2, 4, 4)
+        num_inputs = 2 * 4 * 4
+        # Low threshold so neurons fire early (before t_target=0.7)
+        layer = make_layer(num_inputs=num_inputs, num_outputs=5, avg_threshold=0.01)
+        loader = make_fake_dataloader(num_samples=3, shape=shape)
+
+        X_eq10, _ = extract_features(layer, loader, shape, t_target=0.7)
+        X_linear, _ = extract_features(layer, loader, shape, t_target=None)
+
+        # With low thresholds, neurons fire early → spike_times << 0.7
+        # Eq 10 clamps everything before t_target to 1.0
+        # Linear formula gives 1 - spike_time < 1.0
+        # So Eq 10 values should be >= linear values
+        assert np.all(X_eq10 >= X_linear - 1e-6)
+
+    def test_eq10_specific_values(self):
+        """Verify Eq 10 formula against hand-computed values."""
+        from spiking.evaluation.feature_extraction import spike_times_to_features
+
+        t_target = 0.7
+        spike_times = torch.tensor([0.5, 0.7, 0.8, 1.0, float("inf")])
+
+        features = spike_times_to_features(spike_times, t_target=t_target)
+
+        # t=0.5 < t_target → clamped to 1.0
+        assert features[0].item() == pytest.approx(1.0)
+        # t=0.7 = t_target → 1 - 0/0.3 = 1.0
+        assert features[1].item() == pytest.approx(1.0)
+        # t=0.8 → 1 - 0.1/0.3 = 0.6667
+        assert features[2].item() == pytest.approx(2.0 / 3.0, abs=1e-4)
+        # t=1.0 → 1 - 0.3/0.3 = 0.0
+        assert features[3].item() == pytest.approx(0.0)
+        # t=inf → 0.0
+        assert features[4].item() == pytest.approx(0.0)
+
+    def test_linear_specific_values(self):
+        """Verify linear formula against hand-computed values."""
+        from spiking.evaluation.feature_extraction import spike_times_to_features
+
+        spike_times = torch.tensor([0.0, 0.3, 0.7, 1.0, float("inf")])
+
+        features = spike_times_to_features(spike_times, t_target=None)
+
+        assert features[0].item() == pytest.approx(1.0)
+        assert features[1].item() == pytest.approx(0.7)
+        assert features[2].item() == pytest.approx(0.3)
+        assert features[3].item() == pytest.approx(0.0)
+        assert features[4].item() == pytest.approx(0.0)
+
     def test_uses_analytical_path_without_forward_calls(self):
         """extract_features should use infer_spike_times, not iterative forward."""
         from spiking.evaluation.feature_extraction import extract_features

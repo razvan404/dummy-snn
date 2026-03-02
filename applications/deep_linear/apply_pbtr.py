@@ -28,6 +28,7 @@ def apply_pbtr(
     layer_idx: int = 0,
     num_epochs: int = 10,
     on_batch_end=None,
+    t_target: float | None = None,
 ):
     """Apply PBTR to a specific layer of a trained model and save artifacts."""
     set_seed(seed)
@@ -61,7 +62,9 @@ def apply_pbtr(
         progress=False,
     )
 
-    train_m, val_m = evaluate_model(sub_model, train_loader, val_loader, spike_shape)
+    train_m, val_m = evaluate_model(
+        sub_model, train_loader, val_loader, spike_shape, t_target=t_target,
+    )
 
     os.makedirs(output_dir, exist_ok=True)
     save_model(model, f"{output_dir}/model.pth")
@@ -86,6 +89,7 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, required=True)
     parser.add_argument("--layer-idx", type=int, default=0)
     parser.add_argument("--num-epochs", type=int, default=10)
+    parser.add_argument("--t-target", type=float, default=None)
     args = parser.parse_args()
 
     train_loader, val_loader = create_dataset(args.dataset)
@@ -99,4 +103,5 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         layer_idx=args.layer_idx,
         num_epochs=args.num_epochs,
+        t_target=args.t_target,
     )

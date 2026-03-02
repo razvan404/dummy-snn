@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -33,6 +34,11 @@ def run(dataset: str, *, num_epochs: int = 10, force: bool = False):
     with tqdm(total=total, desc="Exp 3: PBTR post-training") as pbar:
         for model_path in model_paths:
             seed_dir = model_path.parent
+            setup_path = seed_dir / "setup.json"
+            t_target = None
+            if setup_path.exists():
+                with open(setup_path) as f:
+                    t_target = json.load(f).get("t_objective")
             pbtr_dir = seed_dir / "pbtr"
             for seed in SEEDS:
                 output_dir = str(pbtr_dir / f"seed_{seed}")
@@ -49,6 +55,7 @@ def run(dataset: str, *, num_epochs: int = 10, force: bool = False):
                     seed=seed,
                     output_dir=output_dir,
                     num_epochs=num_epochs,
+                    t_target=t_target,
                     on_batch_end=lambda idx, _dw, split: (
                         pbar.set_postfix_str(
                             f"{label} {split} {idx+1}/{steps.get(split, '?')}"
