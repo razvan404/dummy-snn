@@ -1,15 +1,17 @@
 import argparse
 import math
+import os
 
 from tqdm import tqdm
 
 from applications.common import merge_seed_results
 from applications.datasets import DATASETS, create_dataset
 from applications.deep_linear.train import train_layer
+
 SEEDS = [1, 2, 3, 4, 5]
 
 
-def run(dataset: str, *, num_epochs: int = 10):
+def run(dataset: str, *, num_epochs: int = 10, force: bool = False):
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
 
@@ -31,6 +33,11 @@ def run(dataset: str, *, num_epochs: int = 10):
         for thresh in thresholds:
             base_dir = f"logs/{dataset}/layer_1/comp_only/thresh_{thresh}"
             for seed in SEEDS:
+                output_dir = f"{base_dir}/seed_{seed}"
+                if not force and os.path.exists(f"{output_dir}/metrics.json"):
+                    tqdm.write(f"  skip thresh={thresh} seed={seed} (already complete)")
+                    pbar.update(1)
+                    continue
                 pbar.set_postfix_str(f"thresh={thresh} seed={seed}")
                 epoch = [1]
                 train_layer(
@@ -38,7 +45,7 @@ def run(dataset: str, *, num_epochs: int = 10):
                     spike_shape=spike_shape,
                     seed=seed,
                     avg_threshold=thresh,
-                    output_dir=f"{base_dir}/seed_{seed}",
+                    output_dir=output_dir,
                     num_epochs=num_epochs,
                     on_batch_end=lambda idx, _dw, _split: (
                         pbar.set_postfix_str(
@@ -58,7 +65,10 @@ if __name__ == "__main__":
         description="Exp 1: competitive-only threshold sweep"
     )
     parser.add_argument("dataset", choices=DATASETS)
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument(
+        "--force", action="store_true", help="re-run even if results exist"
+    )
     args = parser.parse_args()
 
-    run(args.dataset, num_epochs=args.epochs)
+    run(args.dataset, num_epochs=args.epochs, force=args.force)

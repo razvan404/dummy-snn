@@ -93,7 +93,7 @@ def _save_plots(dynamics, activity, win_counts, layer, spike_shape, figures_dir)
     save_weight_figure(layer, spike_shape, f"{figures_dir}/weights.png")
 
 
-def run(dataset: str, *, num_epochs: int = 10):
+def run(dataset: str, *, num_epochs: int = 10, force: bool = False):
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
     num_inputs = math.prod(spike_shape)
@@ -104,6 +104,11 @@ def run(dataset: str, *, num_epochs: int = 10):
 
     with tqdm(total=len(SEEDS), desc="Exp 0: params establish") as pbar:
         for seed in SEEDS:
+            output_dir = f"{base_dir}/seed_{seed}"
+            if not force and os.path.exists(f"{output_dir}/metrics.json"):
+                tqdm.write(f"  skip seed={seed} (already complete)")
+                pbar.update(1)
+                continue
             pbar.set_postfix_str(f"seed={seed}")
             set_seed(seed)
 
@@ -168,7 +173,6 @@ def run(dataset: str, *, num_epochs: int = 10):
                 sub_model, train_loader, val_loader, spike_shape
             )
 
-            output_dir = f"{base_dir}/seed_{seed}"
             os.makedirs(output_dir, exist_ok=True)
             save_model(model, f"{output_dir}/model.pth")
 
@@ -207,10 +211,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Exp 0: establish baseline parameters with training dynamics"
     )
+    parser.add_argument("dataset", choices=DATASETS)
+    parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument(
-        "dataset", choices=DATASETS
+        "--force", action="store_true", help="re-run even if results exist"
     )
-    parser.add_argument("--epochs", type=int, default=10)
     args = parser.parse_args()
 
-    run(args.dataset, num_epochs=args.epochs)
+    run(args.dataset, num_epochs=args.epochs, force=args.force)

@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from applications.deep_linear.random_thresholds import random_thresholds
 SEEDS = [200, 201, 202, 203, 204]
 
 
-def run(dataset: str):
+def run(dataset: str, *, force: bool = False):
     base_dir = Path(f"logs/{dataset}/layer_1")
     model_paths = [
         p
@@ -31,13 +32,18 @@ def run(dataset: str):
             seed_dir = model_path.parent
             ctrl_dir = seed_dir / "random_thresh"
             for seed in SEEDS:
+                output_dir = str(ctrl_dir / f"seed_{seed}")
+                if not force and os.path.exists(f"{output_dir}/metrics.json"):
+                    tqdm.write(f"  skip {seed_dir.name} seed={seed} (already complete)")
+                    pbar.update(1)
+                    continue
                 pbar.set_postfix_str(f"{seed_dir.name} seed={seed}")
                 random_thresholds(
                     model_path=str(model_path),
                     dataset_loaders=(train_loader, val_loader),
                     spike_shape=spike_shape,
                     seed=seed,
-                    output_dir=str(ctrl_dir / f"seed_{seed}"),
+                    output_dir=output_dir,
                 )
                 pbar.update(1)
             merge_seed_results(str(ctrl_dir))
@@ -46,6 +52,7 @@ def run(dataset: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Exp 4: random threshold control")
     parser.add_argument("dataset", type=str)
+    parser.add_argument("--force", action="store_true", help="re-run even if results exist")
     args = parser.parse_args()
 
-    run(args.dataset)
+    run(args.dataset, force=args.force)

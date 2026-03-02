@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from applications.deep_linear.apply_pbtr import apply_pbtr
 SEEDS = [100, 101, 102]
 
 
-def run(dataset: str, *, num_epochs: int = 10):
+def run(dataset: str, *, num_epochs: int = 10, force: bool = False):
     base_dir = Path(f"logs/{dataset}/layer_1")
     model_paths = [
         p
@@ -34,6 +35,11 @@ def run(dataset: str, *, num_epochs: int = 10):
             seed_dir = model_path.parent
             pbtr_dir = seed_dir / "pbtr"
             for seed in SEEDS:
+                output_dir = str(pbtr_dir / f"seed_{seed}")
+                if not force and os.path.exists(f"{output_dir}/metrics.json"):
+                    tqdm.write(f"  skip {seed_dir.name} seed={seed} (already complete)")
+                    pbar.update(1)
+                    continue
                 label = f"{seed_dir.name} seed={seed}"
                 pbar.set_postfix_str(label)
                 apply_pbtr(
@@ -41,7 +47,7 @@ def run(dataset: str, *, num_epochs: int = 10):
                     dataset_loaders=(train_loader, val_loader),
                     spike_shape=spike_shape,
                     seed=seed,
-                    output_dir=str(pbtr_dir / f"seed_{seed}"),
+                    output_dir=output_dir,
                     num_epochs=num_epochs,
                     on_batch_end=lambda idx, _dw, split: (
                         pbar.set_postfix_str(
@@ -59,6 +65,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Exp 3: PBTR post-training")
     parser.add_argument("dataset", type=str)
     parser.add_argument("--pbtr-epochs", type=int, default=10)
+    parser.add_argument("--force", action="store_true", help="re-run even if results exist")
     args = parser.parse_args()
 
-    run(args.dataset, num_epochs=args.pbtr_epochs)
+    run(args.dataset, num_epochs=args.pbtr_epochs, force=args.force)
