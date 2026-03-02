@@ -30,7 +30,8 @@ from spiking import (
 )
 from spiking.layers import SpikingSequential
 
-SEEDS = [1, 2, 3, 4, 5]
+SEED_START = 1
+DEFAULT_NUM_SEEDS = 5
 
 
 def _save_plots(dynamics, activity, win_counts, layer, spike_shape, figures_dir):
@@ -93,7 +94,8 @@ def _save_plots(dynamics, activity, win_counts, layer, spike_shape, figures_dir)
     save_weight_figure(layer, spike_shape, f"{figures_dir}/weights.png")
 
 
-def run(dataset: str, *, num_epochs: int = 10, force: bool = False):
+def run(dataset: str, *, num_epochs: int = 10, force: bool = False, num_seeds: int = DEFAULT_NUM_SEEDS):
+    seeds = list(range(SEED_START, SEED_START + num_seeds))
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
     num_inputs = math.prod(spike_shape)
@@ -102,8 +104,8 @@ def run(dataset: str, *, num_epochs: int = 10, force: bool = False):
     base_dir = f"logs/{dataset}/layer_1/params_establish"
     train_steps = len(train_loader)
 
-    with tqdm(total=len(SEEDS), desc="Exp 0: params establish") as pbar:
-        for seed in SEEDS:
+    with tqdm(total=len(seeds), desc="Exp 0: params establish") as pbar:
+        for seed in seeds:
             output_dir = f"{base_dir}/seed_{seed}"
             if not force and os.path.exists(f"{output_dir}/metrics.json"):
                 tqdm.write(f"  skip seed={seed} (already complete)")
@@ -216,6 +218,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--force", action="store_true", help="re-run even if results exist"
     )
+    parser.add_argument("--seeds", type=int, default=DEFAULT_NUM_SEEDS)
     args = parser.parse_args()
 
-    run(args.dataset, num_epochs=args.epochs, force=args.force)
+    run(args.dataset, num_epochs=args.epochs, force=args.force, num_seeds=args.seeds)

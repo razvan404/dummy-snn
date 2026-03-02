@@ -8,11 +8,13 @@ from applications.common import merge_seed_results
 from applications.datasets import DATASETS, create_dataset
 from applications.deep_linear.train import train_layer
 
-SEEDS = [1, 2, 3, 4, 5]
+SEED_START = 1
+DEFAULT_NUM_SEEDS = 5
 T_OBJECTIVES = [round(0.4 + v * 0.05, 2) for v in range(12)]  # 0.4 to 0.95
 
 
-def run(dataset: str, *, num_epochs: int = 30, force: bool = False):
+def run(dataset: str, *, num_epochs: int = 30, force: bool = False, num_seeds: int = DEFAULT_NUM_SEEDS):
+    seeds = list(range(SEED_START, SEED_START + num_seeds))
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
     thresh = math.prod(spike_shape) / 20
@@ -21,11 +23,11 @@ def run(dataset: str, *, num_epochs: int = 30, force: bool = False):
     val_steps = len(val_loader)
     steps = {"train": train_steps, "val": val_steps}
 
-    total = len(T_OBJECTIVES) * len(SEEDS)
+    total = len(T_OBJECTIVES) * len(seeds)
     with tqdm(total=total, desc="Exp 2: t_objective sweep") as pbar:
         for t_obj in T_OBJECTIVES:
             base_dir = f"logs/{dataset}/layer_1/comp_t_obj/tobj_{t_obj}"
-            for seed in SEEDS:
+            for seed in seeds:
                 output_dir = f"{base_dir}/seed_{seed}"
                 if not force and os.path.exists(f"{output_dir}/metrics.json"):
                     tqdm.write(f"  skip t_obj={t_obj} seed={seed} (already complete)")
@@ -63,6 +65,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--force", action="store_true", help="re-run even if results exist"
     )
+    parser.add_argument("--seeds", type=int, default=DEFAULT_NUM_SEEDS)
     args = parser.parse_args()
 
-    run(args.dataset, num_epochs=args.epochs, force=args.force)
+    run(args.dataset, num_epochs=args.epochs, force=args.force, num_seeds=args.seeds)

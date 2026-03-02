@@ -29,6 +29,7 @@ def apply_pbtr(
     num_epochs: int = 10,
     on_batch_end=None,
     t_target: float | None = None,
+    sign_only: bool = False,
 ):
     """Apply PBTR to a specific layer of a trained model and save artifacts."""
     set_seed(seed)
@@ -46,6 +47,7 @@ def apply_pbtr(
             learning_rate=0.1,
             min_threshold=1.0,
             max_threshold=max_threshold,
+            sign_only=sign_only,
         ),
     )
 
@@ -90,6 +92,7 @@ if __name__ == "__main__":
     parser.add_argument("--layer-idx", type=int, default=0)
     parser.add_argument("--num-epochs", type=int, default=10)
     parser.add_argument("--t-target", type=float, default=None)
+    parser.add_argument("--sign-only", action="store_true")
     args = parser.parse_args()
 
     train_loader, val_loader = create_dataset(args.dataset)
@@ -104,4 +107,5 @@ if __name__ == "__main__":
         layer_idx=args.layer_idx,
         num_epochs=args.num_epochs,
         t_target=args.t_target,
+        sign_only=args.sign_only,
     )
