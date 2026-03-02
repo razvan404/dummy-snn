@@ -28,6 +28,7 @@ def apply_pbtr(
     layer_idx: int = 0,
     num_epochs: int = 10,
     on_batch_end=None,
+    on_epoch_end=None,
     t_target: float | None = None,
     sign_only: bool = False,
 ):
@@ -61,6 +62,7 @@ def apply_pbtr(
         image_shape=spike_shape,
         early_stopping=False,
         on_batch_end=on_batch_end,
+        on_epoch_end=on_epoch_end,
         progress=False,
     )
 

@@ -376,6 +376,56 @@ class TestPlasticityBalanceAdaptation:
         assert updated[1] == current_thresholds[1]
         assert updated[2] == current_thresholds[2]
 
+    def test_potentiation_dominant_decreases_threshold(self):
+        """When potentiation dominates, threshold should decrease (negative feedback)."""
+        from spiking.threshold import PlasticityBalanceAdaptation
+
+        adaptation = PlasticityBalanceAdaptation(
+            tau=20.0,
+            learning_rate=0.1,
+            min_threshold=1.0,
+            max_threshold=100.0,
+        )
+
+        current_thresholds = torch.tensor([50.0])
+        spike_times = torch.tensor([0.5])
+        weights = torch.ones(1, 5)
+        pre_spike_times = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.45])  # all before post
+
+        updated = adaptation.update(
+            current_thresholds,
+            spike_times,
+            weights=weights,
+            pre_spike_times=pre_spike_times,
+        )
+
+        assert updated[0] < 50.0, "Potentiation dominant → threshold should decrease"
+
+    def test_depression_dominant_increases_threshold(self):
+        """When depression dominates, threshold should increase (negative feedback)."""
+        from spiking.threshold import PlasticityBalanceAdaptation
+
+        adaptation = PlasticityBalanceAdaptation(
+            tau=20.0,
+            learning_rate=0.1,
+            min_threshold=1.0,
+            max_threshold=100.0,
+        )
+
+        current_thresholds = torch.tensor([50.0])
+        spike_times = torch.tensor([0.5])
+        weights = torch.ones(1, 5)
+        pre_spike_times = torch.tensor([0.7, 0.8, 0.9, 0.95, 0.99])  # all after post
+
+        updated = adaptation.update(
+            current_thresholds,
+            spike_times,
+            weights=weights,
+            pre_spike_times=pre_spike_times,
+        )
+
+        assert updated[0] > 50.0, "Depression dominant → threshold should increase"
+
     def test_update_clamps_thresholds(self):
         """Thresholds should be clamped within [min_threshold, max_threshold]."""
         from spiking.threshold import PlasticityBalanceAdaptation
@@ -441,11 +491,11 @@ class TestPlasticityBalanceAdaptation:
             pre_spike_times=pre_spike_times,
         )
 
-        # All pre spikes before post → positive balance → threshold increases by exactly lr
-        assert abs(updated[0].item() - (50.0 + lr)) < 1e-5
+        # All pre spikes before post → positive balance → threshold decreases by exactly lr
+        assert abs(updated[0].item() - (50.0 - lr)) < 1e-5
 
     def test_sign_only_negative_direction(self):
-        """sign_only=True with depression-dominant balance should decrease by exactly lr."""
+        """sign_only=True with depression-dominant balance should increase by exactly lr."""
         from spiking.threshold import PlasticityBalanceAdaptation
 
         lr = 0.1
@@ -469,7 +519,7 @@ class TestPlasticityBalanceAdaptation:
             pre_spike_times=pre_spike_times,
         )
 
-        assert abs(updated[0].item() - (50.0 - lr)) < 1e-5
+        assert abs(updated[0].item() - (50.0 + lr)) < 1e-5
 
     def test_sign_only_defaults_false(self):
         """sign_only should default to False for backward compatibility."""
@@ -516,7 +566,7 @@ class TestPlasticityBalanceAdaptation:
             )
             expected_deltas[idx] = adaptation.learning_rate * balance
         expected = torch.clamp(
-            current_thresholds + expected_deltas,
+            current_thresholds - expected_deltas,
             adaptation.min_threshold,
             adaptation.max_threshold,
         )
@@ -567,7 +617,7 @@ class TestPlasticityBalanceAdaptation:
             direction = 1.0 if balance > 0 else (-1.0 if balance < 0 else 0.0)
             expected_deltas[idx] = adaptation.learning_rate * direction
         expected = torch.clamp(
-            current_thresholds + expected_deltas,
+            current_thresholds - expected_deltas,
             adaptation.min_threshold,
             adaptation.max_threshold,
         )

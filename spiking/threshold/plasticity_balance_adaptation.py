@@ -79,5 +79,5 @@ class PlasticityBalanceAdaptation(ThresholdAdaptation):
         else:
             threshold_deltas[spiked_mask] = self.learning_rate * balance
 
-        new_thresholds = current_thresholds + threshold_deltas
+        new_thresholds = current_thresholds - threshold_deltas
         return torch.clamp(new_thresholds, self.min_threshold, self.max_threshold)

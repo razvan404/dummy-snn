@@ -49,12 +49,11 @@ def run(
             if setup_path.exists():
                 with open(setup_path) as f:
                     t_target = json.load(f).get("t_objective")
-            other_dir = seed_dir / ("pbtr" if sign_only else "pbtr_sign")
-            if not force and other_dir.exists():
-                tqdm.write(f"  skip {seed_dir.name} ({other_dir.name}/ exists, flag mismatch)")
+            pbtr_dir = seed_dir / ("pbtr_sign" if sign_only else "pbtr")
+            if not force and pbtr_dir.exists():
+                tqdm.write(f"  skip {seed_dir.name} ({pbtr_dir.name}/ exists)")
                 pbar.update(len(seeds))
                 continue
-            pbtr_dir = seed_dir / ("pbtr_sign" if sign_only else "pbtr")
             for seed in seeds:
                 output_dir = str(pbtr_dir / f"seed_{seed}")
                 if not force and os.path.exists(f"{output_dir}/metrics.json"):
@@ -63,6 +62,7 @@ def run(
                     continue
                 label = f"{seed_dir.name} seed={seed}"
                 pbar.set_postfix_str(label)
+                epoch = [1]
                 apply_pbtr(
                     model_path=str(model_path),
                     dataset_loaders=(train_loader, val_loader),
@@ -74,11 +74,12 @@ def run(
                     sign_only=sign_only,
                     on_batch_end=lambda idx, _dw, split: (
                         pbar.set_postfix_str(
-                            f"{label} {split} {idx+1}/{steps.get(split, '?')}"
+                            f"{label} epoch={epoch[0]}/{num_epochs} {split} {idx+1}/{steps.get(split, '?')}"
                         )
                         if idx % 200 == 0
                         else None
                     ),
+                    on_epoch_end=lambda e, _total: epoch.__setitem__(0, e + 1),
                 )
                 pbar.update(1)
             merge_seed_results(str(pbtr_dir))
