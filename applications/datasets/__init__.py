@@ -26,8 +26,8 @@ def create_dataset(name: str) -> tuple[DataLoader, DataLoader]:
         train_dataset = Cifar10Dataset("data", "train")
         test_dataset = Cifar10Dataset("data", "test")
     elif name == "fer2013":
-        train_dataset = Fer2013Dataset("data", "train")
-        test_dataset = Fer2013Dataset("data", "test")
+        train_dataset = Fer2013Dataset("train")
+        test_dataset = Fer2013Dataset("test")
     else:
         raise ValueError(f"unknown dataset: {name!r}")
 

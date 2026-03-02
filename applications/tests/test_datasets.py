@@ -207,52 +207,81 @@ class TestCifar10Dataset:
 
 
 class TestFer2013Dataset:
-    def _make_fake_fer_samples(self, n=5):
-        """Return fake _samples list matching torchvision FER2013 internal format."""
-        return [
-            (torch.randint(0, 256, (48, 48), dtype=torch.uint8), i % 7)
-            for i in range(n)
-        ]
+    def _make_fake_kaggle_dir(self, tmp_path, split="train", n_per_class=2):
+        """Create fake kagglehub directory with tiny JPEG images per class."""
+        import numpy as np
+        from PIL import Image
 
-    @patch("torchvision.datasets.FER2013")
-    def test_returns_times_label(self, mock_cls):
-        mock_cls.return_value._samples = self._make_fake_fer_samples()
+        classes = ["angry", "disgust", "fear", "happy", "neutral", "sad", "surprise"]
+        split_dir = tmp_path / split
+        for cls_name in classes:
+            cls_dir = split_dir / cls_name
+            cls_dir.mkdir(parents=True)
+            for i in range(n_per_class):
+                img = Image.fromarray(
+                    np.random.randint(0, 256, (48, 48), dtype=np.uint8), mode="L"
+                )
+                img.save(cls_dir / f"img_{i}.jpg")
+        return str(tmp_path)
+
+    @patch("applications.datasets.fer2013.kagglehub")
+    def test_returns_times_label(self, mock_kagglehub, tmp_path):
+        mock_kagglehub.dataset_download.return_value = self._make_fake_kaggle_dir(
+            tmp_path
+        )
 
         from applications.datasets.fer2013 import Fer2013Dataset
 
-        ds = Fer2013Dataset(root="data", split="train")
+        ds = Fer2013Dataset(split="train")
         times, label = ds[0]
 
         assert isinstance(times, torch.Tensor)
         assert isinstance(label, torch.Tensor)
 
-    @patch("torchvision.datasets.FER2013")
-    def test_inputs_are_grayscale_float(self, mock_cls):
-        mock_cls.return_value._samples = self._make_fake_fer_samples()
+    @patch("applications.datasets.fer2013.kagglehub")
+    def test_inputs_are_grayscale_float(self, mock_kagglehub, tmp_path):
+        mock_kagglehub.dataset_download.return_value = self._make_fake_kaggle_dir(
+            tmp_path
+        )
 
         from applications.datasets.fer2013 import Fer2013Dataset
 
-        ds = Fer2013Dataset(root="data", split="train")
+        ds = Fer2013Dataset(split="train")
         assert ds.inputs.ndim == 3  # (N, H, W)
         assert ds.inputs.dtype == torch.float32
         assert ds.inputs.min() >= 0.0
         assert ds.inputs.max() <= 1.0
 
-    @patch("torchvision.datasets.FER2013")
-    def test_native_image_shape(self, mock_cls):
-        mock_cls.return_value._samples = self._make_fake_fer_samples()
+    @patch("applications.datasets.fer2013.kagglehub")
+    def test_native_image_shape(self, mock_kagglehub, tmp_path):
+        mock_kagglehub.dataset_download.return_value = self._make_fake_kaggle_dir(
+            tmp_path
+        )
 
         from applications.datasets.fer2013 import Fer2013Dataset
 
-        ds = Fer2013Dataset(root="data", split="train")
+        ds = Fer2013Dataset(split="train")
         assert ds.image_shape == (48, 48)
 
-    @patch("torchvision.datasets.FER2013")
-    def test_split_validation(self, mock_cls):
+    @patch("applications.datasets.fer2013.kagglehub")
+    def test_split_validation(self, mock_kagglehub):
         from applications.datasets.fer2013 import Fer2013Dataset
 
         with pytest.raises(ValueError, match="split"):
-            Fer2013Dataset(root="data", split="val")
+            Fer2013Dataset(split="val")
+
+    @patch("applications.datasets.fer2013.kagglehub")
+    def test_labels_match_sorted_class_dirs(self, mock_kagglehub, tmp_path):
+        mock_kagglehub.dataset_download.return_value = self._make_fake_kaggle_dir(
+            tmp_path, n_per_class=1
+        )
+
+        from applications.datasets.fer2013 import Fer2013Dataset
+
+        ds = Fer2013Dataset(split="train")
+        assert len(ds) == 7
+        labels = [ds[i][1].item() for i in range(7)]
+        assert labels == list(range(7))
 
 
 class TestCreateDatasetFactory:
@@ -334,14 +363,23 @@ class TestCreateDatasetFactory:
         train_loader, _ = create_dataset("cifar10")
         assert train_loader.dataset.image_shape == (32, 32)
 
-    @patch("torchvision.datasets.FER2013")
-    def test_fer2013_key_returns_loaders(self, mock_cls):
+    @patch("applications.datasets.fer2013.kagglehub")
+    def test_fer2013_key_returns_loaders(self, mock_kagglehub, tmp_path):
+        import numpy as np
+        from PIL import Image
         from torch.utils.data import DataLoader
 
-        mock_cls.return_value._samples = [
-            (torch.randint(0, 256, (48, 48), dtype=torch.uint8), i % 7)
-            for i in range(5)
-        ]
+        classes = ["angry", "disgust", "fear", "happy", "neutral", "sad", "surprise"]
+        for split in ("train", "test"):
+            split_dir = tmp_path / split
+            for cls_name in classes:
+                cls_dir = split_dir / cls_name
+                cls_dir.mkdir(parents=True)
+                img = Image.fromarray(
+                    np.random.randint(0, 256, (48, 48), dtype=np.uint8), mode="L"
+                )
+                img.save(cls_dir / "img_0.jpg")
+        mock_kagglehub.dataset_download.return_value = str(tmp_path)
 
         from applications.datasets import create_dataset
 
