@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 def gaussian_blur(img: torch.Tensor, sigma: float):
     # Create 1D Gaussian kernel
-    size = int(8 * sigma + 1)
+    size = int(6 * sigma + 1)
     if size % 2 == 0:
         size += 1
     coords = torch.arange(size, dtype=torch.float32, device=img.device) - size // 2

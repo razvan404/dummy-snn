@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader
 from .base import SpikeEncodingDataset
 from .cifar10 import Cifar10Dataset
 from .fashion_mnist import FashionMnistDataset
+from .fer2013 import Fer2013Dataset
 from .mnist import MnistDataset
 from .mnist_subset import MnistSubsetDataset
 
@@ -24,9 +25,15 @@ def create_dataset(name: str) -> tuple[DataLoader, DataLoader]:
     elif name == "cifar10":
         train_dataset = Cifar10Dataset("data", "train")
         test_dataset = Cifar10Dataset("data", "test")
+    elif name == "fer2013":
+        train_dataset = Fer2013Dataset("data", "train")
+        test_dataset = Fer2013Dataset("data", "test")
     else:
         raise ValueError(f"unknown dataset: {name!r}")
 
     train_loader = DataLoader(train_dataset, batch_size=None, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=None, shuffle=False)
     return train_loader, test_loader
+
+
+DATASETS = ["mnist", "mnist_subset", "fashion_mnist", "cifar10", "fer2013"]

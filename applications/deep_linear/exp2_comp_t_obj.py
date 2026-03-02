@@ -1,27 +1,20 @@
 import argparse
+import math
 
 from tqdm import tqdm
 
 from applications.common import merge_seed_results
-from applications.datasets import create_dataset
+from applications.datasets import DATASETS, create_dataset
 from applications.deep_linear.train import train_layer
-
-DATASET_THRESHOLDS = {
-    "mnist": 156.8,
-    "mnist_subset": 156.8,
-    "fashion_mnist": 156.8,
-    "cifar10": 204.8,
-}
 
 SEEDS = [1, 2, 3, 4, 5]
 T_OBJECTIVES = [round(0.4 + v * 0.05, 2) for v in range(12)]  # 0.4 to 0.95
 
 
 def run(dataset: str, *, num_epochs: int = 30):
-    thresh = DATASET_THRESHOLDS[dataset]
-
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
+    thresh = math.prod(spike_shape) / 20
 
     train_steps = len(train_loader)
     val_steps = len(val_loader)
@@ -57,7 +50,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Exp 2: competitive + target-timestamp sweep"
     )
-    parser.add_argument("dataset", choices=list(DATASET_THRESHOLDS))
+    parser.add_argument("dataset", choices=DATASETS)
     parser.add_argument("--epochs", type=int, default=30)
     args = parser.parse_args()
 

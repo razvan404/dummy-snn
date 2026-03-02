@@ -4,10 +4,8 @@ import math
 from tqdm import tqdm
 
 from applications.common import merge_seed_results
-from applications.datasets import create_dataset
+from applications.datasets import DATASETS, create_dataset
 from applications.deep_linear.train import train_layer
-
-DATASETS = ["mnist", "mnist_subset", "fashion_mnist", "cifar10"]
 SEEDS = [1, 2, 3, 4, 5]
 
 

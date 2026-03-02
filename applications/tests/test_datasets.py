@@ -206,6 +206,55 @@ class TestCifar10Dataset:
         assert times.shape == (2, 16, 16)
 
 
+class TestFer2013Dataset:
+    def _make_fake_fer_samples(self, n=5):
+        """Return fake _samples list matching torchvision FER2013 internal format."""
+        return [
+            (torch.randint(0, 256, (48, 48), dtype=torch.uint8), i % 7)
+            for i in range(n)
+        ]
+
+    @patch("torchvision.datasets.FER2013")
+    def test_returns_times_label(self, mock_cls):
+        mock_cls.return_value._samples = self._make_fake_fer_samples()
+
+        from applications.datasets.fer2013 import Fer2013Dataset
+
+        ds = Fer2013Dataset(root="data", split="train")
+        times, label = ds[0]
+
+        assert isinstance(times, torch.Tensor)
+        assert isinstance(label, torch.Tensor)
+
+    @patch("torchvision.datasets.FER2013")
+    def test_inputs_are_grayscale_float(self, mock_cls):
+        mock_cls.return_value._samples = self._make_fake_fer_samples()
+
+        from applications.datasets.fer2013 import Fer2013Dataset
+
+        ds = Fer2013Dataset(root="data", split="train")
+        assert ds.inputs.ndim == 3  # (N, H, W)
+        assert ds.inputs.dtype == torch.float32
+        assert ds.inputs.min() >= 0.0
+        assert ds.inputs.max() <= 1.0
+
+    @patch("torchvision.datasets.FER2013")
+    def test_native_image_shape(self, mock_cls):
+        mock_cls.return_value._samples = self._make_fake_fer_samples()
+
+        from applications.datasets.fer2013 import Fer2013Dataset
+
+        ds = Fer2013Dataset(root="data", split="train")
+        assert ds.image_shape == (48, 48)
+
+    @patch("torchvision.datasets.FER2013")
+    def test_split_validation(self, mock_cls):
+        from applications.datasets.fer2013 import Fer2013Dataset
+
+        with pytest.raises(ValueError, match="split"):
+            Fer2013Dataset(root="data", split="val")
+
+
 class TestCreateDatasetFactory:
     def test_raises_for_unknown_name(self):
         from applications.datasets import create_dataset
@@ -284,3 +333,18 @@ class TestCreateDatasetFactory:
 
         train_loader, _ = create_dataset("cifar10")
         assert train_loader.dataset.image_shape == (32, 32)
+
+    @patch("torchvision.datasets.FER2013")
+    def test_fer2013_key_returns_loaders(self, mock_cls):
+        from torch.utils.data import DataLoader
+
+        mock_cls.return_value._samples = [
+            (torch.randint(0, 256, (48, 48), dtype=torch.uint8), i % 7)
+            for i in range(5)
+        ]
+
+        from applications.datasets import create_dataset
+
+        train_loader, test_loader = create_dataset("fer2013")
+        assert isinstance(train_loader, DataLoader)
+        assert isinstance(test_loader, DataLoader)

@@ -12,7 +12,7 @@ import torch
 from tqdm import tqdm
 
 from applications.common import set_seed, evaluate_model, merge_seed_results
-from applications.datasets import create_dataset
+from applications.datasets import DATASETS, create_dataset
 from applications import default_hyperparams
 from applications.deep_linear.model import create_model, ARCHITECTURE
 from applications.deep_linear.training_plots import (
@@ -208,7 +208,7 @@ if __name__ == "__main__":
         description="Exp 0: establish baseline parameters with training dynamics"
     )
     parser.add_argument(
-        "dataset", choices=["mnist", "mnist_subset", "fashion_mnist", "cifar10"]
+        "dataset", choices=DATASETS
     )
     parser.add_argument("--epochs", type=int, default=10)
     args = parser.parse_args()
