@@ -8,3 +8,4 @@ torchvision~=0.20.1
 seaborn~=0.13.2
 pillow~=10.1.0
 pytest~=9.0.1
+kagglehub~=1.0.0
