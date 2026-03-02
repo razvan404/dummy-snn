@@ -14,7 +14,7 @@ DATASET_THRESHOLDS = {
 }
 
 SEEDS = [1, 2, 3, 4, 5]
-T_OBJECTIVES = [round(v * 0.1, 1) for v in range(11)]  # 0.0 to 1.0
+T_OBJECTIVES = [round(0.4 + v * 0.05, 2) for v in range(12)]  # 0.4 to 0.95
 
 
 def run(dataset: str, *, num_epochs: int = 30):
