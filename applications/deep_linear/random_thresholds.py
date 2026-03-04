@@ -1,3 +1,6 @@
+# ABOUTME: Random threshold control for post-training experiments.
+# ABOUTME: Replaces thresholds with N(mean, std) to test if per-neuron calibration matters.
+
 import argparse
 import json
 import os
@@ -7,7 +10,7 @@ from torch.utils.data import DataLoader
 
 from applications.common import set_seed, evaluate_model
 from applications.datasets import create_dataset
-from spiking import load_model
+from spiking import load_model, save_model
 
 
 def random_thresholds(
@@ -18,6 +21,7 @@ def random_thresholds(
     seed: int,
     output_dir: str,
     layer_idx: int = 0,
+    std: float = 1.0,
 ):
     """Replace a layer's thresholds with random values and evaluate."""
     set_seed(seed)
@@ -28,12 +32,13 @@ def random_thresholds(
     mean_thresh = layer.thresholds.mean().item()
 
     layer.thresholds.data = torch.normal(
-        mean_thresh, 1.0, size=layer.thresholds.shape
+        mean_thresh, std, size=layer.thresholds.shape
     ).clamp(min=1.0)
 
     train_m, val_m = evaluate_model(model, train_loader, val_loader, spike_shape)
 
     os.makedirs(output_dir, exist_ok=True)
+    save_model(model, f"{output_dir}/model.pth")
     metrics = {"train": train_m, "validation": val_m}
     with open(f"{output_dir}/metrics.json", "w") as f:
         json.dump(metrics, f, indent=4)
@@ -46,6 +51,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--output-dir", type=str, required=True)
     parser.add_argument("--layer-idx", type=int, default=0)
+    parser.add_argument("--std", type=float, default=1.0)
     args = parser.parse_args()
 
     train_loader, val_loader = create_dataset(args.dataset)
@@ -58,4 +64,5 @@ if __name__ == "__main__":
         seed=args.seed,
         output_dir=args.output_dir,
         layer_idx=args.layer_idx,
+        std=args.std,
     )

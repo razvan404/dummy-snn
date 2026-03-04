@@ -243,7 +243,7 @@ class TestApplyPbtr:
         model_after = load_model(f"{output_dir}/model.pth")
         assert not torch.equal(model_after.layers[0].thresholds, thresholds_before)
 
-    def test_saves_weights_figure(self, tmp_path, trained_model_path, fake_loaders):
+    def test_does_not_save_weights_figure(self, tmp_path, trained_model_path, fake_loaders):
         from applications.deep_linear.apply_pbtr import apply_pbtr
 
         output_dir = str(tmp_path / "pbtr_output")
@@ -255,7 +255,7 @@ class TestApplyPbtr:
             output_dir=output_dir,
             num_epochs=1,
         )
-        assert os.path.exists(f"{output_dir}/weights.png")
+        assert not os.path.exists(f"{output_dir}/weights.png")
 
     def test_saves_threshold_distribution(self, tmp_path, trained_model_path, fake_loaders):
         from applications.deep_linear.apply_pbtr import apply_pbtr
@@ -350,7 +350,7 @@ class TestRandomThresholds:
         assert "train" in metrics
         assert "validation" in metrics
 
-    def test_does_not_save_model(self, tmp_path, trained_model_path, fake_loaders):
+    def test_saves_model(self, tmp_path, trained_model_path, fake_loaders):
         from applications.deep_linear.random_thresholds import random_thresholds
 
         output_dir = str(tmp_path / "random_output")
@@ -361,7 +361,7 @@ class TestRandomThresholds:
             seed=200,
             output_dir=output_dir,
         )
-        assert not os.path.exists(f"{output_dir}/model.pth")
+        assert os.path.exists(f"{output_dir}/model.pth")
 
 
 class TestSaveWeightFigure:
