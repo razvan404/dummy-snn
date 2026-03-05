@@ -22,27 +22,23 @@ class Learner:
     def _select_neurons(self) -> torch.Tensor:
         if self.competition:
             return self.competition.neurons_to_learn(self.layer.spike_times)
-        return torch.nonzero(torch.isfinite(self.layer.spike_times), as_tuple=False)
+        return torch.nonzero(torch.isfinite(self.layer.spike_times), as_tuple=False).flatten()
 
     @torch.no_grad()
     def step(self, pre_spike_times: torch.Tensor) -> float:
-        neurons_to_learn = self._select_neurons()
+        neurons_to_learn = self._select_neurons().flatten()
         self.neurons_to_learn = neurons_to_learn
 
-        total_dw = 0.0
-        if self.learning_mechanism:
-            for neuron_idx in neurons_to_learn:
-                idx = neuron_idx.item()
-                updated_weights = self.learning_mechanism.update_weights(
-                    self.layer.weights[idx],
-                    pre_spike_times,
-                    self.layer.spike_times[idx],
-                )
-                total_dw += torch.mean(
-                    torch.abs(self.layer.weights[idx] - updated_weights)
-                ).item()
-                if self.layer.training:
-                    self.layer.weights[idx].copy_(updated_weights)
+        dw = 0.0
+        if self.learning_mechanism and len(neurons_to_learn) > 0:
+            weights_slice = self.layer.weights[neurons_to_learn]
+            post_spike_times = self.layer.spike_times[neurons_to_learn].unsqueeze(1)
+            updated_weights = self.learning_mechanism.update_weights(
+                weights_slice, pre_spike_times, post_spike_times,
+            )
+            dw = torch.mean(torch.abs(weights_slice - updated_weights)).item()
+            if self.layer.training:
+                self.layer.weights.data[neurons_to_learn] = updated_weights
 
         if self.threshold_adaptation and self.layer.training:
             self.layer.thresholds.copy_(
@@ -57,7 +53,7 @@ class Learner:
 
         if not self.learning_mechanism:
             return 0.0
-        return total_dw / len(neurons_to_learn) if len(neurons_to_learn) > 0 else 0.0
+        return dw
 
     def learning_rate_step(self):
         if self.learning_mechanism:

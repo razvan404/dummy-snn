@@ -31,7 +31,4 @@ class TargetTimestampAdaptation(ThresholdAdaptation):
         )
 
         updated_thresholds = current_thresholds - threshold_delta
-        return torch.maximum(
-            updated_thresholds,
-            torch.tensor(self.min_threshold, device=current_thresholds.device),
-        )
+        return torch.clamp(updated_thresholds, min=self.min_threshold)

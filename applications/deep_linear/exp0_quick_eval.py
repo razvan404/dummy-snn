@@ -17,6 +17,8 @@ PBTR_VARIANTS = [
     ("pbtr_tau01_homeo_sign", dict(tau=0.1, homeostatic=True, sign_only=True)),
 ]
 
+RANDOM_STDS = [0.1, 1.0, 3.0, 6.0]
+
 SEED = 100
 
 
@@ -94,15 +96,16 @@ def run(
         with open(metrics_path) as f:
             results[name] = json.load(f)
 
-    # Random control (tight perturbation to test if per-neuron calibration matters)
-    name = "random_tight"
-    output_dir = str(model_dir / name / f"seed_{SEED}")
-    metrics_path = f"{output_dir}/metrics.json"
-    if not force and Path(metrics_path).exists():
-        print(f"  skip {name} (already exists)")
-        with open(metrics_path) as f:
-            results[name] = json.load(f)
-    else:
+    # Random controls at multiple std values
+    for std_val in RANDOM_STDS:
+        name = f"random_std{std_val}"
+        output_dir = str(model_dir / name / f"seed_{SEED}")
+        metrics_path = f"{output_dir}/metrics.json"
+        if not force and Path(metrics_path).exists():
+            print(f"  skip {name} (already exists)")
+            with open(metrics_path) as f:
+                results[name] = json.load(f)
+            continue
         print(f"  running {name}...")
         random_thresholds(
             model_path=model_path,
@@ -110,7 +113,7 @@ def run(
             spike_shape=spike_shape,
             seed=SEED,
             output_dir=output_dir,
-            std=0.1,
+            std=std_val,
         )
         with open(metrics_path) as f:
             results[name] = json.load(f)
@@ -154,7 +157,8 @@ def run(
 
     all_methods = (
         [v[0] for v in PBTR_VARIANTS]
-        + ["activity_thresh", "weight_thresh", "random_tight"]
+        + ["activity_thresh", "weight_thresh"]
+        + [f"random_std{s}" for s in RANDOM_STDS]
         + [f"percentile_{p}" for p in [30, 50, 70]]
     )
     for name in all_methods:

@@ -46,7 +46,6 @@ class UnsupervisedTrainer:
         self,
         batch_idx: int,
         times: torch.Tensor,
-        label: str | None,
         /,
         split: str = "train",
     ):
@@ -71,8 +70,8 @@ class UnsupervisedTrainer:
             self.model.train()
         else:
             self.model.eval()
-        for batch_idx, (times, label) in enumerate(loader):
-            self.step_batch(batch_idx, times, label, split=split)
+        for batch_idx, (times, _label) in enumerate(loader):
+            self.step_batch(batch_idx, times, split=split)
 
     def step_epoch(self):
         self.learner.learning_rate_step()

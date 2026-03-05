@@ -14,12 +14,12 @@ class TrainingMonitor:
         self._batch_count = 0
         self.weight_diffs = {split: [] for split in splits}
 
-        self.some_threshold_indices = [1, 10, 56, 99]
+        self.SAMPLE_NEURON_INDICES = [1, 10, 56, 99]
         self.thresholds = {
             "mean": [],
             "min": [],
             "max": [],
-            **{f"idx_{idx}": [] for idx in self.some_threshold_indices},
+            **{f"idx_{idx}": [] for idx in self.SAMPLE_NEURON_INDICES},
             "list": [],
         }
 
@@ -56,7 +56,7 @@ class TrainingMonitor:
             self.thresholds["max"].append(thresholds.max().item())
             self.thresholds["list"].append(thresholds.tolist())
 
-            for idx in self.some_threshold_indices:
+            for idx in self.SAMPLE_NEURON_INDICES:
                 if idx < len(thresholds):
                     self.thresholds[f"idx_{idx}"].append(thresholds[idx].item())
 
@@ -64,7 +64,7 @@ class TrainingMonitor:
         self.neurons_activity[active] += 1.0
 
     def most_active_neurons(self, num_neurons: int = 20) -> torch.Tensor:
-        return torch.topk(self.model.thresholds, num_neurons).indices
+        return torch.topk(self.neurons_activity, num_neurons).indices
 
     def plot_weight_evolution(
         self, split: str, title: str = None, window_size: int = 100

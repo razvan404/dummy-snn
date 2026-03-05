@@ -28,6 +28,13 @@ class SpikingSequential(SpikingModule):
             times = layer.infer_spike_times(times)
         return times
 
+    def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
+        """Chain batched analytical spike time computation through all layers."""
+        times = input_times
+        for layer in self.layers:
+            times = layer.infer_spike_times_batch(times)
+        return times
+
     def reset(self):
         for layer in self.layers:
             layer.reset()

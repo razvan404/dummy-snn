@@ -1,6 +1,3 @@
-# ABOUTME: Post-training weight tuning using STDP on all spiking neurons.
-# ABOUTME: Runnable via python -m applications.single_layer.post_train_weights model.pth.
-
 import argparse
 import copy
 import json

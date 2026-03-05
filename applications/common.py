@@ -1,8 +1,6 @@
-import copy
 import json
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
@@ -25,17 +23,9 @@ def evaluate_model(model, train_loader, val_loader, image_shape, t_target=None):
     t_target: if provided, use Falez Eq 10 for feature conversion.
     """
     model = model.cpu()
-    val_model = copy.deepcopy(model)
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        train_future = pool.submit(
-            extract_features, model, train_loader, image_shape, t_target,
-        )
-        val_future = pool.submit(
-            extract_features, val_model, val_loader, image_shape, t_target,
-        )
-        X_train, y_train = train_future.result()
-        X_test, y_test = val_future.result()
+    X_train, y_train = extract_features(model, train_loader, image_shape, t_target)
+    X_test, y_test = extract_features(model, val_loader, image_shape, t_target)
 
     return evaluate_classifier(X_train, y_train, X_test, y_test)
 

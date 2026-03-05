@@ -8,7 +8,7 @@ class ConstantInitialization(ThresholdInitialization):
         super().__init__()
         self.threshold = threshold
 
-    def initialize(self, shape: tuple[int] | int = 1) -> torch.Tensor | float:
-        if shape == 1:
-            return self.threshold
-        return torch.ones(shape) * self.threshold
+    def initialize(self, shape: tuple[int] | int = 1) -> torch.Tensor:
+        if isinstance(shape, int):
+            shape = (shape,)
+        return torch.full(shape, self.threshold)

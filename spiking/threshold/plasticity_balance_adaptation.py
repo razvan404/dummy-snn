@@ -25,33 +25,6 @@ class PlasticityBalanceAdaptation(ThresholdAdaptation):
     def learning_rate_step(self):
         self.learning_rate *= self.decay_factor
 
-    def compute_balance(
-        self,
-        weights: torch.Tensor,
-        pre_spike_times: torch.Tensor,
-        post_spike_time: float,
-    ) -> float:
-        """
-        Each synapse contributes weight * exp(-|delta_t|/tau), with sign
-        determined by whether the pre-synaptic spike preceded (potentiation)
-        or followed (depression) the post-synaptic spike.
-        """
-        delta_t = post_spike_time - pre_spike_times
-
-        potentiation_mask = delta_t > 0
-        depression_mask = delta_t < 0
-
-        pot_contribution = (
-            weights[potentiation_mask]
-            * torch.exp(-delta_t[potentiation_mask] / self.tau)
-        ).sum()
-
-        dep_contribution = (
-            weights[depression_mask] * torch.exp(delta_t[depression_mask] / self.tau)
-        ).sum()
-
-        return (pot_contribution - dep_contribution).item()
-
     def update(
         self, current_thresholds: torch.Tensor, spike_times: torch.Tensor, **kwargs
     ) -> torch.Tensor:

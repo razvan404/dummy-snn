@@ -4,6 +4,36 @@ import torch
 from spiking.preprocessing import discretize_times
 
 
+class TestDifferenceOfGaussians:
+    def test_output_shape_and_channels(self):
+        from spiking.preprocessing.difference_of_gaussians import (
+            apply_difference_of_gaussians_filter,
+        )
+
+        image = torch.rand(8, 8)
+        result = apply_difference_of_gaussians_filter(image)
+        assert result.shape == (2, 8, 8)
+
+    def test_on_off_channels_non_negative(self):
+        from spiking.preprocessing.difference_of_gaussians import (
+            apply_difference_of_gaussians_filter,
+        )
+
+        image = torch.rand(8, 8)
+        result = apply_difference_of_gaussians_filter(image)
+        assert (result >= 0).all()
+
+    def test_deterministic(self):
+        from spiking.preprocessing.difference_of_gaussians import (
+            apply_difference_of_gaussians_filter,
+        )
+
+        image = torch.rand(8, 8)
+        r1 = apply_difference_of_gaussians_filter(image)
+        r2 = apply_difference_of_gaussians_filter(image)
+        assert torch.equal(r1, r2)
+
+
 class TestDiscretizeTimes:
     def test_finite_values_quantized_to_bin_edges(self):
         """Values in [0, 1) should snap to floor(v * num_bins) / num_bins."""

@@ -110,7 +110,7 @@ def benchmark_step_batch(layer, learner, samples):
     elapsed = 0.0
     for i, times in enumerate(samples):
         t0 = time.perf_counter()
-        trainer.step_batch(i, times.unsqueeze(0), None, split="train")
+        trainer.step_batch(i, times.unsqueeze(0), split="train")
         elapsed += time.perf_counter() - t0
     return elapsed
 

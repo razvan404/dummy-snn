@@ -14,6 +14,8 @@ SERIES_COLORS = {
     "baseline": "#1f77b4",
     "pbtr": "#ff7f0e",
     "pbtr_sign": "#2ca02c",
+    "random_thresh": "#d62728",
+    "uniform_thresh": "#9467bd",
 }
 
 
@@ -48,9 +50,9 @@ def _collect_pbtr_accuracies(variant_dir: Path, subdir: str, split: str) -> list
 def load_comparison_data(
     base_dir: Path, split: str
 ) -> list[tuple[float, dict[str, list[float]]]]:
-    """Load baseline and PBTR accuracies for all variants under base_dir.
+    """Load baseline, PBTR, and random threshold accuracies for all variants under base_dir.
 
-    Returns a sorted list of (param_value, {"baseline": [...], "pbtr": [...], "pbtr_sign": [...]}).
+    Returns a sorted list of (param_value, {series_name: [accuracies]}).
     Only includes series that have data.
     """
     variants = []
@@ -75,6 +77,14 @@ def load_comparison_data(
         pbtr_sign = _collect_pbtr_accuracies(variant_path, "pbtr_sign", split)
         if pbtr_sign:
             series["pbtr_sign"] = pbtr_sign
+
+        random_thresh = _collect_pbtr_accuracies(variant_path, "random_thresh", split)
+        if random_thresh:
+            series["random_thresh"] = random_thresh
+
+        uniform_thresh = _collect_pbtr_accuracies(variant_path, "uniform_thresh", split)
+        if uniform_thresh:
+            series["uniform_thresh"] = uniform_thresh
 
         variants.append((param_value, series))
 
@@ -137,7 +147,7 @@ def plot_comparison(
     ax.set_xticklabels(tick_labels)
     ax.set_ylabel(f"{split} accuracy")
     ax.set_xlabel("parameter value")
-    ax.set_title(f"{network_type}: baseline vs PBTR ({split} accuracy)")
+    ax.set_title(f"{network_type}: post-training comparison ({split} accuracy)")
 
     legend_handles = [
         plt.Rectangle((0, 0), 1, 1, facecolor=color, alpha=0.7, label=name)

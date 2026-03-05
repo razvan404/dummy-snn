@@ -414,6 +414,167 @@ class TestInferSpikeTimes:
                 f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
             )
 
+class TestInferSpikeTimesBatch:
+    def _make_layer_with_params(self, weights, thresholds, refractory_period=float("inf")):
+        """Create a layer with exact weights and thresholds."""
+        layer = IntegrateAndFireLayer(
+            num_inputs=weights.shape[1],
+            num_outputs=weights.shape[0],
+            threshold_initialization=ConstantInitialization(1.0),
+            refractory_period=refractory_period,
+        )
+        with torch.no_grad():
+            layer.weights.copy_(weights)
+            layer.thresholds.copy_(thresholds)
+        return layer
+
+    def test_single_neuron_crosses_threshold(self):
+        weights = torch.tensor([[2.0]])
+        thresholds = torch.tensor([1.0])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        single = layer.infer_spike_times(torch.tensor([0.5]))
+        batch = layer.infer_spike_times_batch(torch.tensor([[0.5]]))
+
+        assert batch.shape == (1, 1)
+        torch.testing.assert_close(batch[0], single)
+
+    def test_below_threshold_returns_inf(self):
+        weights = torch.tensor([[0.5]])
+        thresholds = torch.tensor([1.0])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        single = layer.infer_spike_times(torch.tensor([0.3]))
+        batch = layer.infer_spike_times_batch(torch.tensor([[0.3]]))
+
+        assert torch.isinf(batch[0, 0])
+        torch.testing.assert_close(batch[0], single)
+
+    def test_cumulative_crossing(self):
+        weights = torch.tensor([[0.6, 0.6]])
+        thresholds = torch.tensor([1.0])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        single = layer.infer_spike_times(torch.tensor([0.1, 0.3]))
+        batch = layer.infer_spike_times_batch(torch.tensor([[0.1, 0.3]]))
+
+        torch.testing.assert_close(batch[0], single)
+
+    def test_simultaneous_inputs_grouped(self):
+        weights = torch.tensor([[0.6, 0.6]])
+        thresholds = torch.tensor([1.0])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        single = layer.infer_spike_times(torch.tensor([0.2, 0.2]))
+        batch = layer.infer_spike_times_batch(torch.tensor([[0.2, 0.2]]))
+
+        torch.testing.assert_close(batch[0], single)
+
+    def test_all_inf_inputs_returns_all_inf(self):
+        weights = torch.tensor([[1.0, 1.0]])
+        thresholds = torch.tensor([0.5])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        inp = torch.tensor([[float("inf"), float("inf")]])
+        batch = layer.infer_spike_times_batch(inp)
+
+        assert torch.all(torch.isinf(batch))
+
+    def test_batch_matches_individual_across_seeds(self):
+        """Process multiple random samples as a batch, verify each row matches single-sample."""
+        for seed in range(5):
+            torch.manual_seed(seed)
+            layer = make_layer(num_inputs=32, num_outputs=10, avg_threshold=5.0)
+            inputs = torch.rand(5, 32)
+
+            batch_result = layer.infer_spike_times_batch(inputs)
+
+            for i in range(5):
+                single = layer.infer_spike_times(inputs[i])
+                torch.testing.assert_close(batch_result[i], single, atol=1e-6, rtol=0)
+
+    def test_sequential_batch_matches_individual(self):
+        """Multi-layer batched must match per-sample analytical."""
+        from spiking.layers.sequential import SpikingSequential
+
+        for seed in range(5):
+            torch.manual_seed(seed)
+            layer1 = make_layer(num_inputs=32, num_outputs=16, avg_threshold=5.0)
+            layer2 = make_layer(num_inputs=16, num_outputs=10, avg_threshold=5.0)
+            model = SpikingSequential(layer1, layer2)
+
+            inputs = torch.rand(5, 32)
+            batch_result = model.infer_spike_times_batch(inputs)
+
+            for i in range(5):
+                single = model.infer_spike_times(inputs[i])
+                torch.testing.assert_close(batch_result[i], single, atol=1e-6, rtol=0)
+
+    def test_extract_features_batched_matches_original(self):
+        """Batched extract_features must match per-sample infer_spike_times loop."""
+        from spiking.evaluation.feature_extraction import extract_features
+
+        torch.manual_seed(42)
+        shape = (2, 4, 4)
+        num_inputs = 2 * 4 * 4
+        num_samples = 10
+        layer = make_layer(num_inputs=num_inputs, num_outputs=5, avg_threshold=5.0)
+        dataset = FakeDataset(num_samples=num_samples, shape=shape)
+
+        # Ground truth: per-sample analytical inference
+        expected_X = []
+        for i in range(num_samples):
+            times, label = dataset[i]
+            spike_times = layer.infer_spike_times(times.flatten())
+            expected_X.append(torch.clamp(1.0 - spike_times, min=0, max=1.0).numpy())
+        expected_X = np.array(expected_X)
+
+        loader = DataLoader(dataset, batch_size=None, shuffle=False)
+        actual_X, _ = extract_features(layer, loader, shape)
+
+        np.testing.assert_allclose(actual_X, expected_X, atol=1e-6)
+
+
+class TestConvertToSpikes:
+    def test_basic_conversion(self):
+        from spiking.spike_convertor import convert_to_spikes
+
+        times = torch.tensor([
+            [[0.1, 0.3], [float("inf"), 0.2]],  # k=0
+        ])
+        spikes = convert_to_spikes(times)
+
+        assert len(spikes) == 3
+        # Should be sorted by time
+        assert spikes[0].time == pytest.approx(0.1)
+        assert spikes[1].time == pytest.approx(0.2)
+        assert spikes[2].time == pytest.approx(0.3)
+        # Check coordinates: Spike(x=j, y=i, z=k, time=...)
+        assert (spikes[0].z, spikes[0].y, spikes[0].x) == (0, 0, 0)
+        assert (spikes[1].z, spikes[1].y, spikes[1].x) == (0, 1, 1)
+        assert (spikes[2].z, spikes[2].y, spikes[2].x) == (0, 0, 1)
+
+    def test_all_inf_returns_empty(self):
+        from spiking.spike_convertor import convert_to_spikes
+
+        times = torch.full((2, 3, 3), float("inf"))
+        assert convert_to_spikes(times) == []
+
+    def test_multi_channel(self):
+        from spiking.spike_convertor import convert_to_spikes
+
+        times = torch.full((2, 2, 2), float("inf"))
+        times[0, 0, 1] = 0.5
+        times[1, 1, 0] = 0.3
+
+        spikes = convert_to_spikes(times)
+        assert len(spikes) == 2
+        assert spikes[0].time == pytest.approx(0.3)
+        assert spikes[0].z == 1
+        assert spikes[1].time == pytest.approx(0.5)
+        assert spikes[1].z == 0
+
+
 class TestIterateSpikes:
     def test_yields_one_entry_per_unique_time(self):
         """iterate_spikes should yield one entry per unique spike time."""

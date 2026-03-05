@@ -4,12 +4,18 @@ from .spike import Spike
 
 
 def convert_to_spikes(times: torch.Tensor) -> list[Spike]:
-    spikes = []
-    for k in range(times.shape[0]):
-        for i in range(times.shape[1]):
-            for j in range(times.shape[2]):
-                time = times[k, i, j]
-                if not torch.isinf(time):
-                    spikes.append(Spike(x=j, y=i, z=k, time=time.item()))
+    finite_mask = torch.isfinite(times)
+    if not finite_mask.any():
+        return []
 
-    return sorted(spikes, key=lambda spike: spike.time)
+    indices = torch.nonzero(finite_mask, as_tuple=False)  # (N, 3) for k, i, j
+    spike_times = times[finite_mask]
+
+    sort_order = spike_times.argsort()
+    indices = indices[sort_order]
+    spike_times = spike_times[sort_order]
+
+    return [
+        Spike(x=idx[2].item(), y=idx[1].item(), z=idx[0].item(), time=t.item())
+        for idx, t in zip(indices, spike_times)
+    ]

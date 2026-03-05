@@ -117,6 +117,39 @@ class IntegrateAndFireLayer(SpikingModule):
 
         return result
 
+    @torch.no_grad()
+    def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
+        """Batched analytical spike time inference.
+
+        input_times: (B, num_inputs)
+        Returns: (B, num_outputs)
+        """
+        B, I = input_times.shape
+        result = torch.full((B, self.num_outputs), float("inf"), dtype=input_times.dtype)
+
+        finite_mask = torch.isfinite(input_times)
+        if not finite_mask.any():
+            return result
+
+        unique_times = input_times[finite_mask].unique().sort()[0]
+
+        cum_potential = torch.zeros((B, self.num_outputs), dtype=input_times.dtype)
+        not_yet_spiked = torch.ones((B, self.num_outputs), dtype=torch.bool)
+
+        for t in unique_times:
+            active = (input_times == t).float()  # (B, I)
+            contrib = active @ self.weights.T  # (B, O)
+            cum_potential += contrib
+
+            crossed = (cum_potential >= self.thresholds) & not_yet_spiked
+            result[crossed] = t.item()
+            not_yet_spiked &= ~crossed
+
+            if not not_yet_spiked.any():
+                break
+
+        return result
+
     @property
     def spike_times(self) -> torch.Tensor:
         return self._spike_times

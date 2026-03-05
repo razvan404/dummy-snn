@@ -177,6 +177,53 @@ class TestLearnerStep:
         ), "Thresholds should not change without adaptation"
 
 
+class TestLearnerStepVectorized:
+    def test_vectorized_step_matches_per_neuron_loop(self):
+        """Vectorized step() must produce identical results to per-neuron loop."""
+        torch.manual_seed(42)
+        layer = make_layer(num_inputs=20, num_outputs=8)
+        stdp = make_stdp()
+        learner = Learner(layer, stdp)
+        layer.train()
+
+        # Multiple neurons spike
+        layer._spike_times[0] = 0.3
+        layer._spike_times[2] = 0.5
+        layer._spike_times[4] = 0.7
+        pre_spike_times = torch.rand(layer.num_inputs) * 0.2
+
+        weights_before = layer.weights.detach().clone()
+        dw = learner.step(pre_spike_times)
+
+        # Reference: per-neuron loop
+        ref_layer = make_layer(num_inputs=20, num_outputs=8)
+        with torch.no_grad():
+            ref_layer.weights.copy_(weights_before)
+            ref_layer.thresholds.copy_(layer.thresholds)
+        ref_layer._spike_times = torch.full((8,), float("inf"))
+        ref_layer._spike_times[0] = 0.3
+        ref_layer._spike_times[2] = 0.5
+        ref_layer._spike_times[4] = 0.7
+        ref_layer.train()
+
+        neurons = torch.tensor([0, 2, 4])
+        ref_total_dw = 0.0
+        ref_stdp = STDP(tau_pre=0.1, tau_post=0.1, max_pre_spike_time=1.0, learning_rate=0.1)
+        with torch.no_grad():
+            for idx in neurons:
+                i = idx.item()
+                updated = ref_stdp.update_weights(
+                    weights_before[i], pre_spike_times, ref_layer.spike_times[i]
+                )
+                ref_total_dw += torch.mean(torch.abs(weights_before[i] - updated)).item()
+                ref_layer.weights[i].copy_(updated)
+
+        ref_dw = ref_total_dw / len(neurons)
+
+        assert abs(dw - ref_dw) < 1e-6, f"dw mismatch: {dw} vs {ref_dw}"
+        assert torch.allclose(layer.weights, ref_layer.weights, atol=1e-6)
+
+
 class TestLearnerNeuronsToLearn:
     def test_neurons_to_learn_set_after_step(self):
         """step() should store the selected neurons on the learner instance."""
@@ -311,42 +358,6 @@ class TestPreSpikeResolution:
 
 
 class TestPlasticityBalanceAdaptation:
-    def test_compute_balance_potentiation_dominant(self):
-        """When pre spikes arrive before post spike, potentiation dominates."""
-        from spiking.threshold import PlasticityBalanceAdaptation
-
-        adaptation = PlasticityBalanceAdaptation(
-            tau=20.0,
-            learning_rate=0.1,
-            min_threshold=1.0,
-            max_threshold=100.0,
-        )
-
-        weights = torch.tensor([0.5, 0.5, 0.5])
-        pre_spike_times = torch.tensor([0.1, 0.2, 0.3])  # all before post
-        post_spike_time = 0.5
-
-        balance = adaptation.compute_balance(weights, pre_spike_times, post_spike_time)
-        assert balance > 0, "Balance should be positive when pre spikes precede post"
-
-    def test_compute_balance_depression_dominant(self):
-        """When pre spikes arrive after post spike, depression dominates."""
-        from spiking.threshold import PlasticityBalanceAdaptation
-
-        adaptation = PlasticityBalanceAdaptation(
-            tau=20.0,
-            learning_rate=0.1,
-            min_threshold=1.0,
-            max_threshold=100.0,
-        )
-
-        weights = torch.tensor([0.5, 0.5, 0.5])
-        pre_spike_times = torch.tensor([0.7, 0.8, 0.9])  # all after post
-        post_spike_time = 0.5
-
-        balance = adaptation.compute_balance(weights, pre_spike_times, post_spike_time)
-        assert balance < 0, "Balance should be negative when pre spikes follow post"
-
     def test_update_adjusts_thresholds_for_spiking_neurons(self):
         """update() should only modify thresholds of neurons that spiked."""
         from spiking.threshold import PlasticityBalanceAdaptation
@@ -530,107 +541,6 @@ class TestPlasticityBalanceAdaptation:
         )
         assert adaptation.sign_only is False
 
-    def test_vectorized_update_matches_per_neuron_loop(self):
-        """Vectorized update() must match per-neuron compute_balance() loop."""
-        from spiking.threshold import PlasticityBalanceAdaptation
-
-        torch.manual_seed(123)
-        num_neurons = 8
-        num_inputs = 20
-
-        adaptation = PlasticityBalanceAdaptation(
-            tau=20.0,
-            learning_rate=0.1,
-            min_threshold=1.0,
-            max_threshold=100.0,
-        )
-
-        current_thresholds = torch.rand(num_neurons) * 10 + 5
-        weights = torch.rand(num_neurons, num_inputs)
-        pre_spike_times = torch.rand(num_inputs) * 0.8
-        # Some neurons spiked, some didn't
-        spike_times = torch.full((num_neurons,), float("inf"))
-        spike_times[0] = 0.3
-        spike_times[2] = 0.5
-        spike_times[4] = 0.7
-        spike_times[6] = 0.1
-
-        # Reference: per-neuron loop using compute_balance()
-        expected_deltas = torch.zeros_like(current_thresholds)
-        spiked_mask = torch.isfinite(spike_times)
-        spiked_indices = torch.nonzero(spiked_mask, as_tuple=True)[0]
-        for neuron_idx in spiked_indices:
-            idx = neuron_idx.item()
-            balance = adaptation.compute_balance(
-                weights[idx], pre_spike_times, spike_times[idx].item()
-            )
-            expected_deltas[idx] = adaptation.learning_rate * balance
-        expected = torch.clamp(
-            current_thresholds - expected_deltas,
-            adaptation.min_threshold,
-            adaptation.max_threshold,
-        )
-
-        # Actual: vectorized update()
-        actual = adaptation.update(
-            current_thresholds.clone(),
-            spike_times,
-            weights=weights,
-            pre_spike_times=pre_spike_times,
-        )
-
-        assert torch.allclose(actual, expected, atol=1e-6)
-
-    def test_vectorized_update_sign_only_matches_loop(self):
-        """Vectorized update() with sign_only=True must match per-neuron loop."""
-        from spiking.threshold import PlasticityBalanceAdaptation
-
-        torch.manual_seed(456)
-        num_neurons = 6
-        num_inputs = 15
-
-        adaptation = PlasticityBalanceAdaptation(
-            tau=20.0,
-            learning_rate=0.1,
-            min_threshold=1.0,
-            max_threshold=100.0,
-            sign_only=True,
-        )
-
-        current_thresholds = torch.rand(num_neurons) * 10 + 5
-        weights = torch.rand(num_neurons, num_inputs)
-        pre_spike_times = torch.rand(num_inputs) * 0.8
-        spike_times = torch.full((num_neurons,), float("inf"))
-        spike_times[1] = 0.4
-        spike_times[3] = 0.6
-        spike_times[5] = 0.2
-
-        # Reference: per-neuron loop
-        expected_deltas = torch.zeros_like(current_thresholds)
-        spiked_mask = torch.isfinite(spike_times)
-        spiked_indices = torch.nonzero(spiked_mask, as_tuple=True)[0]
-        for neuron_idx in spiked_indices:
-            idx = neuron_idx.item()
-            balance = adaptation.compute_balance(
-                weights[idx], pre_spike_times, spike_times[idx].item()
-            )
-            direction = 1.0 if balance > 0 else (-1.0 if balance < 0 else 0.0)
-            expected_deltas[idx] = adaptation.learning_rate * direction
-        expected = torch.clamp(
-            current_thresholds - expected_deltas,
-            adaptation.min_threshold,
-            adaptation.max_threshold,
-        )
-
-        actual = adaptation.update(
-            current_thresholds.clone(),
-            spike_times,
-            weights=weights,
-            pre_spike_times=pre_spike_times,
-        )
-
-        assert torch.allclose(actual, expected, atol=1e-6)
-
     def test_through_learner_step(self):
         """PlasticityBalanceAdaptation works end-to-end through Learner.step()."""
         from spiking.threshold import PlasticityBalanceAdaptation
@@ -715,7 +625,7 @@ class TestUnsupervisedTrainerCallback:
 
         times = torch.rand(1, 1, 10) * 0.5
 
-        trainer.step_batch(0, times, "0", split="train")
+        trainer.step_batch(0, times, split="train")
 
         assert len(calls) == 1
         assert calls[0][0] == 0
@@ -1029,6 +939,51 @@ class TestCompetitiveThresholdAdaptation:
 
         with pytest.raises(ValueError):
             adaptation.update(thresholds, spike_times)
+
+
+class TestThresholdInitializationAlwaysReturnsTensor:
+    def test_constant_init_single_returns_tensor(self):
+        from spiking.threshold import ConstantInitialization
+
+        init = ConstantInitialization(threshold=5.0)
+        result = init.initialize((1,))
+        assert isinstance(result, torch.Tensor)
+
+    def test_normal_init_single_returns_tensor(self):
+        from spiking.threshold import NormalInitialization
+
+        torch.manual_seed(42)
+        init = NormalInitialization(avg_threshold=5.0, min_threshold=1.0, std_dev=0.1)
+        result = init.initialize((1,))
+        assert isinstance(result, torch.Tensor)
+
+    def test_constant_init_multi_returns_tensor(self):
+        from spiking.threshold import ConstantInitialization
+
+        init = ConstantInitialization(threshold=5.0)
+        result = init.initialize((10,))
+        assert isinstance(result, torch.Tensor)
+        assert result.shape == (10,)
+
+    def test_normal_init_multi_returns_tensor(self):
+        from spiking.threshold import NormalInitialization
+
+        torch.manual_seed(42)
+        init = NormalInitialization(avg_threshold=5.0, min_threshold=1.0, std_dev=0.1)
+        result = init.initialize((10,))
+        assert isinstance(result, torch.Tensor)
+        assert result.shape == (10,)
+
+
+class TestCompetitiveThresholdAdaptationDevice:
+    def test_min_threshold_stored_as_float(self):
+        """min_threshold should be a float, not a tensor, to avoid device mismatches."""
+        from spiking.threshold import CompetitiveThresholdAdaptation
+
+        adaptation = CompetitiveThresholdAdaptation(
+            min_threshold=1.0, learning_rate=5.0
+        )
+        assert isinstance(adaptation.min_threshold, float)
 
 
 class TestTargetTimestampAdaptation:

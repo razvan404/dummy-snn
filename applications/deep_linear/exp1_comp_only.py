@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 from applications.common import merge_seed_results
 from applications.datasets import DATASETS, create_dataset
+from applications.deep_linear.progress_callbacks import make_progress_callbacks
 from applications.deep_linear.train import train_layer
 
 SEED_START = 1
@@ -40,8 +41,11 @@ def run(dataset: str, *, num_epochs: int = 10, force: bool = False, num_seeds: i
                     tqdm.write(f"  skip thresh={thresh} seed={seed} (already complete)")
                     pbar.update(1)
                     continue
-                pbar.set_postfix_str(f"thresh={thresh} seed={seed}")
-                epoch = [1]
+                label = f"thresh={thresh} seed={seed}"
+                pbar.set_postfix_str(label)
+                on_batch_end, on_epoch_end = make_progress_callbacks(
+                    pbar, label, num_epochs, {"train": train_steps},
+                )
                 train_layer(
                     dataset_loaders=(train_loader, val_loader),
                     spike_shape=spike_shape,
@@ -49,14 +53,8 @@ def run(dataset: str, *, num_epochs: int = 10, force: bool = False, num_seeds: i
                     avg_threshold=thresh,
                     output_dir=output_dir,
                     num_epochs=num_epochs,
-                    on_batch_end=lambda idx, _dw, _split: (
-                        pbar.set_postfix_str(
-                            f"thresh={thresh} seed={seed} epoch={epoch[0]}/{num_epochs} {idx+1}/{train_steps}"
-                        )
-                        if idx % 200 == 0
-                        else None
-                    ),
-                    on_epoch_end=lambda e, _total: epoch.__setitem__(0, e + 1),
+                    on_batch_end=on_batch_end,
+                    on_epoch_end=on_epoch_end,
                 )
                 pbar.update(1)
             merge_seed_results(base_dir)

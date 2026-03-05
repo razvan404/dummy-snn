@@ -1,6 +1,3 @@
-# ABOUTME: Post-training threshold tuning using PlasticityBalanceAdaptation.
-# ABOUTME: Runnable via python -m applications.single_layer.post_train_thresholds model.pth.
-
 import argparse
 import copy
 import json

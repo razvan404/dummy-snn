@@ -9,6 +9,7 @@ from tqdm import tqdm
 from applications.common import merge_seed_results
 from applications.datasets import create_dataset
 from applications.deep_linear.apply_pbtr import apply_pbtr
+from applications.deep_linear.progress_callbacks import make_progress_callbacks
 
 SEED_START = 100
 DEFAULT_NUM_SEEDS = 3
@@ -62,7 +63,9 @@ def run(
                     continue
                 label = f"{seed_dir.name} seed={seed}"
                 pbar.set_postfix_str(label)
-                epoch = [1]
+                on_batch_end, on_epoch_end = make_progress_callbacks(
+                    pbar, label, num_epochs, steps,
+                )
                 apply_pbtr(
                     model_path=str(model_path),
                     dataset_loaders=(train_loader, val_loader),
@@ -72,14 +75,8 @@ def run(
                     num_epochs=num_epochs,
                     t_target=t_target,
                     sign_only=sign_only,
-                    on_batch_end=lambda idx, _dw, split: (
-                        pbar.set_postfix_str(
-                            f"{label} epoch={epoch[0]}/{num_epochs} {split} {idx+1}/{steps.get(split, '?')}"
-                        )
-                        if idx % 200 == 0
-                        else None
-                    ),
-                    on_epoch_end=lambda e, _total: epoch.__setitem__(0, e + 1),
+                    on_batch_end=on_batch_end,
+                    on_epoch_end=on_epoch_end,
                 )
                 pbar.update(1)
             merge_seed_results(str(pbtr_dir))

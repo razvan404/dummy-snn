@@ -2,17 +2,20 @@ import torch
 import torch.nn.functional as F
 
 
-def gaussian_blur(img: torch.Tensor, sigma: float):
-    # Create 1D Gaussian kernel
+def _make_gaussian_kernel(sigma: float, device: torch.device) -> torch.Tensor:
+    """Create a 1D Gaussian kernel for separable convolution."""
     size = int(6 * sigma + 1)
     if size % 2 == 0:
         size += 1
-    coords = torch.arange(size, dtype=torch.float32, device=img.device) - size // 2
+    coords = torch.arange(size, dtype=torch.float32, device=device) - size // 2
     kernel = torch.exp(-(coords**2) / (2 * sigma**2))
     kernel = kernel / kernel.sum()
-    kernel = kernel.view(1, 1, -1)
+    return kernel.view(1, 1, -1)
 
-    # Apply separable convolution: first horizontal, then vertical
+
+def _apply_blur(img: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
+    """Apply separable Gaussian blur using a precomputed 1D kernel."""
+    size = kernel.shape[-1]
     img = F.conv2d(img.unsqueeze(0), kernel.unsqueeze(2), padding=(0, size // 2))
     img = F.conv2d(img, kernel.unsqueeze(3), padding=(size // 2, 0))
     return img.squeeze(0)
@@ -33,8 +36,11 @@ def apply_difference_of_gaussians_filter(
     if image.ndim == 2:
         image = image.unsqueeze(0)
 
-    gaussian_center = gaussian_blur(image, sigma_center)
-    gaussian_surround = gaussian_blur(image, sigma_surround)
+    kernel_center = _make_gaussian_kernel(sigma_center, image.device)
+    kernel_surround = _make_gaussian_kernel(sigma_surround, image.device)
+
+    gaussian_center = _apply_blur(image, kernel_center)
+    gaussian_surround = _apply_blur(image, kernel_surround)
 
     dog = gaussian_center - gaussian_surround
     x_on = torch.clamp(dog, min=0)

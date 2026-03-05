@@ -1,5 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.base import TransformerMixin, ClassifierMixin
 from sklearn.decomposition import PCA
 from sklearn.svm import LinearSVC
@@ -39,6 +38,8 @@ def plot_reduced_features(
 
     Returns the fitted reducer for reuse on other splits.
     """
+    import matplotlib.pyplot as plt
+
     if reducer is None:
         reducer = PCA(n_components=2)
         reducer.fit(X)

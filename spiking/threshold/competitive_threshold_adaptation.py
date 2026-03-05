@@ -11,7 +11,7 @@ class CompetitiveThresholdAdaptation(ThresholdAdaptation):
         decay_factor: float = 1.0,
     ):
         super().__init__()
-        self.min_threshold = torch.tensor(min_threshold)
+        self.min_threshold = float(min_threshold)
         self.learning_rate = learning_rate
         self.decay_factor = decay_factor
 
@@ -39,7 +39,6 @@ class CompetitiveThresholdAdaptation(ThresholdAdaptation):
         if losers_divisor > 0:
             threshold_updates[losers_mask] *= -self.learning_rate / losers_divisor
 
-        updated_thresholds = torch.maximum(
-            self.min_threshold, current_thresholds + threshold_updates
+        return torch.clamp(
+            current_thresholds + threshold_updates, min=self.min_threshold
         )
-        return updated_thresholds

@@ -11,13 +11,9 @@ class NormalInitialization(ThresholdInitialization):
         self.min_threshold = min_threshold
         self.std_dev = std_dev
 
-    def initialize(self, shape: tuple[int] | int = 1) -> torch.Tensor | float:
+    def initialize(self, shape: tuple[int] | int = 1) -> torch.Tensor:
         if isinstance(shape, int):
             shape = (shape,)
 
         thresholds = torch.normal(mean=self.avg_threshold, std=self.std_dev, size=shape)
-        thresholds = torch.clamp(thresholds, min=self.min_threshold)
-
-        if shape == (1,):
-            return thresholds.item()
-        return thresholds
+        return torch.clamp(thresholds, min=self.min_threshold)
