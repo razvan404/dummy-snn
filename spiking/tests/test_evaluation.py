@@ -510,6 +510,22 @@ class TestInferSpikeTimesBatch:
                 single = model.infer_spike_times(inputs[i])
                 torch.testing.assert_close(batch_result[i], single, atol=1e-6, rtol=0)
 
+    def test_batch_with_mixed_inf_finite(self):
+        """Batch with some samples having many inf inputs still matches per-sample."""
+        torch.manual_seed(99)
+        layer = make_layer(num_inputs=64, num_outputs=20, avg_threshold=5.0)
+
+        inputs = torch.rand(16, 64)
+        # Make ~30% of inputs inf, varying per sample
+        mask = torch.rand(16, 64) < 0.3
+        inputs[mask] = float("inf")
+
+        batch_result = layer.infer_spike_times_batch(inputs)
+
+        for i in range(16):
+            single = layer.infer_spike_times(inputs[i])
+            torch.testing.assert_close(batch_result[i], single, atol=1e-6, rtol=0)
+
     def test_extract_features_batched_matches_original(self):
         """Batched extract_features must match per-sample infer_spike_times loop."""
         from spiking.evaluation.feature_extraction import extract_features
@@ -533,6 +549,88 @@ class TestInferSpikeTimesBatch:
         actual_X, _ = extract_features(layer, loader, shape)
 
         np.testing.assert_allclose(actual_X, expected_X, atol=1e-6)
+
+
+class TestPrecomputeCumulativePotentials:
+    def _make_layer_with_params(self, weights, thresholds):
+        layer = IntegrateAndFireLayer(
+            num_inputs=weights.shape[1],
+            num_outputs=weights.shape[0],
+            threshold_initialization=ConstantInitialization(1.0),
+            refractory_period=float("inf"),
+        )
+        with torch.no_grad():
+            layer.weights.copy_(weights)
+            layer.thresholds.copy_(thresholds)
+        return layer
+
+    def test_roundtrip_matches_infer_spike_times(self):
+        """precompute + resolve must match infer_spike_times."""
+        torch.manual_seed(42)
+        layer = make_layer(num_inputs=32, num_outputs=10, avg_threshold=5.0)
+
+        for seed in range(5):
+            torch.manual_seed(seed)
+            input_times = torch.rand(32)
+
+            expected = layer.infer_spike_times(input_times)
+            precomputed = layer.precompute_cumulative_potentials(input_times)
+            actual = IntegrateAndFireLayer.spike_times_from_cumulative_potentials(
+                *precomputed, layer.thresholds
+            )
+
+            torch.testing.assert_close(actual, expected, atol=1e-6, rtol=0)
+
+    def test_all_inf_returns_none(self):
+        weights = torch.tensor([[1.0, 1.0]])
+        thresholds = torch.tensor([0.5])
+        layer = self._make_layer_with_params(weights, thresholds)
+
+        result = layer.precompute_cumulative_potentials(
+            torch.tensor([float("inf"), float("inf")])
+        )
+        assert result is None
+
+    def test_scaled_cumulative_matches_scaled_weights(self):
+        """factor * cum_at_boundaries must give same spike times as scaled weights."""
+        torch.manual_seed(42)
+        layer = make_layer(num_inputs=64, num_outputs=20, avg_threshold=5.0)
+        input_times = torch.rand(64)
+
+        precomputed = layer.precompute_cumulative_potentials(input_times)
+        unique_times, cum_at_boundaries = precomputed
+
+        for factor in [0.5, 0.8, 1.0, 1.2, 2.0]:
+            # Scale weights, compute spike times directly
+            with torch.no_grad():
+                original_weights = layer.weights.clone()
+                layer.weights.copy_(original_weights * factor)
+                expected = layer.infer_spike_times(input_times)
+                layer.weights.copy_(original_weights)
+
+            # Use precomputed with scaled cumulative potentials
+            actual = IntegrateAndFireLayer.spike_times_from_cumulative_potentials(
+                unique_times, cum_at_boundaries * factor, layer.thresholds
+            )
+
+            torch.testing.assert_close(actual, expected, atol=1e-6, rtol=0), (
+                f"Mismatch at factor={factor}"
+            )
+
+    def test_with_mixed_inf_finite(self):
+        """Precomputed roundtrip works when some inputs are inf."""
+        torch.manual_seed(99)
+        layer = make_layer(num_inputs=64, num_outputs=20, avg_threshold=5.0)
+        input_times = torch.rand(64)
+        input_times[torch.rand(64) < 0.3] = float("inf")
+
+        expected = layer.infer_spike_times(input_times)
+        precomputed = layer.precompute_cumulative_potentials(input_times)
+        actual = IntegrateAndFireLayer.spike_times_from_cumulative_potentials(
+            *precomputed, layer.thresholds
+        )
+
+        torch.testing.assert_close(actual, expected, atol=1e-6, rtol=0)
 
 
 class TestConvertToSpikes:

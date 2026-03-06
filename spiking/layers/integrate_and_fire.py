@@ -52,7 +52,11 @@ class IntegrateAndFireLayer(SpikingModule):
         if not active_neurons.any():
             return self._output_spikes
 
-        input_contrib = torch.sum(self.weights[active_neurons] * incoming_spikes, dim=1)
+        spike_indices = incoming_spikes.nonzero(as_tuple=True)[0]
+        if len(spike_indices) == 0:
+            return self._output_spikes
+
+        input_contrib = self.weights[active_neurons][:, spike_indices].sum(dim=1)
         self.membrane_potentials[active_neurons] += input_contrib
 
         potentials = self.membrane_potentials[active_neurons]
@@ -86,13 +90,17 @@ class IntegrateAndFireLayer(SpikingModule):
         self._output_spikes.zero_()
 
     @torch.no_grad()
-    def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
-        """Compute first spike times analytically without mutating model state."""
-        result = torch.full((self.num_outputs,), float("inf"), dtype=input_times.dtype)
+    def precompute_cumulative_potentials(
+        self, input_times: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Precompute sorted unique times and cumulative potentials at group boundaries.
 
+        Returns (unique_times, cum_at_boundaries) or None if no finite inputs.
+        cum_at_boundaries shape: (num_outputs, num_groups).
+        """
         finite_mask = torch.isfinite(input_times)
         if not finite_mask.any():
-            return result
+            return None
 
         finite_indices = torch.nonzero(finite_mask, as_tuple=True)[0]
         finite_times = input_times[finite_indices]
@@ -100,17 +108,28 @@ class IntegrateAndFireLayer(SpikingModule):
         sorted_times, sort_order = finite_times.sort()
         sorted_indices = finite_indices[sort_order]
 
-        # Cumulative membrane potential in sorted spike-time order
         sorted_weights = self.weights[:, sorted_indices]
         cum_potentials = sorted_weights.cumsum(dim=1)
 
-        # Only check threshold at group boundaries (simultaneous spikes)
-        unique_times, counts = torch.unique_consecutive(sorted_times, return_counts=True)
+        unique_times, counts = torch.unique_consecutive(
+            sorted_times, return_counts=True
+        )
         group_end_indices = counts.cumsum(dim=0) - 1
-
         cum_at_boundaries = cum_potentials[:, group_end_indices]
-        crossed = cum_at_boundaries >= self.thresholds.unsqueeze(1)
 
+        return unique_times, cum_at_boundaries
+
+    @staticmethod
+    def spike_times_from_cumulative_potentials(
+        unique_times: torch.Tensor,
+        cum_at_boundaries: torch.Tensor,
+        thresholds: torch.Tensor,
+    ) -> torch.Tensor:
+        """Resolve first spike times from precomputed cumulative potentials."""
+        num_outputs = cum_at_boundaries.shape[0]
+        result = torch.full((num_outputs,), float("inf"), dtype=unique_times.dtype)
+
+        crossed = cum_at_boundaries >= thresholds.unsqueeze(1)
         any_crossed = crossed.any(dim=1)
         first_crossing = crossed.float().argmax(dim=1)
         result[any_crossed] = unique_times[first_crossing[any_crossed]]
@@ -118,13 +137,28 @@ class IntegrateAndFireLayer(SpikingModule):
         return result
 
     @torch.no_grad()
+    def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
+        """Compute first spike times analytically without mutating model state."""
+        precomputed = self.precompute_cumulative_potentials(input_times)
+        if precomputed is None:
+            return torch.full(
+                (self.num_outputs,), float("inf"), dtype=input_times.dtype
+            )
+        return self.spike_times_from_cumulative_potentials(
+            *precomputed, self.thresholds
+        )
+
+    @torch.no_grad()
     def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
         """Batched analytical spike time inference.
+
+        Iterates over unique input times and accumulates membrane potentials
+        via batched matmul. Efficient when inputs are discretized to few bins.
 
         input_times: (B, num_inputs)
         Returns: (B, num_outputs)
         """
-        B, I = input_times.shape
+        B = input_times.shape[0]
         result = torch.full((B, self.num_outputs), float("inf"), dtype=input_times.dtype)
 
         finite_mask = torch.isfinite(input_times)
@@ -137,12 +171,12 @@ class IntegrateAndFireLayer(SpikingModule):
         not_yet_spiked = torch.ones((B, self.num_outputs), dtype=torch.bool)
 
         for t in unique_times:
-            active = (input_times == t).float()  # (B, I)
-            contrib = active @ self.weights.T  # (B, O)
+            active = (input_times == t).float()
+            contrib = active @ self.weights.T
             cum_potential += contrib
 
             crossed = (cum_potential >= self.thresholds) & not_yet_spiked
-            result[crossed] = t.item()
+            result[crossed] = t
             not_yet_spiked &= ~crossed
 
             if not not_yet_spiked.any():

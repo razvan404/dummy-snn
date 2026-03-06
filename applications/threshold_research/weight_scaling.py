@@ -2,15 +2,67 @@ import argparse
 import json
 import os
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from applications.common import set_seed, evaluate_model
 from applications.datasets import DATASETS, create_dataset
 from spiking import load_model
-from spiking.layers import SpikingSequential
+from spiking.evaluation.eval_classifier import evaluate_classifier
+from spiking.evaluation.feature_extraction import spike_times_to_features
+from spiking.layers.integrate_and_fire import IntegrateAndFireLayer
 
-DEFAULT_SCALE_FACTORS = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.05, 1.1]
+DEFAULT_SCALE_FACTORS = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.98, 1.02, 1.05, 1.1]
+
+
+def _extract_features_multi_factor(
+    layer: IntegrateAndFireLayer,
+    dataloader: DataLoader,
+    factors: list[float],
+    t_target: float | None = None,
+) -> dict[float, tuple[np.ndarray, np.ndarray]]:
+    """Extract features for multiple weight scale factors in a single data pass.
+
+    Runs the time-step loop once over all samples, computing the weight
+    contribution per timestep once and checking all factors via scalar multiply.
+    """
+    layer.eval()
+    full_loader = DataLoader(
+        dataloader.dataset, batch_size=len(dataloader.dataset), shuffle=False
+    )
+    all_times, all_labels = next(iter(full_loader))
+    input_times = all_times.flatten(1)
+    B = input_times.shape[0]
+    O = layer.num_outputs
+    thresholds = layer.thresholds
+    y = all_labels.numpy()
+
+    results = {
+        f: torch.full((B, O), float("inf"), dtype=input_times.dtype) for f in factors
+    }
+    not_yet_spiked = {f: torch.ones((B, O), dtype=torch.bool) for f in factors}
+
+    with torch.no_grad():
+        finite_mask = torch.isfinite(input_times)
+        if finite_mask.any():
+            unique_times = input_times[finite_mask].unique().sort()[0]
+            cum_potential = torch.zeros((B, O), dtype=input_times.dtype)
+
+            for t in unique_times:
+                active = (input_times == t).float()
+                contrib = active @ layer.weights.T
+                cum_potential += contrib
+
+                for factor in factors:
+                    crossed = (cum_potential * factor >= thresholds) & not_yet_spiked[
+                        factor
+                    ]
+                    results[factor][crossed] = t
+                    not_yet_spiked[factor] &= ~crossed
+
+    return {
+        f: (spike_times_to_features(results[f], t_target).numpy(), y) for f in factors
+    }
 
 
 def weight_scaling_sweep(
@@ -24,6 +76,9 @@ def weight_scaling_sweep(
 ) -> dict:
     """Scale layer weights by various factors and evaluate each.
 
+    Precomputes cumulative potentials once, then derives all factors' spike times
+    analytically (factor * cum_potential >= threshold).
+
     Returns: {"baseline": metrics_dict, "factors": {0.7: metrics_dict, ...}}
     """
     if scale_factors is None:
@@ -33,25 +88,26 @@ def weight_scaling_sweep(
 
     model = load_model(model_path)
     layer = model.layers[layer_idx]
-    original_weights = layer.weights.detach().clone()
-    sub_model = SpikingSequential(*model.layers[: layer_idx + 1])
+    layer.cpu()
 
-    _, baseline = evaluate_model(
-        sub_model, train_loader, val_loader, spike_shape, t_target=t_target
+    all_factors = [1.0] + scale_factors
+
+    train_features = _extract_features_multi_factor(
+        layer, train_loader, all_factors, t_target=t_target
+    )
+    val_features = _extract_features_multi_factor(
+        layer, val_loader, all_factors, t_target=t_target
     )
 
-    factors = {}
-    for factor in scale_factors:
-        layer.weights.data.copy_(original_weights * factor)
-        _, val_metrics = evaluate_model(
-            sub_model, train_loader, val_loader, spike_shape, t_target=t_target
-        )
-        factors[factor] = val_metrics
+    results = {}
+    for factor in all_factors:
+        X_train, y_train = train_features[factor]
+        X_val, y_val = val_features[factor]
+        _, val_metrics = evaluate_classifier(X_train, y_train, X_val, y_val)
+        results[factor] = val_metrics
 
-    # Restore original weights
-    layer.weights.data.copy_(original_weights)
-
-    return {"baseline": baseline, "factors": factors}
+    baseline = results.pop(1.0)
+    return {"baseline": baseline, "factors": results}
 
 
 def _find_trained_models(base_dir: str) -> list[tuple[str, float]]:
@@ -73,6 +129,27 @@ def _find_trained_models(base_dir: str) -> list[tuple[str, float]]:
     return models
 
 
+def _load_existing_results(output_path: str) -> dict | None:
+    """Load existing weight_scaling.json if it exists."""
+    if not os.path.exists(output_path):
+        return None
+    with open(output_path) as f:
+        return json.load(f)
+
+
+def _diff_factors(
+    existing: dict | None, desired: list[float]
+) -> tuple[list[float], list[str]]:
+    """Return (missing factors to compute, stale factor keys to remove)."""
+    if existing is None:
+        return desired, []
+    desired_keys = {str(f) for f in desired}
+    existing_keys = set(existing.get("factors", {}).keys())
+    missing = [f for f in desired if str(f) not in existing_keys]
+    stale = [k for k in existing_keys if k not in desired_keys]
+    return missing, stale
+
+
 def run(dataset: str, *, force: bool = False):
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
@@ -85,23 +162,45 @@ def run(dataset: str, *, force: bool = False):
 
     for model_path, t_obj in models:
         output_path = os.path.join(os.path.dirname(model_path), "weight_scaling.json")
-        if not force and os.path.exists(output_path):
+
+        existing = None if force else _load_existing_results(output_path)
+        missing, stale = _diff_factors(existing, DEFAULT_SCALE_FACTORS)
+
+        if not missing and not stale:
             print(f"  skip {model_path} (already complete)")
             continue
 
-        print(f"  scaling {model_path} (t_obj={t_obj})")
-        result = weight_scaling_sweep(
-            model_path=model_path,
-            dataset_loaders=(train_loader, val_loader),
-            spike_shape=spike_shape,
-            t_target=t_obj,
-        )
+        if existing is not None:
+            # Incremental: compute only missing factors, keep existing baseline
+            if missing:
+                print(f"  scaling {model_path} (t_obj={t_obj}, {len(missing)} new factors)")
+                result = weight_scaling_sweep(
+                    model_path=model_path,
+                    dataset_loaders=(train_loader, val_loader),
+                    spike_shape=spike_shape,
+                    t_target=t_obj,
+                    scale_factors=missing,
+                )
+                for k, v in result["factors"].items():
+                    existing["factors"][str(k)] = v
+            if stale:
+                print(f"  removing {len(stale)} stale factors from {output_path}")
+                for k in stale:
+                    del existing["factors"][k]
+            serializable = existing
+        else:
+            print(f"  scaling {model_path} (t_obj={t_obj})")
+            result = weight_scaling_sweep(
+                model_path=model_path,
+                dataset_loaders=(train_loader, val_loader),
+                spike_shape=spike_shape,
+                t_target=t_obj,
+            )
+            serializable = {
+                "baseline": result["baseline"],
+                "factors": {str(k): v for k, v in result["factors"].items()},
+            }
 
-        # Convert float keys to strings for JSON
-        serializable = {
-            "baseline": result["baseline"],
-            "factors": {str(k): v for k, v in result["factors"].items()},
-        }
         with open(output_path, "w") as f:
             json.dump(serializable, f, indent=4)
 

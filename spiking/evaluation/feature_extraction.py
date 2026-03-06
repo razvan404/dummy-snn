@@ -27,17 +27,16 @@ def extract_features(
     dataloader: DataLoader,
     shape: tuple[int, int, int],
     t_target: float | None = None,
-    batch_size: int = 256,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Run model inference on a dataloader and return (X, y) numpy arrays.
 
     Uses batched analytical spike time computation for efficiency.
+    Processes the full dataset in one batch for optimal matmul throughput.
     """
     model.eval()
-    batched_loader = DataLoader(dataloader.dataset, batch_size=batch_size, shuffle=False)
-    X, y = [], []
-    for batch_times, batch_labels in batched_loader:
-        spike_times = model.infer_spike_times_batch(batch_times.flatten(1))
-        X.append(spike_times_to_features(spike_times, t_target).numpy())
-        y.append(batch_labels.numpy())
-    return np.concatenate(X), np.concatenate(y)
+    full_loader = DataLoader(dataloader.dataset, batch_size=len(dataloader.dataset), shuffle=False)
+    all_times, all_labels = next(iter(full_loader))
+    spike_times = model.infer_spike_times_batch(all_times.flatten(1))
+    X = spike_times_to_features(spike_times, t_target).numpy()
+    y = all_labels.numpy()
+    return X, y

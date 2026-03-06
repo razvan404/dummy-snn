@@ -31,7 +31,7 @@ from spiking.layers import SpikingSequential
 
 SEED_START = 1
 DEFAULT_NUM_SEEDS = 5
-T_OBJECTIVES = [round(0.4 + v * 0.05, 2) for v in range(12)]  # 0.4 to 0.95
+T_OBJECTIVES = [round(0.4 + v * 0.05, 2) for v in range(12)] + [0.875]  # 0.4 to 0.95
 
 
 def train_with_metrics(

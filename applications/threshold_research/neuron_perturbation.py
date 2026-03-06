@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from sklearn.svm import LinearSVC
+from sklearn.linear_model import RidgeClassifier
 from torch.utils.data import DataLoader
 
 from applications.common import set_seed
@@ -104,54 +104,72 @@ def run_perturbation_sweep(
 
     perturbation_fractions = [round(-0.5 + i * 0.025, 3) for i in range(31)]
 
-    # Extract features for training and validation
+    # Extract unperturbed features as baseline
     X_train, y_train = extract_features(sub_model, train_loader, spike_shape, t_target)
     X_val, y_val = extract_features(sub_model, val_loader, spike_shape, t_target)
 
-    # Fit classifier once on unperturbed training features
-    classifier = LinearSVC(max_iter=10000)
-    classifier.fit(X_train, y_train)
-    baseline_metrics = compute_metrics(y_val, classifier.predict(X_val))
+    # Baseline uses same classifier type as perturbation loop
+    baseline_clf = RidgeClassifier()
+    baseline_clf.fit(X_train, y_train)
+    baseline_metrics = compute_metrics(y_val, baseline_clf.predict(X_val))
 
-    # Precompute cumulative potentials for validation set
-    val_batched = DataLoader(val_loader.dataset, batch_size=256, shuffle=False)
-    all_input_times = []
-    for batch_times, _labels in val_batched:
-        all_input_times.append(batch_times.flatten(1))
-    val_input_times = torch.cat(all_input_times, dim=0)
+    # Precompute cumulative potentials for both train and val
+    weights = layer.weights.detach()
 
-    cum_potentials, boundary_times = precompute_cumulative_potentials(
-        val_input_times, layer.weights.detach()
+    def _collect_input_times(loader):
+        batched = DataLoader(loader.dataset, batch_size=256, shuffle=False)
+        parts = []
+        for batch_times, _labels in batched:
+            parts.append(batch_times.flatten(1))
+        return torch.cat(parts, dim=0)
+
+    train_input_times = _collect_input_times(train_loader)
+    val_input_times = _collect_input_times(val_loader)
+
+    train_cum, train_boundary = precompute_cumulative_potentials(
+        train_input_times, weights
+    )
+    val_cum, val_boundary = precompute_cumulative_potentials(
+        val_input_times, weights
     )
 
-    # For each perturbation fraction, compute all neurons' spike times at once
+    # For each perturbation fraction, retrain classifier per neuron
     accuracy_matrix = np.zeros((num_outputs, len(perturbation_fractions)))
     f1_matrix = np.zeros((num_outputs, len(perturbation_fractions)))
 
     for frac_idx, frac in enumerate(perturbation_fractions):
         new_thresholds = original_thresholds * (1.0 + frac)
 
-        # Compute spike times for all neurons with perturbed thresholds
-        N_val = val_input_times.shape[0]
-        perturbed_spike_times = torch.full(
-            (N_val, num_outputs), float("inf"), dtype=val_input_times.dtype
-        )
-        for neuron_idx in range(num_outputs):
-            neuron_potentials = cum_potentials[:, neuron_idx, :]
-            perturbed_spike_times[:, neuron_idx] = spike_times_from_potentials(
-                neuron_potentials, boundary_times, new_thresholds[neuron_idx].item()
+        # Compute perturbed spike times for all neurons (train and val)
+        def _perturbed_features(cum_potentials, boundary_times, n_samples):
+            spike_times = torch.full(
+                (n_samples, num_outputs), float("inf"), dtype=cum_potentials.dtype
             )
+            for neuron_idx in range(num_outputs):
+                spike_times[:, neuron_idx] = spike_times_from_potentials(
+                    cum_potentials[:, neuron_idx, :],
+                    boundary_times,
+                    new_thresholds[neuron_idx].item(),
+                )
+            return spike_times_to_features(spike_times, t_target).numpy()
 
-        perturbed_features = spike_times_to_features(
-            perturbed_spike_times, t_target
-        ).numpy()
+        train_perturbed = _perturbed_features(
+            train_cum, train_boundary, train_input_times.shape[0]
+        )
+        val_perturbed = _perturbed_features(
+            val_cum, val_boundary, val_input_times.shape[0]
+        )
 
-        # For each neuron, swap just that column and predict
+        # For each neuron, swap that column and retrain
         for neuron_idx in range(num_outputs):
+            X_train_mod = X_train.copy()
+            X_train_mod[:, neuron_idx] = train_perturbed[:, neuron_idx]
             X_val_mod = X_val.copy()
-            X_val_mod[:, neuron_idx] = perturbed_features[:, neuron_idx]
+            X_val_mod[:, neuron_idx] = val_perturbed[:, neuron_idx]
 
-            y_pred = classifier.predict(X_val_mod)
+            clf = RidgeClassifier()
+            clf.fit(X_train_mod, y_train)
+            y_pred = clf.predict(X_val_mod)
             metrics = compute_metrics(y_val, y_pred)
             accuracy_matrix[neuron_idx, frac_idx] = metrics["accuracy"]
             f1_matrix[neuron_idx, frac_idx] = metrics["f1"]

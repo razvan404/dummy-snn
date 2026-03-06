@@ -332,6 +332,39 @@ class TestWeightScalingSweep:
         )
 
 
+class TestDiffFactors:
+    def test_no_existing_returns_all_desired(self):
+        from applications.threshold_research.weight_scaling import _diff_factors
+
+        missing, stale = _diff_factors(None, [0.9, 1.1])
+        assert missing == [0.9, 1.1]
+        assert stale == []
+
+    def test_all_present_returns_empty(self):
+        from applications.threshold_research.weight_scaling import _diff_factors
+
+        existing = {"factors": {"0.9": {}, "1.1": {}}}
+        missing, stale = _diff_factors(existing, [0.9, 1.1])
+        assert missing == []
+        assert stale == []
+
+    def test_partial_overlap(self):
+        from applications.threshold_research.weight_scaling import _diff_factors
+
+        existing = {"factors": {"0.9": {}, "0.7": {}}}
+        missing, stale = _diff_factors(existing, [0.9, 1.1])
+        assert missing == [1.1]
+        assert "0.7" in stale
+
+    def test_all_stale(self):
+        from applications.threshold_research.weight_scaling import _diff_factors
+
+        existing = {"factors": {"0.5": {}, "0.6": {}}}
+        missing, stale = _diff_factors(existing, [0.9, 1.1])
+        assert missing == [0.9, 1.1]
+        assert set(stale) == {"0.5", "0.6"}
+
+
 class TestRunPerturbationSweep:
     def test_output_shapes_and_baseline(self, train_loader, val_loader):
         from applications.threshold_research.neuron_perturbation import (

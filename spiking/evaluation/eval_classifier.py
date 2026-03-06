@@ -18,7 +18,7 @@ def evaluate_classifier(
     Defaults to LinearSVC if no classifier is provided.
     """
     if classifier is None:
-        classifier = LinearSVC(max_iter=10000)
+        classifier = LinearSVC(dual=False, tol=1e-3, max_iter=10000)
 
     classifier.fit(X_train, y_train)
 
