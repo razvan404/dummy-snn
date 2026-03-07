@@ -444,6 +444,44 @@ class TestRunPerturbationSweep:
             ), f"neuron {neuron_idx} at frac=0 differs from baseline"
 
 
+class TestInferSpikeTimesAndPotentialsBatch:
+    def test_returns_correct_shapes(self):
+        layer = _make_tiny_layer(num_inputs=8, num_outputs=4)
+        B = 5
+        input_times = torch.rand(B, 8)
+        input_times[torch.rand(B, 8) > 0.5] = float("inf")
+
+        spike_times, cum_potential = layer.infer_spike_times_and_potentials_batch(
+            input_times
+        )
+
+        assert spike_times.shape == (B, 4)
+        assert cum_potential.shape == (B, 4)
+
+    def test_spike_times_match_infer_spike_times_batch(self):
+        torch.manual_seed(99)
+        layer = _make_tiny_layer(num_inputs=8, num_outputs=4)
+        B = 10
+        input_times = torch.rand(B, 8)
+        input_times[torch.rand(B, 8) > 0.5] = float("inf")
+
+        expected = layer.infer_spike_times_batch(input_times)
+        spike_times, _ = layer.infer_spike_times_and_potentials_batch(input_times)
+
+        torch.testing.assert_close(spike_times, expected)
+
+    def test_all_infinite_inputs(self):
+        layer = _make_tiny_layer(num_inputs=8, num_outputs=4)
+        input_times = torch.full((3, 8), float("inf"))
+
+        spike_times, cum_potential = layer.infer_spike_times_and_potentials_batch(
+            input_times
+        )
+
+        assert torch.isinf(spike_times).all()
+        assert (cum_potential == 0).all()
+
+
 class TestComputePostHocMetrics:
     def test_output_keys_and_shapes(self, train_loader, val_loader):
         from applications.threshold_research.analysis import compute_post_hoc_metrics
@@ -476,6 +514,9 @@ class TestComputePostHocMetrics:
             "avg_spike_time",
             "spike_rate",
             "weight_std",
+            "potential_ratio_mean",
+            "potential_ratio_max",
+            "potential_ratio_std",
         }
         assert set(metrics.keys()) == expected_keys
 
@@ -510,6 +551,61 @@ class TestComputePostHocMetrics:
         rates = np.array(metrics["spike_rate"])
         assert np.all(rates >= 0.0)
         assert np.all(rates <= 1.0)
+
+    def test_potential_ratio_max_ge_mean(self, train_loader, val_loader):
+        from applications.threshold_research.analysis import compute_post_hoc_metrics
+        from applications.deep_linear.model import create_model
+        from spiking import save_model
+
+        setup = {
+            "threshold_init": {
+                "avg_threshold": 5.0,
+                "min_threshold": 1.0,
+                "std_dev": 0.5,
+            },
+        }
+        torch.manual_seed(42)
+        model = create_model(setup, NUM_INPUTS, [16])
+
+        model_path = "/tmp/test_post_hoc_ratio_model.pth"
+        save_model(model, model_path)
+
+        metrics = compute_post_hoc_metrics(
+            model_path=model_path,
+            dataset_loaders=(train_loader, val_loader),
+            spike_shape=SPIKE_SHAPE,
+        )
+
+        ratio_max = np.array(metrics["potential_ratio_max"])
+        ratio_mean = np.array(metrics["potential_ratio_mean"])
+        assert np.all(ratio_max >= ratio_mean - 1e-6)
+
+    def test_potential_ratio_mean_nonnegative(self, train_loader, val_loader):
+        from applications.threshold_research.analysis import compute_post_hoc_metrics
+        from applications.deep_linear.model import create_model
+        from spiking import save_model
+
+        setup = {
+            "threshold_init": {
+                "avg_threshold": 5.0,
+                "min_threshold": 1.0,
+                "std_dev": 0.5,
+            },
+        }
+        torch.manual_seed(42)
+        model = create_model(setup, NUM_INPUTS, [16])
+
+        model_path = "/tmp/test_post_hoc_ratio_nonneg_model.pth"
+        save_model(model, model_path)
+
+        metrics = compute_post_hoc_metrics(
+            model_path=model_path,
+            dataset_loaders=(train_loader, val_loader),
+            spike_shape=SPIKE_SHAPE,
+        )
+
+        ratio_mean = np.array(metrics["potential_ratio_mean"])
+        assert np.all(ratio_mean >= 0.0)
 
     def test_weight_norms_positive(self, train_loader, val_loader):
         from applications.threshold_research.analysis import compute_post_hoc_metrics
@@ -644,6 +740,9 @@ class TestCorrelationsReportWithTrainingMetrics:
             "avg_spike_time": rng.uniform(0, 1, num_neurons).tolist(),
             "spike_rate": rng.uniform(0, 1, num_neurons).tolist(),
             "weight_std": rng.uniform(0.01, 0.5, num_neurons).tolist(),
+            "potential_ratio_mean": rng.uniform(0, 1, num_neurons).tolist(),
+            "potential_ratio_max": rng.uniform(0.5, 1.5, num_neurons).tolist(),
+            "potential_ratio_std": rng.uniform(0, 0.5, num_neurons).tolist(),
         }
 
         report = correlations_report(
@@ -662,6 +761,9 @@ class TestCorrelationsReportWithTrainingMetrics:
             "avg_spike_time_vs_delta",
             "spike_rate_vs_delta",
             "weight_std_vs_delta",
+            "potential_ratio_mean_vs_delta",
+            "potential_ratio_max_vs_delta",
+            "potential_ratio_std_vs_delta",
         ]:
             assert key in report, f"Missing correlation: {key}"
             assert "r" in report[key]

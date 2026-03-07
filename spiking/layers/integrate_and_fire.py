@@ -149,25 +149,26 @@ class IntegrateAndFireLayer(SpikingModule):
         )
 
     @torch.no_grad()
-    def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
-        """Batched analytical spike time inference.
-
-        Iterates over unique input times and accumulates membrane potentials
-        via batched matmul. Efficient when inputs are discretized to few bins.
+    def infer_spike_times_and_potentials_batch(
+        self, input_times: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Batched analytical spike time inference, also returning final potentials.
 
         input_times: (B, num_inputs)
-        Returns: (B, num_outputs)
+        Returns: (spike_times, cum_potential) both (B, num_outputs).
+          cum_potential holds each neuron's cumulative membrane potential at the
+          end of the input window (or at the moment it spiked).
         """
         B = input_times.shape[0]
         result = torch.full((B, self.num_outputs), float("inf"), dtype=input_times.dtype)
+        cum_potential = torch.zeros((B, self.num_outputs), dtype=input_times.dtype)
 
         finite_mask = torch.isfinite(input_times)
         if not finite_mask.any():
-            return result
+            return result, cum_potential
 
         unique_times = input_times[finite_mask].unique().sort()[0]
 
-        cum_potential = torch.zeros((B, self.num_outputs), dtype=input_times.dtype)
         not_yet_spiked = torch.ones((B, self.num_outputs), dtype=torch.bool)
 
         for t in unique_times:
@@ -182,6 +183,19 @@ class IntegrateAndFireLayer(SpikingModule):
             if not not_yet_spiked.any():
                 break
 
+        return result, cum_potential
+
+    @torch.no_grad()
+    def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
+        """Batched analytical spike time inference.
+
+        Iterates over unique input times and accumulates membrane potentials
+        via batched matmul. Efficient when inputs are discretized to few bins.
+
+        input_times: (B, num_inputs)
+        Returns: (B, num_outputs)
+        """
+        result, _ = self.infer_spike_times_and_potentials_batch(input_times)
         return result
 
     @property

@@ -50,32 +50,69 @@ def compute_post_hoc_metrics(
     weight_l1_norm = torch.norm(weights, p=1, dim=1).numpy().tolist()
     weight_std = weights.std(dim=1).numpy().tolist()
 
-    # Collect spike times across training set
+    # Collect spike times and membrane potentials across training set
     train_loader = dataset_loaders[0]
     batched_loader = DataLoader(train_loader.dataset, batch_size=256, shuffle=False)
 
+    thresholds = layer.thresholds.detach()
+    preceding_layers = model.layers[:layer_idx]
+
     spike_time_sum = np.zeros(num_outputs)
     spike_count = np.zeros(num_outputs)
+    nonspiking_count = np.zeros(num_outputs)
+    ratio_sum_nonspiking = np.zeros(num_outputs)
+    ratio_max_nonspiking = np.zeros(num_outputs)
+    ratio_all = []  # collect per-sample ratios for std computation
     total_samples = 0
 
     with torch.no_grad():
         for batch_times, _labels in batched_loader:
-            st = sub_model.infer_spike_times_batch(batch_times.flatten(1))
-            finite_mask = torch.isfinite(st).numpy()
+            flat_input = batch_times.flatten(1)
+
+            # Propagate through preceding layers if multi-layer
+            layer_input = flat_input
+            for prev_layer in preceding_layers:
+                layer_input = prev_layer.infer_spike_times_batch(layer_input)
+
+            st, cum_pot = layer.infer_spike_times_and_potentials_batch(layer_input)
+            finite_mask = torch.isfinite(st)
+
             st_np = st.numpy()
+            finite_np = finite_mask.numpy()
+            ratio = (cum_pot / thresholds).numpy()  # (B, num_outputs)
 
             batch_size = st.shape[0]
             total_samples += batch_size
+            ratio_all.append(ratio)
 
             for n in range(num_outputs):
-                finite_n = finite_mask[:, n]
+                finite_n = finite_np[:, n]
                 spike_count[n] += finite_n.sum()
                 spike_time_sum[n] += st_np[finite_n, n].sum()
+
+                nonspiking_n = ~finite_n
+                n_nonspiking = nonspiking_n.sum()
+                nonspiking_count[n] += n_nonspiking
+                if n_nonspiking > 0:
+                    ratios_n = ratio[nonspiking_n, n]
+                    ratio_sum_nonspiking[n] += ratios_n.sum()
+                    ratio_max_nonspiking[n] = max(
+                        ratio_max_nonspiking[n], ratios_n.max()
+                    )
 
     avg_spike_time = np.where(
         spike_count > 0, spike_time_sum / spike_count, float("inf")
     ).tolist()
     spike_rate = (spike_count / total_samples).tolist()
+
+    with np.errstate(invalid="ignore"):
+        potential_ratio_mean = np.where(
+            nonspiking_count > 0, ratio_sum_nonspiking / nonspiking_count, 0.0
+        ).tolist()
+    potential_ratio_max = ratio_max_nonspiking.tolist()
+
+    all_ratios = np.concatenate(ratio_all, axis=0)  # (total_samples, num_outputs)
+    potential_ratio_std = np.std(all_ratios, axis=0).tolist()
 
     return {
         "weight_l2_norm": weight_l2_norm,
@@ -83,6 +120,9 @@ def compute_post_hoc_metrics(
         "avg_spike_time": avg_spike_time,
         "spike_rate": spike_rate,
         "weight_std": weight_std,
+        "potential_ratio_mean": potential_ratio_mean,
+        "potential_ratio_max": potential_ratio_max,
+        "potential_ratio_std": potential_ratio_std,
     }
 
 
@@ -209,6 +249,21 @@ def correlations_report(
                 "weight_std",
                 "weight_std_vs_delta",
                 "Weight std (receptive field sharpness)",
+            ),
+            (
+                "potential_ratio_mean",
+                "potential_ratio_mean_vs_delta",
+                "Mean potential/threshold ratio (non-spiking)",
+            ),
+            (
+                "potential_ratio_max",
+                "potential_ratio_max_vs_delta",
+                "Max potential/threshold ratio (non-spiking)",
+            ),
+            (
+                "potential_ratio_std",
+                "potential_ratio_std_vs_delta",
+                "Potential/threshold ratio std",
             ),
         ]
         for metric_key, report_key, label in metric_pairs:

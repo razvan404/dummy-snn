@@ -12,7 +12,20 @@ from spiking.evaluation.eval_classifier import evaluate_classifier
 from spiking.evaluation.feature_extraction import spike_times_to_features
 from spiking.layers.integrate_and_fire import IntegrateAndFireLayer
 
-DEFAULT_SCALE_FACTORS = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.98, 1.02, 1.05, 1.1]
+DEFAULT_SCALE_FACTORS = [
+    0.7,
+    0.75,
+    0.8,
+    0.85,
+    0.9,
+    0.95,
+    0.97,
+    0.98,
+    1.02,
+    1.03,
+    1.05,
+    1.1,
+]
 
 
 def _extract_features_multi_factor(
@@ -173,7 +186,9 @@ def run(dataset: str, *, force: bool = False):
         if existing is not None:
             # Incremental: compute only missing factors, keep existing baseline
             if missing:
-                print(f"  scaling {model_path} (t_obj={t_obj}, {len(missing)} new factors)")
+                print(
+                    f"  scaling {model_path} (t_obj={t_obj}, {len(missing)} new factors)"
+                )
                 result = weight_scaling_sweep(
                     model_path=model_path,
                     dataset_loaders=(train_loader, val_loader),
