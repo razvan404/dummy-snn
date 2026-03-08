@@ -47,12 +47,14 @@ def run(dataset: str, *, force: bool = False):
             continue
 
         tqdm.write(f"  running t_obj={t_obj} seed={seed}")
+        cache_dir = os.path.join(os.path.dirname(model_path), "perturbation_cache")
         result = run_perturbation_sweep(
             model_path=model_path,
             dataset_loaders=(train_loader, val_loader),
             spike_shape=spike_shape,
             t_target=t_obj,
             seed=seed,
+            cache_dir=cache_dir,
         )
 
         with open(output_path, "w") as f:

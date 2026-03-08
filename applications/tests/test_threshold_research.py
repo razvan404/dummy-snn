@@ -787,6 +787,212 @@ class TestCorrelationsReportWithTrainingMetrics:
         assert "spike_count_vs_delta" not in report
 
 
+class TestComputePerturbedFeatures:
+    def test_output_structure(self, train_loader, val_loader):
+        from applications.threshold_research.neuron_perturbation import (
+            compute_perturbed_features,
+        )
+        from applications.deep_linear.model import create_model
+        from spiking import save_model
+
+        setup = {
+            "threshold_init": {
+                "avg_threshold": 5.0,
+                "min_threshold": 1.0,
+                "std_dev": 0.5,
+            },
+        }
+        torch.manual_seed(42)
+        model = create_model(setup, NUM_INPUTS, [16])
+        num_outputs = model.layers[0].num_outputs
+
+        model_path = "/tmp/test_compute_features_model.pth"
+        save_model(model, model_path)
+
+        features = compute_perturbed_features(
+            model_path=model_path,
+            dataset_loaders=(train_loader, val_loader),
+            spike_shape=SPIKE_SHAPE,
+            seed=42,
+        )
+
+        n_train = features["baseline_train"].shape[0]
+        n_val = features["baseline_val"].shape[0]
+        assert features["baseline_train"].shape == (n_train, num_outputs)
+        assert features["baseline_val"].shape == (n_val, num_outputs)
+        assert features["perturbed_train"].shape == (31, n_train, num_outputs)
+        assert features["perturbed_val"].shape == (31, n_val, num_outputs)
+        assert features["labels_train"].shape == (n_train,)
+        assert features["labels_val"].shape == (n_val,)
+        assert len(features["original_thresholds"]) == num_outputs
+        assert len(features["perturbation_fractions"]) == 31
+
+    def test_caching_roundtrip(self, train_loader, val_loader, tmp_path):
+        from applications.threshold_research.neuron_perturbation import (
+            compute_perturbed_features,
+        )
+        from applications.deep_linear.model import create_model
+        from spiking import save_model
+
+        setup = {
+            "threshold_init": {
+                "avg_threshold": 5.0,
+                "min_threshold": 1.0,
+                "std_dev": 0.5,
+            },
+        }
+        torch.manual_seed(42)
+        model = create_model(setup, NUM_INPUTS, [16])
+
+        model_path = str(tmp_path / "model.pth")
+        save_model(model, model_path)
+        cache_dir = str(tmp_path / "cache")
+
+        # First call computes and caches
+        features1 = compute_perturbed_features(
+            model_path=model_path,
+            dataset_loaders=(train_loader, val_loader),
+            spike_shape=SPIKE_SHAPE,
+            seed=42,
+            cache_dir=cache_dir,
+        )
+
+        # Verify cache files exist
+        assert os.path.exists(os.path.join(cache_dir, "metadata.json"))
+        assert os.path.exists(os.path.join(cache_dir, "baseline_train.npy"))
+        assert os.path.exists(os.path.join(cache_dir, "perturbed_train.npy"))
+
+        # Second call loads from cache
+        features2 = compute_perturbed_features(
+            model_path=model_path,
+            dataset_loaders=(train_loader, val_loader),
+            spike_shape=SPIKE_SHAPE,
+            seed=42,
+            cache_dir=cache_dir,
+        )
+
+        np.testing.assert_array_equal(
+            features1["baseline_train"], features2["baseline_train"]
+        )
+        np.testing.assert_array_equal(
+            features1["perturbed_train"], features2["perturbed_train"]
+        )
+        assert features1["original_thresholds"] == features2["original_thresholds"]
+
+
+class TestEvaluatePerturbationsResume:
+    def test_resume_produces_correct_results(self, train_loader, val_loader, tmp_path):
+        """Simulate interruption by writing partial results, then resuming."""
+        from applications.threshold_research.neuron_perturbation import (
+            compute_perturbed_features,
+            evaluate_perturbations,
+        )
+        from applications.deep_linear.model import create_model
+        from spiking import save_model
+
+        setup = {
+            "threshold_init": {
+                "avg_threshold": 5.0,
+                "min_threshold": 1.0,
+                "std_dev": 0.5,
+            },
+        }
+        torch.manual_seed(42)
+        model = create_model(setup, NUM_INPUTS, [16])
+
+        model_path = str(tmp_path / "model.pth")
+        save_model(model, model_path)
+
+        features = compute_perturbed_features(
+            model_path=model_path,
+            dataset_loaders=(train_loader, val_loader),
+            spike_shape=SPIKE_SHAPE,
+            seed=42,
+        )
+
+        # Full run without caching (reference)
+        full_result = evaluate_perturbations(features=features)
+
+        # Simulate partial run: save first 2 fractions as completed
+        cache_dir = str(tmp_path / "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        acc_matrix = np.array(full_result["accuracy_matrix"])
+        f1_matrix_arr = np.array(full_result["f1_matrix"])
+        partial = {
+            "completed_fractions": [0, 1],
+            "accuracy_matrix": acc_matrix[:, [0, 1]].tolist(),
+            "f1_matrix": f1_matrix_arr[:, [0, 1]].tolist(),
+        }
+        with open(os.path.join(cache_dir, "partial_results.json"), "w") as f:
+            json.dump(partial, f)
+
+        # Resume
+        resumed_result = evaluate_perturbations(
+            features=features, cache_dir=cache_dir
+        )
+
+        np.testing.assert_array_almost_equal(
+            resumed_result["accuracy_matrix"], full_result["accuracy_matrix"]
+        )
+        np.testing.assert_array_almost_equal(
+            resumed_result["f1_matrix"], full_result["f1_matrix"]
+        )
+
+
+class TestCachedPerturbationSweep:
+    def test_cached_matches_uncached(self, train_loader, val_loader, tmp_path):
+        from applications.threshold_research.neuron_perturbation import (
+            run_perturbation_sweep,
+        )
+        from applications.deep_linear.model import create_model
+        from spiking import save_model
+
+        setup = {
+            "threshold_init": {
+                "avg_threshold": 5.0,
+                "min_threshold": 1.0,
+                "std_dev": 0.5,
+            },
+        }
+        torch.manual_seed(42)
+        model = create_model(setup, NUM_INPUTS, [16])
+
+        model_path = str(tmp_path / "model.pth")
+        save_model(model, model_path)
+
+        # Uncached run
+        uncached = run_perturbation_sweep(
+            model_path=model_path,
+            dataset_loaders=(train_loader, val_loader),
+            spike_shape=SPIKE_SHAPE,
+            seed=42,
+        )
+
+        # Cached run
+        cache_dir = str(tmp_path / "cache")
+        cached = run_perturbation_sweep(
+            model_path=model_path,
+            dataset_loaders=(train_loader, val_loader),
+            spike_shape=SPIKE_SHAPE,
+            seed=42,
+            cache_dir=cache_dir,
+        )
+
+        assert uncached["baseline"] == cached["baseline"]
+        np.testing.assert_array_almost_equal(
+            uncached["accuracy_matrix"], cached["accuracy_matrix"]
+        )
+        np.testing.assert_array_almost_equal(
+            uncached["f1_matrix"], cached["f1_matrix"]
+        )
+        assert uncached["original_thresholds"] == pytest.approx(
+            cached["original_thresholds"]
+        )
+        assert uncached["optimal_thresholds"] == pytest.approx(
+            cached["optimal_thresholds"]
+        )
+
+
 class TestComputePredictiveModel:
     def test_returns_r_squared(self):
         from applications.threshold_research.analysis import compute_predictive_model
