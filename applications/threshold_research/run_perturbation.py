@@ -7,35 +7,47 @@ from tqdm import tqdm
 from applications.datasets import DATASETS, create_dataset
 from applications.threshold_research.neuron_perturbation import run_perturbation_sweep
 
-T_OBJECTIVES = [round(0.75 + v * 0.05, 2) for v in range(5)]  # 0.75 to 0.95
-SEEDS = [1, 2]
-
 
 def _find_models(base_dir: str) -> list[tuple[str, float, int]]:
-    """Find model paths matching selected t_objectives and seeds.
+    """Discover all model paths under base_dir.
 
-    Returns list of (model_path, t_obj, seed).
+    Scans tobj_* and seed_* directories, returning every model found.
+    Returns list of (model_path, t_obj, seed) sorted by (t_obj, seed).
     """
     models = []
-    for t_obj in T_OBJECTIVES:
-        tobj_dir = os.path.join(base_dir, f"tobj_{t_obj}")
-        if not os.path.isdir(tobj_dir):
+    if not os.path.isdir(base_dir):
+        return models
+    for tobj_name in sorted(os.listdir(base_dir)):
+        if not tobj_name.startswith("tobj_"):
             continue
-        for seed in SEEDS:
-            model_path = os.path.join(tobj_dir, f"seed_{seed}", "model.pth")
+        try:
+            t_obj = float(tobj_name.split("_", 1)[1])
+        except ValueError:
+            continue
+        tobj_path = os.path.join(base_dir, tobj_name)
+        for seed_name in sorted(os.listdir(tobj_path)):
+            if not seed_name.startswith("seed_"):
+                continue
+            try:
+                seed = int(seed_name.split("_", 1)[1])
+            except ValueError:
+                continue
+            model_path = os.path.join(tobj_path, seed_name, "model.pth")
             if os.path.exists(model_path):
                 models.append((model_path, t_obj, seed))
     return models
 
 
-def run(dataset: str, *, force: bool = False):
+def run(dataset: str, *, force: bool = False, seeds: list[int] | None = None):
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
 
     base_dir = f"logs/{dataset}/threshold_research"
     models = _find_models(base_dir)
+    if seeds:
+        models = [(p, t, s) for p, t, s in models if s in seeds]
     if not models:
-        print(f"No models found under {base_dir} for t_objectives {T_OBJECTIVES}")
+        print(f"No models found under {base_dir}")
         return
 
     for model_path, t_obj, seed in tqdm(models, desc="Perturbation sweep"):
@@ -55,6 +67,7 @@ def run(dataset: str, *, force: bool = False):
             t_target=t_obj,
             seed=seed,
             cache_dir=cache_dir,
+            force=force,
         )
 
         with open(output_path, "w") as f:
@@ -69,5 +82,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--force", action="store_true", help="re-run even if results exist"
     )
+    parser.add_argument(
+        "--seeds", type=int, nargs="+", help="only run these seeds (default: all)"
+    )
     args = parser.parse_args()
-    run(args.dataset, force=args.force)
+    run(args.dataset, force=args.force, seeds=args.seeds)

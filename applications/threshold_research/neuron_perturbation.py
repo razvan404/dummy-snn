@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from sklearn.linear_model import RidgeClassifier
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from applications.common import set_seed
 from spiking import load_model
@@ -136,8 +137,8 @@ def _load_feature_cache(cache_dir):
         "baseline_val": np.load(os.path.join(cache_dir, "baseline_val.npy")),
         "labels_train": np.load(os.path.join(cache_dir, "labels_train.npy")),
         "labels_val": np.load(os.path.join(cache_dir, "labels_val.npy")),
-        "perturbed_train": np.load(os.path.join(cache_dir, "perturbed_train.npy")),
-        "perturbed_val": np.load(os.path.join(cache_dir, "perturbed_val.npy")),
+        "perturbed_train": np.load(os.path.join(cache_dir, "perturbed_train.npy"), mmap_mode="r"),
+        "perturbed_val": np.load(os.path.join(cache_dir, "perturbed_val.npy"), mmap_mode="r"),
         "original_thresholds": metadata["original_thresholds"],
         "perturbation_fractions": metadata["perturbation_fractions"],
     }
@@ -175,13 +176,14 @@ def compute_perturbed_features(
     t_target: float | None = None,
     seed: int = 42,
     cache_dir: str | None = None,
+    force: bool = False,
 ) -> dict:
     """Compute baseline and perturbed feature matrices for all fractions.
 
     If cache_dir is provided, saves results to disk and loads from cache on
-    subsequent calls.
+    subsequent calls. Set force=True to recompute even if cache exists.
     """
-    if cache_dir and _feature_cache_exists(cache_dir):
+    if cache_dir and not force and _feature_cache_exists(cache_dir):
         return _load_feature_cache(cache_dir)
 
     set_seed(seed)
@@ -250,12 +252,19 @@ def evaluate_perturbations(
     *,
     features: dict,
     cache_dir: str | None = None,
+    classifier_factory=None,
+    refit: bool = False,
 ) -> dict:
     """Run per-neuron classifier fits on precomputed features.
 
+    classifier_factory: callable returning a classifier (default RidgeClassifier).
+    refit: if False, use the baseline classifier for predictions without re-fitting.
     If cache_dir is provided, saves results incrementally after each fraction
     and resumes from partial results on restart.
     """
+    if classifier_factory is None:
+        classifier_factory = lambda: RidgeClassifier()
+
     X_train = features["baseline_train"]
     X_val = features["baseline_val"]
     y_train = features["labels_train"]
@@ -269,7 +278,7 @@ def evaluate_perturbations(
     num_fracs = len(perturbation_fractions)
 
     # Baseline classifier
-    baseline_clf = RidgeClassifier()
+    baseline_clf = classifier_factory()
     baseline_clf.fit(X_train, y_train)
     baseline_metrics = compute_metrics(y_val, baseline_clf.predict(X_val))
 
@@ -289,20 +298,30 @@ def evaluate_perturbations(
                 accuracy_matrix[:, frac_idx] = acc_arr[:, i]
                 f1_matrix[:, frac_idx] = f1_arr[:, i]
 
-    for frac_idx in range(num_fracs):
-        if frac_idx in completed_fractions:
-            continue
+    remaining = [i for i in range(num_fracs) if i not in completed_fractions]
+    pbar = tqdm(
+        remaining,
+        desc="Perturbation eval",
+        initial=len(completed_fractions),
+        total=num_fracs,
+    )
+    for frac_idx in pbar:
+        frac = perturbation_fractions[frac_idx]
+        pbar.set_postfix_str(f"frac={frac:+.3f} ({num_outputs} neurons)")
 
-        # For each neuron, swap that column and retrain
+        # For each neuron, swap that column and evaluate
         for neuron_idx in range(num_outputs):
             X_train_mod = X_train.copy()
             X_train_mod[:, neuron_idx] = perturbed_train[frac_idx, :, neuron_idx]
             X_val_mod = X_val.copy()
             X_val_mod[:, neuron_idx] = perturbed_val[frac_idx, :, neuron_idx]
 
-            clf = RidgeClassifier()
-            clf.fit(X_train_mod, y_train)
-            y_pred = clf.predict(X_val_mod)
+            if refit:
+                clf = classifier_factory()
+                clf.fit(X_train_mod, y_train)
+                y_pred = clf.predict(X_val_mod)
+            else:
+                y_pred = baseline_clf.predict(X_val_mod)
             metrics = compute_metrics(y_val, y_pred)
             accuracy_matrix[neuron_idx, frac_idx] = metrics["accuracy"]
             f1_matrix[neuron_idx, frac_idx] = metrics["f1"]
@@ -346,6 +365,7 @@ def run_perturbation_sweep(
     t_target: float | None = None,
     seed: int = 42,
     cache_dir: str | None = None,
+    force: bool = False,
 ) -> dict:
     """Run per-neuron threshold perturbation sweep.
 
@@ -362,5 +382,6 @@ def run_perturbation_sweep(
         t_target=t_target,
         seed=seed,
         cache_dir=cache_dir,
+        force=force,
     )
     return evaluate_perturbations(features=features, cache_dir=cache_dir)

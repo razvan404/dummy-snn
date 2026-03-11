@@ -1,7 +1,9 @@
 import numpy as np
 import torch
 from scipy import stats
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import cross_val_score
 from torch.utils.data import DataLoader
 
 from spiking import load_model
@@ -148,6 +150,38 @@ def compute_predictive_model(
     }
 
 
+def compute_nonlinear_predictive_model(
+    optimal_deltas: np.ndarray,
+    metrics: dict[str, np.ndarray],
+    n_folds: int = 5,
+) -> dict:
+    """Compare linear vs gradient boosting regression for predicting optimal deltas.
+
+    Cross-validated R² for fair comparison (GBR can overfit on small sample sizes).
+    Returns dict with linear_cv_r2, gbr_cv_r2, their stds, n_samples, n_features.
+    """
+    optimal_deltas = np.asarray(optimal_deltas)
+    names = list(metrics.keys())
+    X = np.column_stack([np.asarray(metrics[k]) for k in names])
+
+    linear = LinearRegression()
+    gbr = GradientBoostingRegressor(
+        n_estimators=100, max_depth=3, random_state=0
+    )
+
+    linear_scores = cross_val_score(linear, X, optimal_deltas, cv=n_folds, scoring="r2")
+    gbr_scores = cross_val_score(gbr, X, optimal_deltas, cv=n_folds, scoring="r2")
+
+    return {
+        "linear_cv_r2": float(np.mean(linear_scores)),
+        "linear_cv_r2_std": float(np.std(linear_scores)),
+        "gbr_cv_r2": float(np.mean(gbr_scores)),
+        "gbr_cv_r2_std": float(np.std(gbr_scores)),
+        "n_samples": int(X.shape[0]),
+        "n_features": int(X.shape[1]),
+    }
+
+
 def correlations_report(
     results: dict,
     winner_counts: np.ndarray | None = None,
@@ -273,5 +307,15 @@ def correlations_report(
                     post_hoc_metrics[metric_key],
                     f"{label} vs optimal threshold shift",
                 )
+
+    if "baseline_importance" in results and "optimal_importance" in results:
+        baseline_imp = np.asarray(results["baseline_importance"], dtype=float)
+        optimal_imp = np.asarray(results["optimal_importance"], dtype=float)
+        importance_gap = optimal_imp - baseline_imp
+        _add_correlation(
+            "importance_gap_vs_delta",
+            importance_gap,
+            "Classifier importance change (optimal - baseline) vs optimal threshold shift",
+        )
 
     return report

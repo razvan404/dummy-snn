@@ -4,12 +4,24 @@ import os
 
 import numpy as np
 import torch
+from sklearn.svm import LinearSVC
 from torch.utils.data import DataLoader
 
-from applications.common import set_seed, evaluate_model
+from applications.common import set_seed
 from applications.datasets import DATASETS, create_dataset
 from spiking import load_model
+from spiking.evaluation.eval_utils import compute_metrics
+from spiking.evaluation.feature_extraction import extract_features
 from spiking.layers import SpikingSequential
+
+
+def _fit_and_evaluate(X_train, y_train, X_val, y_val):
+    """Fit LinearSVC, return (val_metrics, per-feature importance)."""
+    clf = LinearSVC(dual=False, tol=1e-3, max_iter=10000)
+    clf.fit(X_train, y_train)
+    val_metrics = compute_metrics(y_val, clf.predict(X_val))
+    importance = np.mean(np.abs(clf.coef_), axis=0)
+    return val_metrics, importance
 
 
 def evaluate_optimal_thresholds(
@@ -24,7 +36,8 @@ def evaluate_optimal_thresholds(
 ) -> dict:
     """Set all neurons to their per-neuron optimal thresholds and evaluate.
 
-    Returns dict with baseline metrics, optimal metrics, and threshold details.
+    Returns dict with baseline metrics, optimal metrics, classifier importance,
+    and threshold details.
     """
     set_seed(seed)
     train_loader, val_loader = dataset_loaders
@@ -32,22 +45,26 @@ def evaluate_optimal_thresholds(
     model = load_model(model_path)
     layer = model.layers[layer_idx]
     sub_model = SpikingSequential(*model.layers[: layer_idx + 1])
+    sub_model = sub_model.cpu()
 
     original_thresholds = layer.thresholds.detach().clone()
 
-    # Evaluate baseline
-    _, baseline_metrics = evaluate_model(
-        sub_model, train_loader, val_loader, spike_shape, t_target=t_target
+    # Baseline: extract features, fit classifier, get importance
+    X_train, y_train = extract_features(sub_model, train_loader, spike_shape, t_target)
+    X_val, y_val = extract_features(sub_model, val_loader, spike_shape, t_target)
+    baseline_metrics, baseline_importance = _fit_and_evaluate(
+        X_train, y_train, X_val, y_val
     )
 
-    # Apply per-neuron optimal thresholds
+    # Optimal: apply per-neuron optimal thresholds, extract features, fit classifier
     optimal = torch.tensor(
         perturbation_results["optimal_thresholds"], dtype=layer.thresholds.dtype
     )
     layer.thresholds.data.copy_(optimal)
-
-    _, optimal_metrics = evaluate_model(
-        sub_model, train_loader, val_loader, spike_shape, t_target=t_target
+    X_train_opt, _ = extract_features(sub_model, train_loader, spike_shape, t_target)
+    X_val_opt, _ = extract_features(sub_model, val_loader, spike_shape, t_target)
+    optimal_metrics, optimal_importance = _fit_and_evaluate(
+        X_train_opt, y_train, X_val_opt, y_val
     )
 
     # Restore
@@ -62,6 +79,8 @@ def evaluate_optimal_thresholds(
         "accuracy_improvement": (
             optimal_metrics["accuracy"] - baseline_metrics["accuracy"]
         ),
+        "baseline_importance": baseline_importance.tolist(),
+        "optimal_importance": optimal_importance.tolist(),
     }
 
 
