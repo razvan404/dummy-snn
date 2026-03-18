@@ -1,5 +1,3 @@
-# ABOUTME: Pre-computes post-hoc per-neuron metrics for all trained models.
-# ABOUTME: Iterates tobj_*/seed_* directories and saves post_hoc_metrics.json per seed.
 import argparse
 import json
 import os
@@ -24,9 +22,7 @@ def run(dataset: str, *, force: bool = False, seeds: list[int] | None = None):
         return
 
     for model_path, t_obj, seed in tqdm(models, desc="Post-hoc metrics"):
-        output_path = os.path.join(
-            os.path.dirname(model_path), "post_hoc_metrics.json"
-        )
+        output_path = os.path.join(os.path.dirname(model_path), "post_hoc_metrics.json")
         if not force and os.path.exists(output_path):
             tqdm.write(f"  skip t_obj={t_obj} seed={seed} (already complete)")
             continue

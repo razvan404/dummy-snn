@@ -6,6 +6,7 @@ from .fashion_mnist import FashionMnistDataset
 from .fer2013 import Fer2013Dataset
 from .mnist import MnistDataset
 from .mnist_subset import MnistSubsetDataset
+from .cifar10_whitened import Cifar10WhitenedDataset, create_cifar10_whitened
 
 
 def create_dataset(name: str) -> tuple[DataLoader, DataLoader]:
@@ -28,6 +29,8 @@ def create_dataset(name: str) -> tuple[DataLoader, DataLoader]:
     elif name == "fer2013":
         train_dataset = Fer2013Dataset("train")
         test_dataset = Fer2013Dataset("test")
+    elif name == "cifar10_whitened":
+        return create_cifar10_whitened()
     else:
         raise ValueError(f"unknown dataset: {name!r}")
 
@@ -36,4 +39,4 @@ def create_dataset(name: str) -> tuple[DataLoader, DataLoader]:
     return train_loader, test_loader
 
 
-DATASETS = ["mnist", "mnist_subset", "fashion_mnist", "cifar10", "fer2013"]
+DATASETS = ["mnist", "mnist_subset", "fashion_mnist", "cifar10", "cifar10_whitened", "fer2013"]
