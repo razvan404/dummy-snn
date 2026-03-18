@@ -160,7 +160,9 @@ class IntegrateAndFireLayer(SpikingModule):
           end of the input window (or at the moment it spiked).
         """
         B = input_times.shape[0]
-        result = torch.full((B, self.num_outputs), float("inf"), dtype=input_times.dtype)
+        result = torch.full(
+            (B, self.num_outputs), float("inf"), dtype=input_times.dtype
+        )
         cum_potential = torch.zeros((B, self.num_outputs), dtype=input_times.dtype)
 
         finite_mask = torch.isfinite(input_times)
