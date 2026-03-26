@@ -88,13 +88,16 @@ def _save_plots(dynamics, activity, win_counts, layer, spike_shape, figures_dir)
         layer.thresholds, f"{figures_dir}/threshold_distribution.png"
     )
 
-    # Receptive fields of 32 most active neurons
-    top_k = min(32, len(activity))
-    top_neurons = activity.topk(top_k).indices.sort().values
     save_weight_figure(layer, spike_shape, f"{figures_dir}/weights.png")
 
 
-def run(dataset: str, *, num_epochs: int = 10, force: bool = False, num_seeds: int = DEFAULT_NUM_SEEDS):
+def run(
+    dataset: str,
+    *,
+    num_epochs: int = 10,
+    force: bool = False,
+    num_seeds: int = DEFAULT_NUM_SEEDS,
+):
     seeds = list(range(SEED_START, SEED_START + num_seeds))
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
@@ -171,9 +174,7 @@ def run(dataset: str, *, num_epochs: int = 10, force: bool = False, num_seeds: i
                 progress=False,
             )
 
-            train_m, val_m = evaluate_model(
-                sub_model, train_loader, val_loader, spike_shape
-            )
+            train_m, val_m = evaluate_model(sub_model, train_loader, val_loader)
 
             os.makedirs(output_dir, exist_ok=True)
             save_model(model, f"{output_dir}/model.pth")

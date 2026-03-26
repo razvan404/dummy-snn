@@ -51,7 +51,6 @@ def main():
             model,
             train_loader,
             val_loader,
-            spike_shape,
         )
         return {"train": train_metrics, "validation": val_metrics}
 

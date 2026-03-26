@@ -125,7 +125,6 @@ def train_with_metrics(
         sub_model,
         train_loader,
         val_loader,
-        spike_shape,
         t_target=t_objective,
     )
 

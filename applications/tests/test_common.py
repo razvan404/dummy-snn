@@ -35,7 +35,7 @@ class TestEvaluateModel:
         val_loader = make_fake_dataloader(num_samples=5, shape=shape)
 
         train_metrics, val_metrics = evaluate_model(
-            layer, train_loader, val_loader, image_shape=shape
+            layer, train_loader, val_loader
         )
 
         for metrics in (train_metrics, val_metrics):

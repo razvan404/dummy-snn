@@ -7,6 +7,8 @@ def _extract_patches(
 ) -> torch.Tensor:
     """Extract random patches from images.
 
+    Uses F.unfold for vectorized extraction rather than per-patch loops.
+
     Args:
         images: (N, C, H, W) tensor.
         patch_size: Side length of square patches.
@@ -16,24 +18,53 @@ def _extract_patches(
         (n_patches, C * patch_size * patch_size) flattened patches.
     """
     N, C, H, W = images.shape
-    half = patch_size // 2
+    dim = C * patch_size * patch_size
 
-    # Random image indices and spatial positions
-    img_idx = torch.randint(0, N, (n_patches,))
-    row_idx = torch.randint(half, H - half, (n_patches,))
-    col_idx = torch.randint(half, W - half, (n_patches,))
+    # Unfold all patches: (N, C*kH*kW, L) where L = num_patches_per_image
+    all_patches = F.unfold(images, kernel_size=patch_size)  # (N, dim, L)
+    L = all_patches.shape[2]
 
-    patches = []
-    for i in range(n_patches):
-        patch = images[
-            img_idx[i],
-            :,
-            row_idx[i] - half : row_idx[i] + half + 1,
-            col_idx[i] - half : col_idx[i] + half + 1,
-        ]
-        patches.append(patch.flatten())
+    # Reshape to (N*L, dim)
+    all_patches = all_patches.permute(0, 2, 1).reshape(-1, dim)
 
-    return torch.stack(patches)
+    # Randomly sample n_patches
+    total = all_patches.shape[0]
+    indices = torch.randint(0, total, (n_patches,))
+    return all_patches[indices]
+
+
+def compute_patch_mean(
+    images: torch.Tensor,
+    patch_size: int = 9,
+    n_patches: int = 1_000_000,
+) -> torch.Tensor:
+    """Compute the mean patch vector from image patches.
+
+    Args:
+        images: (N, C, H, W) tensor of images in [0, 1].
+        patch_size: Side length of square patches.
+        n_patches: Number of random patches to sample.
+
+    Returns:
+        (C * patch_size * patch_size,) mean vector.
+    """
+    N, C, H, W = images.shape
+    max_patches = N * (H - patch_size + 1) * (W - patch_size + 1)
+    n_patches = min(n_patches, max_patches)
+    patches = _extract_patches(images, patch_size, n_patches)
+    return patches.mean(dim=0)
+
+
+def load_kernels(path: str) -> torch.Tensor:
+    """Load pre-computed whitening kernels from a .pt file.
+
+    Args:
+        path: Path to a .pt file containing a (C, C, kH, kW) tensor.
+
+    Returns:
+        (C, C, kH, kW) kernel tensor.
+    """
+    return torch.load(path, weights_only=True)
 
 
 def fit_whitening_kernels(
@@ -41,21 +72,21 @@ def fit_whitening_kernels(
     patch_size: int = 9,
     n_patches: int = 1_000_000,
     epsilon: float = 1e-2,
-    rho: float = 1.0,
+    rho: float = 0.15,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Fit whitening kernels from image patches (Falez 2020 Eqs 8-12).
 
-    Approximates ZCA whitening via per-channel impulse response kernels.
+    Approximates ZCA whitening via cross-channel impulse response kernels.
 
     Args:
         images: (N, C, H, W) tensor of images in [0, 1].
         patch_size: Side length of square patches (must be odd).
         n_patches: Number of random patches to sample.
         epsilon: Regularization constant for eigenvalue inversion.
-        rho: Fraction of eigenvalues to retain (1.0 = keep all).
+        rho: Fraction of eigenvalues to retain (0.15 per Falez 2020).
 
     Returns:
-        (kernels, mean) where kernels is (C, 1, kH, kW) for depthwise conv
+        (kernels, mean) where kernels is (C, C, kH, kW) for cross-channel conv
         and mean is (C * kH * kW,) patch mean vector.
     """
     N, C, H, W = images.shape
@@ -72,7 +103,7 @@ def fit_whitening_kernels(
     centered = patches - mean
 
     # Covariance matrix (Eq 9)
-    cov = (centered.T @ centered) / (n_patches - 1)
+    cov = (centered.T @ centered) / n_patches
 
     # Eigen-decomposition
     eigenvalues, eigenvectors = torch.linalg.eigh(cov)
@@ -91,21 +122,20 @@ def fit_whitening_kernels(
     scale = torch.diag(1.0 / torch.sqrt(eigenvalues + epsilon))
     zca_matrix = eigenvectors @ scale @ eigenvectors.T  # (dim, dim)
 
-    # Extract per-channel impulse response kernels (Eqs 11-12)
+    # Extract cross-channel impulse response kernels (Eqs 11-12)
     # For each channel c, the kernel is the ZCA matrix's response to a
     # unit impulse at the center pixel of channel c.
     center_pixel = patch_size * patch_size // 2
     kernels = []
     for c in range(C):
         impulse_idx = c * patch_size * patch_size + center_pixel
-        kernel_flat = zca_matrix[:, impulse_idx]  # (dim,)
-        # Extract only channel c's portion of the response
-        c_start = c * patch_size * patch_size
-        c_end = c_start + patch_size * patch_size
-        kernel_2d = kernel_flat[c_start:c_end].reshape(1, patch_size, patch_size)
-        kernels.append(kernel_2d)
+        kernel_flat = zca_matrix[:, impulse_idx]  # (dim,) full cross-channel response
+        kernel_3d = kernel_flat.reshape(C, patch_size, patch_size)  # (C, kH, kW)
+        # Subtract filter mean (DC removal, per reference implementation)
+        kernel_3d = kernel_3d - kernel_3d.mean()
+        kernels.append(kernel_3d)
 
-    kernels = torch.stack(kernels)  # (C, 1, kH, kW)
+    kernels = torch.stack(kernels)  # (C, C, kH, kW)
     return kernels, mean
 
 
@@ -114,32 +144,22 @@ def apply_whitening_kernels(
     kernels: torch.Tensor,
     mean: torch.Tensor,
 ) -> torch.Tensor:
-    """Apply pre-fitted whitening kernels to images via depthwise convolution.
+    """Apply pre-fitted whitening kernels to images via cross-channel convolution.
 
-    The mean vector captures the average patch content. Centering is done by
-    convolving the mean's spatial structure with the whitening kernels to get
-    a per-channel bias, then subtracting it from the convolution output.
+    The kernels already have DC removal built in (filter mean subtracted during
+    fitting), so no additional bias subtraction is needed.
 
     Args:
         images: (N, C, H, W) tensor.
-        kernels: (C, 1, kH, kW) depthwise convolution kernels.
-        mean: (C * kH * kW,) patch mean vector from fitting.
+        kernels: (C, C, kH, kW) cross-channel convolution kernels.
+        mean: (C * kH * kW,) patch mean vector from fitting (unused during
+            application, kept for API compatibility).
 
     Returns:
         (N, C, H, W) whitened images (same spatial dimensions via padding).
     """
-    C = kernels.shape[0]
     kH = kernels.shape[2]
     padding = kH // 2
-
-    # Convolve images with whitening kernels (depthwise)
-    conv_out = F.conv2d(images, kernels, padding=padding, groups=C)
-
-    # Compute bias from the mean: for each channel c, dot the mean's
-    # channel-c portion with the kernel for channel c.
-    # mean reshaped: (C, kH, kW)
-    mean_spatial = mean.reshape(C, kH, kH)
-    bias = (mean_spatial * kernels.squeeze(1)).sum(dim=(1, 2))  # (C,)
-
-    whitened = conv_out - bias.reshape(1, C, 1, 1)
-    return whitened
+    # Replicate padding to match C++ clamp-to-edge boundary handling
+    padded = F.pad(images, [padding, padding, padding, padding], mode="replicate")
+    return F.conv2d(padded, kernels)

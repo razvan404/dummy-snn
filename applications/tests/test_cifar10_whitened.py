@@ -50,7 +50,7 @@ class TestCifar10WhitenedDataset:
 
     def test_kernels_and_mean_exposed(self, mock_cifar10):
         dataset = Cifar10WhitenedDataset("data", "train", patch_size=5)
-        assert dataset.kernels.shape == (3, 1, 5, 5)
+        assert dataset.kernels.shape == (3, 3, 5, 5)
         assert dataset.mean.shape[0] == 3 * 5 * 5
 
     def test_prefitted_kernels(self, mock_cifar10):

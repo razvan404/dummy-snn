@@ -21,6 +21,36 @@ def _apply_blur(img: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
     return img.squeeze(0)
 
 
+def apply_difference_of_gaussians_filter_batch(
+    images: torch.Tensor, sigma_center: float = 1.0, sigma_surround: float = 2.0
+) -> torch.Tensor:
+    """Apply DoG filter to a batch of images.
+
+    Args:
+        images: (B, H, W) tensor of grayscale images.
+        sigma_center: Standard deviation for the center Gaussian.
+        sigma_surround: Standard deviation for the surround Gaussian.
+
+    Returns:
+        (B, 2, H, W) tensor with on/off DoG channels.
+    """
+    imgs = images.unsqueeze(1)  # (B, 1, H, W)
+    kc = _make_gaussian_kernel(sigma_center, images.device)
+    ks = _make_gaussian_kernel(sigma_surround, images.device)
+    gc = F.conv2d(
+        F.conv2d(imgs, kc.unsqueeze(2), padding=(0, kc.shape[-1] // 2)),
+        kc.unsqueeze(3),
+        padding=(kc.shape[-1] // 2, 0),
+    )
+    gs = F.conv2d(
+        F.conv2d(imgs, ks.unsqueeze(2), padding=(0, ks.shape[-1] // 2)),
+        ks.unsqueeze(3),
+        padding=(ks.shape[-1] // 2, 0),
+    )
+    dog = gc - gs
+    return torch.cat((dog.clamp(min=0), (-dog).clamp(min=0)), dim=1)
+
+
 def apply_difference_of_gaussians_filter(
     image: torch.Tensor, sigma_center: float = 1.0, sigma_surround: float = 2.0
 ) -> torch.Tensor:

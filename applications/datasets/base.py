@@ -1,9 +1,11 @@
+import os
+
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 from spiking.preprocessing import (
-    apply_difference_of_gaussians_filter,
+    apply_difference_of_gaussians_filter_batch,
     apply_latency_encoding,
     discretize_times,
 )
@@ -15,6 +17,7 @@ class SpikeEncodingDataset(Dataset):
         inputs: torch.Tensor,
         outputs: torch.Tensor,
         image_shape: tuple[int, int] | None = None,
+        cache_path: str | None = None,
     ):
         self.outputs = outputs.long()
         self.inputs = inputs.float()
@@ -26,14 +29,14 @@ class SpikeEncodingDataset(Dataset):
                 mode="nearest",
             ).squeeze(1)
 
-        self.all_times = torch.stack(
-            [
-                discretize_times(
-                    apply_latency_encoding(apply_difference_of_gaussians_filter(img))
-                )
-                for img in self.inputs
-            ]
-        )
+        if cache_path and os.path.exists(cache_path):
+            self.all_times = torch.load(cache_path, weights_only=True)
+        else:
+            dog = apply_difference_of_gaussians_filter_batch(self.inputs)
+            self.all_times = discretize_times(apply_latency_encoding(dog))
+            if cache_path:
+                os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                torch.save(self.all_times, cache_path)
 
     @property
     def image_shape(self) -> tuple[int, int]:

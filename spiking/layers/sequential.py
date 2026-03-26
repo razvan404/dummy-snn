@@ -1,16 +1,17 @@
 import torch
+import torch.nn as nn
 
 from spiking.spiking_module import SpikingModule
 
 
 class SpikingSequential(SpikingModule):
     def __init__(self, *layers: SpikingModule):
-        self.layers = list(layers)
-        assert len(self.layers) >= 1
+        assert len(layers) >= 1
         super().__init__(
-            num_inputs=self.layers[0].num_inputs,
-            num_outputs=self.layers[-1].num_outputs,
+            num_inputs=layers[0].num_inputs,
+            num_outputs=layers[-1].num_outputs,
         )
+        self.layers = nn.ModuleList(layers)
 
     @property
     def spike_times(self):

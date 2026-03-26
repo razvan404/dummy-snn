@@ -57,8 +57,8 @@ class TestEncodeWhitenedImage:
         assert (finite >= 0).all()
         assert (finite < 1).all()
 
-    def test_channel_ordering(self):
-        """Channels should be ordered [R+, G+, B+, R-, G-, B-]."""
+    def test_channel_ordering_interleaved(self):
+        """Channels should be interleaved [R+, R-, G+, G-, B+, B-]."""
         # Image with: R=+1, G=-1, B=+0.5
         image = torch.tensor(
             [
@@ -68,12 +68,21 @@ class TestEncodeWhitenedImage:
             ]
         )  # (3, 1, 1)
         result = encode_whitened_image(image)
-        # R+: finite, R-: inf
+        # R+ at index 0: finite, R- at index 1: inf
         assert torch.isfinite(result[0, 0, 0])
-        assert torch.isinf(result[3, 0, 0])
-        # G+: inf, G-: finite
         assert torch.isinf(result[1, 0, 0])
+        # G+ at index 2: inf, G- at index 3: finite
+        assert torch.isinf(result[2, 0, 0])
+        assert torch.isfinite(result[3, 0, 0])
+        # B+ at index 4: finite, B- at index 5: inf
         assert torch.isfinite(result[4, 0, 0])
-        # B+: finite, B-: inf
-        assert torch.isfinite(result[2, 0, 0])
         assert torch.isinf(result[5, 0, 0])
+
+    def test_per_sample_scaling(self):
+        """Per-sample min-max scaling: max maps to +1, min maps to -1."""
+        image = torch.tensor([[[2.0, -1.0]]])  # (1, 1, 2), min=-1, max=2
+        result = encode_whitened_image(image)
+        # 2.0 → scaled to +1.0 → pos channel: 1.0 → spike time 0.0 (earliest)
+        assert result[0, 0, 0] == 0.0
+        # -1.0 → scaled to -1.0 → neg channel: 1.0 → spike time 0.0 (earliest)
+        assert result[1, 0, 1] == 0.0

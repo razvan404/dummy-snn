@@ -5,7 +5,7 @@ import os
 from tqdm import tqdm
 
 from applications.datasets import DATASETS, create_dataset
-from applications.threshold_research.analysis import compute_post_hoc_metrics
+from applications.threshold_research.metrics import compute_post_hoc_metrics
 from applications.threshold_research.run_perturbation import _find_models
 
 

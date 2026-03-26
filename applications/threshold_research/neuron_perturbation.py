@@ -79,7 +79,7 @@ def spike_times_from_potentials(
     return result
 
 
-def _collect_input_times(loader):
+def collect_input_times(loader: DataLoader) -> torch.Tensor:
     """Collect all input spike times from a DataLoader into a single tensor."""
     batched = DataLoader(loader.dataset, batch_size=256, shuffle=False)
     parts = []
@@ -88,7 +88,12 @@ def _collect_input_times(loader):
     return torch.cat(parts, dim=0)
 
 
-def _compute_fraction_features(cum_potentials, boundary_times, thresholds, t_target):
+def compute_features_with_thresholds(
+    cum_potentials: torch.Tensor,
+    boundary_times: torch.Tensor,
+    thresholds: torch.Tensor,
+    t_target: float | None,
+) -> np.ndarray:
     """Compute feature matrix for all neurons at a given set of thresholds."""
     n_samples = cum_potentials.shape[0]
     num_outputs = cum_potentials.shape[1]
@@ -107,11 +112,11 @@ def _compute_fraction_features(cum_potentials, boundary_times, thresholds, t_tar
 # --- Cache helpers ---
 
 
-def _feature_cache_exists(cache_dir):
+def _feature_cache_exists(cache_dir: str) -> bool:
     return os.path.exists(os.path.join(cache_dir, "metadata.json"))
 
 
-def _save_feature_cache(cache_dir, features):
+def _save_feature_cache(cache_dir: str, features: dict) -> None:
     os.makedirs(cache_dir, exist_ok=True)
     np.save(os.path.join(cache_dir, "baseline_train.npy"), features["baseline_train"])
     np.save(os.path.join(cache_dir, "baseline_val.npy"), features["baseline_val"])
@@ -129,7 +134,7 @@ def _save_feature_cache(cache_dir, features):
         )
 
 
-def _load_feature_cache(cache_dir):
+def _load_feature_cache(cache_dir: str) -> dict:
     with open(os.path.join(cache_dir, "metadata.json")) as f:
         metadata = json.load(f)
     return {
@@ -137,14 +142,23 @@ def _load_feature_cache(cache_dir):
         "baseline_val": np.load(os.path.join(cache_dir, "baseline_val.npy")),
         "labels_train": np.load(os.path.join(cache_dir, "labels_train.npy")),
         "labels_val": np.load(os.path.join(cache_dir, "labels_val.npy")),
-        "perturbed_train": np.load(os.path.join(cache_dir, "perturbed_train.npy"), mmap_mode="r"),
-        "perturbed_val": np.load(os.path.join(cache_dir, "perturbed_val.npy"), mmap_mode="r"),
+        "perturbed_train": np.load(
+            os.path.join(cache_dir, "perturbed_train.npy"), mmap_mode="r"
+        ),
+        "perturbed_val": np.load(
+            os.path.join(cache_dir, "perturbed_val.npy"), mmap_mode="r"
+        ),
         "original_thresholds": metadata["original_thresholds"],
         "perturbation_fractions": metadata["perturbation_fractions"],
     }
 
 
-def _save_partial_results(cache_dir, completed_fractions, accuracy_matrix, f1_matrix):
+def _save_partial_results(
+    cache_dir: str,
+    completed_fractions: set[int],
+    accuracy_matrix: np.ndarray,
+    f1_matrix: np.ndarray,
+) -> None:
     os.makedirs(cache_dir, exist_ok=True)
     sorted_completed = sorted(completed_fractions)
     partial = {
@@ -156,7 +170,7 @@ def _save_partial_results(cache_dir, completed_fractions, accuracy_matrix, f1_ma
         json.dump(partial, f)
 
 
-def _load_partial_results(cache_dir):
+def _load_partial_results(cache_dir: str) -> dict | None:
     path = os.path.join(cache_dir, "partial_results.json")
     if not os.path.exists(path):
         return None
@@ -199,13 +213,13 @@ def compute_perturbed_features(
     perturbation_fractions = [round(-0.5 + i * 0.025, 3) for i in range(31)]
 
     # Extract unperturbed features as baseline
-    X_train, y_train = extract_features(sub_model, train_loader, spike_shape, t_target)
-    X_val, y_val = extract_features(sub_model, val_loader, spike_shape, t_target)
+    X_train, y_train = extract_features(sub_model, train_loader, t_target)
+    X_val, y_val = extract_features(sub_model, val_loader, t_target)
 
     # Precompute cumulative potentials for both train and val
     weights = layer.weights.detach()
-    train_input_times = _collect_input_times(train_loader)
-    val_input_times = _collect_input_times(val_loader)
+    train_input_times = collect_input_times(train_loader)
+    val_input_times = collect_input_times(val_loader)
 
     train_cum, train_boundary = precompute_cumulative_potentials(
         train_input_times, weights
@@ -221,10 +235,10 @@ def compute_perturbed_features(
 
     for frac_idx, frac in enumerate(perturbation_fractions):
         new_thresholds = original_thresholds * (1.0 + frac)
-        perturbed_train[frac_idx] = _compute_fraction_features(
+        perturbed_train[frac_idx] = compute_features_with_thresholds(
             train_cum, train_boundary, new_thresholds, t_target
         )
-        perturbed_val[frac_idx] = _compute_fraction_features(
+        perturbed_val[frac_idx] = compute_features_with_thresholds(
             val_cum, val_boundary, new_thresholds, t_target
         )
 
@@ -263,7 +277,7 @@ def evaluate_perturbations(
     and resumes from partial results on restart.
     """
     if classifier_factory is None:
-        classifier_factory = lambda: RidgeClassifier()
+        classifier_factory = RidgeClassifier
 
     X_train = features["baseline_train"]
     X_val = features["baseline_val"]
@@ -350,6 +364,14 @@ def evaluate_perturbations(
         "f1_matrix": f1_matrix.tolist(),
         "optimal_thresholds": optimal_thresholds,
         "optimal_deltas": optimal_deltas,
+        **(
+            {
+                "baseline_classifier_coef": baseline_clf.coef_.tolist(),
+                "baseline_classifier_intercept": baseline_clf.intercept_.tolist(),
+            }
+            if hasattr(baseline_clf, "coef_")
+            else {}
+        ),
     }
 
 

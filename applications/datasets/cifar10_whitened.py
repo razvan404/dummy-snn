@@ -1,12 +1,19 @@
+import logging
+
 import torch
 import torchvision
 from torch.utils.data import Dataset, DataLoader
 
+logger = logging.getLogger(__name__)
+
 from spiking.preprocessing.whitening_kernels import (
     fit_whitening_kernels,
     apply_whitening_kernels,
+    compute_patch_mean,
+    load_kernels,
 )
 from spiking.preprocessing.whitened_spike_encoding import encode_whitened_image
+from spiking.preprocessing.latency_encoding import discretize_times
 
 
 class Cifar10WhitenedDataset(Dataset):
@@ -16,10 +23,11 @@ class Cifar10WhitenedDataset(Dataset):
         split: str,
         patch_size: int = 9,
         epsilon: float = 1e-2,
-        rho: float = 1.0,
+        rho: float = 0.15,
         n_patches: int = 1_000_000,
         kernels: torch.Tensor | None = None,
         mean: torch.Tensor | None = None,
+        kernels_path: str | None = None,
     ):
         if split not in ("train", "test"):
             raise ValueError(f"Invalid split: {split!r}, must be 'train' or 'test'")
@@ -33,8 +41,20 @@ class Cifar10WhitenedDataset(Dataset):
 
         self.outputs = torch.tensor(dataset.targets, dtype=torch.long)
 
-        # Fit or reuse whitening kernels
-        if kernels is None:
+        # Load pre-computed kernels, reuse provided kernels, or fit from data
+        if kernels_path is not None:
+            logger.info("  Loading whitening kernels from %s...", kernels_path)
+            self.kernels = load_kernels(kernels_path)
+            self.mean = compute_patch_mean(
+                images, patch_size=patch_size, n_patches=n_patches
+            )
+        elif kernels is not None:
+            self.kernels = kernels
+            self.mean = mean
+        else:
+            logger.info(
+                "  Fitting whitening kernels (%s, %d patches)...", split, n_patches
+            )
             self.kernels, self.mean = fit_whitening_kernels(
                 images,
                 patch_size=patch_size,
@@ -42,16 +62,18 @@ class Cifar10WhitenedDataset(Dataset):
                 epsilon=epsilon,
                 rho=rho,
             )
-        else:
-            self.kernels = kernels
-            self.mean = mean
 
-        # Apply whitening and encode as spikes
+        # Apply whitening, then per-sample encode as spikes (Falez 2020 Section IV-A)
+        logger.info("  Whitening + encoding %d images (%s)...", len(images), split)
         whitened = apply_whitening_kernels(images, self.kernels, self.mean)
 
         self.all_times = torch.stack(
-            [encode_whitened_image(whitened[i]) for i in range(len(whitened))]
+            [
+                discretize_times(encode_whitened_image(whitened[i]))
+                for i in range(len(whitened))
+            ]
         )
+        logger.info("  Done (%s).", split)
 
     @property
     def image_shape(self) -> tuple[int, int, int]:
@@ -68,11 +90,13 @@ class Cifar10WhitenedDataset(Dataset):
 def create_cifar10_whitened(
     patch_size: int = 9,
     epsilon: float = 1e-2,
-    rho: float = 1.0,
+    rho: float = 0.15,
+    kernels_path: str | None = None,
 ) -> tuple[DataLoader, DataLoader]:
     """Create train and test loaders for whitened CIFAR-10.
 
-    Fits whitening kernels on training data and reuses for test.
+    Fits whitening kernels on training data and reuses for test,
+    or loads pre-computed kernels from kernels_path.
     """
     train_dataset = Cifar10WhitenedDataset(
         "data",
@@ -80,6 +104,7 @@ def create_cifar10_whitened(
         patch_size=patch_size,
         epsilon=epsilon,
         rho=rho,
+        kernels_path=kernels_path,
     )
     test_dataset = Cifar10WhitenedDataset(
         "data",

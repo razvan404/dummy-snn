@@ -7,6 +7,7 @@ from .fer2013 import Fer2013Dataset
 from .mnist import MnistDataset
 from .mnist_subset import MnistSubsetDataset
 from .cifar10_whitened import Cifar10WhitenedDataset, create_cifar10_whitened
+from .cifar10_patches import Cifar10PatchDataset
 
 
 def create_dataset(name: str) -> tuple[DataLoader, DataLoader]:

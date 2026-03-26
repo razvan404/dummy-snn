@@ -112,7 +112,10 @@ def train_layer(
     )
 
     train_m, val_m = evaluate_model(
-        sub_model, train_loader, val_loader, spike_shape, t_target=t_objective,
+        sub_model,
+        train_loader,
+        val_loader,
+        t_target=t_objective,
     )
 
     os.makedirs(output_dir, exist_ok=True)

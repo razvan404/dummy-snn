@@ -154,7 +154,7 @@ def main():
 
     print("\nEvaluating model BEFORE post-training...")
     before_train, before_val = evaluate_model(
-        copy.deepcopy(model), train_loader, val_loader, image_shape=spike_shape
+        copy.deepcopy(model), train_loader, val_loader
     )
     print(f"  Train accuracy: {before_train['accuracy']:.4f}")
     print(f"  Val accuracy: {before_val['accuracy']:.4f}")
@@ -203,9 +203,7 @@ def main():
             break
 
     print("\nEvaluating model AFTER post-training...")
-    after_train, after_val = evaluate_model(
-        model, train_loader, val_loader, image_shape=spike_shape
-    )
+    after_train, after_val = evaluate_model(model, train_loader, val_loader)
     print(f"  Train accuracy: {after_train['accuracy']:.4f}")
     print(f"  Val accuracy: {after_val['accuracy']:.4f}")
 

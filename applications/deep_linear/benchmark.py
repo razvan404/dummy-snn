@@ -90,7 +90,6 @@ def main():
             model_no_pba,
             train_loader,
             val_loader,
-            spike_shape,
         )
         metrics_no_pba = {"train": train_m, "validation": val_m}
         no_pba_metrics.append(metrics_no_pba)
@@ -111,7 +110,6 @@ def main():
             model_pba,
             train_loader,
             val_loader,
-            spike_shape,
         )
         metrics_pba = {"train": train_m, "validation": val_m}
         with_pba_metrics.append(metrics_pba)

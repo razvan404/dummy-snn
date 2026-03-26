@@ -52,7 +52,7 @@ def train_one_layer(exp_name: str, setup: dict):
     )
 
     model = model.cpu()
-    save_visualizations(monitor, figures_dir, spike_shape[1:])
+    save_visualizations(monitor, figures_dir, spike_shape)
     train_metrics, val_metrics = eval_snn(
         model,
         train_loader=train_loader,

@@ -50,8 +50,8 @@ def evaluate_optimal_thresholds(
     original_thresholds = layer.thresholds.detach().clone()
 
     # Baseline: extract features, fit classifier, get importance
-    X_train, y_train = extract_features(sub_model, train_loader, spike_shape, t_target)
-    X_val, y_val = extract_features(sub_model, val_loader, spike_shape, t_target)
+    X_train, y_train = extract_features(sub_model, train_loader, t_target)
+    X_val, y_val = extract_features(sub_model, val_loader, t_target)
     baseline_metrics, baseline_importance = _fit_and_evaluate(
         X_train, y_train, X_val, y_val
     )
@@ -61,8 +61,8 @@ def evaluate_optimal_thresholds(
         perturbation_results["optimal_thresholds"], dtype=layer.thresholds.dtype
     )
     layer.thresholds.data.copy_(optimal)
-    X_train_opt, _ = extract_features(sub_model, train_loader, spike_shape, t_target)
-    X_val_opt, _ = extract_features(sub_model, val_loader, spike_shape, t_target)
+    X_train_opt, _ = extract_features(sub_model, train_loader, t_target)
+    X_val_opt, _ = extract_features(sub_model, val_loader, t_target)
     optimal_metrics, optimal_importance = _fit_and_evaluate(
         X_train_opt, y_train, X_val_opt, y_val
     )

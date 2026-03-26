@@ -6,7 +6,13 @@ from spiking import SpikingModule
 
 
 class TrainingMonitor:
-    def __init__(self, model: SpikingModule, splits: list[str] | None = None, log_interval: int = 1):
+    def __init__(
+        self,
+        model: SpikingModule,
+        splits: list[str] | None = None,
+        log_interval: int = 1,
+        sample_neuron_indices: list[int] | None = None,
+    ):
         if splits is None:
             splits = ["train", "val", "test"]
         self.model = model
@@ -14,7 +20,11 @@ class TrainingMonitor:
         self._batch_count = 0
         self.weight_diffs = {split: [] for split in splits}
 
-        self.SAMPLE_NEURON_INDICES = [1, 10, 56, 99]
+        if sample_neuron_indices is None:
+            sample_neuron_indices = [
+                i for i in [1, 10, 56, 99] if i < model.num_outputs
+            ]
+        self.SAMPLE_NEURON_INDICES = sample_neuron_indices
         self.thresholds = {
             "mean": [],
             "min": [],
@@ -123,23 +133,3 @@ class TrainingMonitor:
         plt.xlabel("Neuron Index")
         plt.ylabel("Activity")
         plt.title("Neuron Activity Bar Plot")
-
-    def visualize_weights(
-        self, image_shape: tuple[int, int], neurons_indices=None, ncols: int = 4
-    ):
-        if neurons_indices is None:
-            neurons_indices = range(self.model.num_outputs)
-
-        nrows = (len(neurons_indices) - 1) // ncols + 1
-        plt.figure(figsize=(ncols * 2, nrows * 2))
-        plt.suptitle("Weights")
-        for idx, neuron_idx in enumerate(neurons_indices, start=1):
-            img = self.model.weights[neuron_idx].reshape((2, *image_shape))
-            padding = torch.zeros((1, *image_shape), device=img.device)
-            img = torch.cat([img, padding], dim=0)
-            img = img.permute(1, 2, 0).detach().cpu().numpy()
-
-            plt.subplot(nrows, ncols, idx)
-            plt.title(str(int(neuron_idx)))
-            plt.axis("off")
-            plt.imshow(img)

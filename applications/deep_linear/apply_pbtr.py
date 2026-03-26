@@ -73,7 +73,6 @@ def apply_pbtr(
         sub_model,
         train_loader,
         val_loader,
-        spike_shape,
         t_target=t_target,
     )
 

@@ -42,9 +42,7 @@ def sweep_thresholds(
     mean_thresh = layer.thresholds.mean().item()
 
     sub_model = SpikingSequential(*model.layers[: layer_idx + 1])
-    _, baseline_metrics = evaluate_model(
-        sub_model, train_loader, val_loader, spike_shape
-    )
+    _, baseline_metrics = evaluate_model(sub_model, train_loader, val_loader)
     baseline_acc = baseline_metrics["accuracy"]
 
     results = {
@@ -83,9 +81,7 @@ def sweep_thresholds(
                     )
 
                 sub_model = SpikingSequential(*model.layers[: layer_idx + 1])
-                _, val_m = evaluate_model(
-                    sub_model, train_loader, val_loader, spike_shape
-                )
+                _, val_m = evaluate_model(sub_model, train_loader, val_loader)
                 entry[dist_name]["accuracies"].append(val_m["accuracy"])
 
         for dist_name in ("normal", "uniform"):

@@ -1,21 +1,23 @@
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 from spiking.evaluation.feature_extraction import spike_times_to_features
+from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 
 
 def sum_pool_features(features: torch.Tensor, pool_size: int = 2) -> torch.Tensor:
-    """Apply sum pooling to spatial feature maps.
+    """Divide spatial feature maps into a pool_size × pool_size grid and sum each region.
+
+    For pool_size=2 with 28×28 input: divides into 4 quadrants of 14×14 each,
+    sums each quadrant → output 2×2 per filter.
 
     Args:
         features: (F, oH, oW) or (B, F, oH, oW) feature tensor.
-        pool_size: Spatial pooling window size.
+        pool_size: Number of regions per spatial dimension.
 
     Returns:
-        Pooled tensor with spatial dims divided by pool_size.
+        Tensor with spatial dims equal to pool_size × pool_size.
     """
     if pool_size == 1:
         return features
@@ -24,8 +26,11 @@ def sum_pool_features(features: torch.Tensor, pool_size: int = 2) -> torch.Tenso
     if needs_batch:
         features = features.unsqueeze(0)
 
-    # Sum pooling = avg_pool * pool_size^2
-    pooled = F.avg_pool2d(features.float(), pool_size) * (pool_size**2)
+    B, F_dim, H, W = features.shape
+    rH, rW = H // pool_size, W // pool_size
+    # Trim to exact multiple and reshape into grid of regions
+    trimmed = features[:, :, : rH * pool_size, : rW * pool_size]
+    pooled = trimmed.reshape(B, F_dim, pool_size, rH, pool_size, rW).sum(dim=(3, 5))
 
     if needs_batch:
         pooled = pooled.squeeze(0)
@@ -55,22 +60,16 @@ def extract_conv_features(
     """
     model.eval()
 
-    # Collect all data into a single batch
-    full_loader = DataLoader(
-        dataloader.dataset, batch_size=len(dataloader.dataset), shuffle=False
-    )
-    all_times, all_labels = next(iter(full_loader))
+    chunk_loader = DataLoader(dataloader.dataset, batch_size=256, shuffle=False)
 
-    # Batched analytical inference: (B, C, H, W) → (B, F, oH, oW)
-    spike_times = model.infer_spike_times_batch(all_times)
+    X_parts: list[np.ndarray] = []
+    y_parts: list[np.ndarray] = []
 
-    # Convert spike times to features
-    features = spike_times_to_features(spike_times, t_target)  # (B, F, oH, oW)
+    for batch_times, batch_labels in chunk_loader:
+        spike_times = model.infer_spike_times_batch(batch_times)
+        features = spike_times_to_features(spike_times, t_target)
+        pooled = sum_pool_features(features, pool_size)
+        X_parts.append(pooled.flatten(1).numpy())
+        y_parts.append(batch_labels.numpy())
 
-    # Apply sum pooling
-    pooled = sum_pool_features(features, pool_size)  # (B, F, pH, pW)
-
-    # Flatten spatial dims
-    X = pooled.flatten(1).numpy()  # (B, F * pH * pW)
-    y = all_labels.numpy()
-    return X, y
+    return np.concatenate(X_parts, axis=0), np.concatenate(y_parts, axis=0)

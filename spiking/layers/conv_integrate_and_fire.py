@@ -112,10 +112,7 @@ class ConvIntegrateAndFireLayer(SpikingModule):
             self.membrane_potentials >= self.thresholds.view(-1, 1, 1)
         ) & update_mask
         if crossed.any():
-            if self.training:
-                self._output_spikes[crossed] = 1.0
-            else:
-                self._output_spikes[crossed] = 1.0
+            self._output_spikes[crossed] = 1.0
             self.membrane_potentials[crossed] = 0.0
             self._spike_times[crossed] = current_time
             self.refractory_times[crossed] = self.refractory_period

@@ -16,16 +16,15 @@ def set_seed(seed: int):
         torch.cuda.manual_seed(seed)
 
 
-def evaluate_model(model, train_loader, val_loader, image_shape, t_target=None):
+def evaluate_model(model, train_loader, val_loader, t_target=None):
     """Extract features and evaluate classifier. Moves model to CPU.
 
-    image_shape: e.g. (2, 16, 16) — the full spike volume shape.
     t_target: if provided, use Falez Eq 10 for feature conversion.
     """
     model = model.cpu()
 
-    X_train, y_train = extract_features(model, train_loader, image_shape, t_target)
-    X_test, y_test = extract_features(model, val_loader, image_shape, t_target)
+    X_train, y_train = extract_features(model, train_loader, t_target)
+    X_test, y_test = extract_features(model, val_loader, t_target)
 
     return evaluate_classifier(X_train, y_train, X_test, y_test)
 

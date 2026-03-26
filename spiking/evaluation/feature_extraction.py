@@ -3,6 +3,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from spiking import SpikingModule
+from spiking.evaluation.decoding import LinearInversion, TargetRelative
 
 
 def spike_times_to_features(
@@ -14,18 +15,32 @@ def spike_times_to_features(
     Without t_target: linear inversion, clamp(1 - t, 0, 1).
     With t_target: Falez Eq 10, clamp(1 - (t - t_target) / (1 - t_target), 0, 1).
     """
-    if t_target is None:
-        return torch.clamp(1.0 - spike_times, min=0, max=1.0)
-    return torch.clamp(
-        1.0 - (spike_times - t_target) / (1.0 - t_target), min=0, max=1.0
+    decoder = TargetRelative(t_target) if t_target is not None else LinearInversion()
+    return decoder.decode(spike_times)
+
+
+@torch.no_grad()
+def extract_spike_times(
+    model: SpikingModule,
+    dataloader: DataLoader,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run model inference on a dataloader and return raw spike times and labels.
+
+    Returns (spike_times, labels) as torch tensors.
+    """
+    model.eval()
+    full_loader = DataLoader(
+        dataloader.dataset, batch_size=len(dataloader.dataset), shuffle=False
     )
+    all_times, all_labels = next(iter(full_loader))
+    spike_times = model.infer_spike_times_batch(all_times.flatten(1))
+    return spike_times, all_labels
 
 
 @torch.no_grad()
 def extract_features(
     model: SpikingModule,
     dataloader: DataLoader,
-    shape: tuple[int, int, int],
     t_target: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Run model inference on a dataloader and return (X, y) numpy arrays.
@@ -34,7 +49,9 @@ def extract_features(
     Processes the full dataset in one batch for optimal matmul throughput.
     """
     model.eval()
-    full_loader = DataLoader(dataloader.dataset, batch_size=len(dataloader.dataset), shuffle=False)
+    full_loader = DataLoader(
+        dataloader.dataset, batch_size=len(dataloader.dataset), shuffle=False
+    )
     all_times, all_labels = next(iter(full_loader))
     spike_times = model.infer_spike_times_batch(all_times.flatten(1))
     X = spike_times_to_features(spike_times, t_target).numpy()

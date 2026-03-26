@@ -16,13 +16,27 @@ class TestFitWhiteningKernels:
     def test_kernel_shape_rgb(self):
         images = make_random_rgb_images(n=50)
         kernels, mean = fit_whitening_kernels(images, patch_size=5, n_patches=500)
-        # One kernel per channel, depthwise: (C, 1, kH, kW)
-        assert kernels.shape == (3, 1, 5, 5)
+        # Cross-channel kernels: (C_out, C_in, kH, kW)
+        assert kernels.shape == (3, 3, 5, 5)
 
     def test_kernel_shape_grayscale(self):
         images = torch.rand(50, 1, 16, 16)
         kernels, mean = fit_whitening_kernels(images, patch_size=3, n_patches=200)
         assert kernels.shape == (1, 1, 3, 3)
+
+    def test_default_rho(self):
+        """Default rho should be 0.15 per Falez 2020."""
+        images = make_random_rgb_images(n=50)
+        kernels, mean = fit_whitening_kernels(images, patch_size=5, n_patches=500)
+        # With rho=0.15, only ~15% of eigenvalues retained, but kernel shape stays the same
+        assert kernels.shape == (3, 3, 5, 5)
+
+    def test_filter_mean_is_zero(self):
+        """Each kernel should have zero mean (DC removal)."""
+        images = make_random_rgb_images(n=50)
+        kernels, mean = fit_whitening_kernels(images, patch_size=5, n_patches=500)
+        for c in range(kernels.shape[0]):
+            assert abs(kernels[c].mean().item()) < 1e-6
 
     def test_mean_shape(self):
         images = make_random_rgb_images(n=50)
@@ -42,7 +56,7 @@ class TestFitWhiteningKernels:
         kernels, mean = fit_whitening_kernels(
             images, patch_size=5, n_patches=500, rho=0.5
         )
-        assert kernels.shape == (3, 1, 5, 5)
+        assert kernels.shape == (3, 3, 5, 5)
         assert torch.isfinite(kernels).all()
 
 

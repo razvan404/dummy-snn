@@ -94,11 +94,9 @@ def benchmark_architecture(
         )
 
         model = model.cpu()
-        X_train, y_train = extract_features(model, train_loader, image_shape)
-        X_val, y_val = extract_features(model, val_loader, image_shape)
-        train_metrics, val_metrics = evaluate_classifier(
-            X_train, y_train, X_val, y_val
-        )
+        X_train, y_train = extract_features(model, train_loader)
+        X_val, y_val = extract_features(model, val_loader)
+        train_metrics, val_metrics = evaluate_classifier(X_train, y_train, X_val, y_val)
 
         metrics = {"train": train_metrics, "validation": val_metrics}
         all_metrics.append(metrics)

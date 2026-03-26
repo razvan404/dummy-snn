@@ -31,8 +31,8 @@ def eval_snn(
 ):
     from sklearn.svm import LinearSVC
 
-    X_train, y_train = extract_features(model, train_loader, spike_shape)
-    X_test, y_test = extract_features(model, val_loader, spike_shape)
+    X_train, y_train = extract_features(model, train_loader)
+    X_test, y_test = extract_features(model, val_loader)
 
     if verbose:
         print(f"{X_train.shape = }, {y_train.shape = }")

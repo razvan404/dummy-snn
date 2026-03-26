@@ -32,7 +32,7 @@ def apply_threshold_transform(
     transform_fn(layer)
 
     sub_model = SpikingSequential(*model.layers[: layer_idx + 1])
-    train_m, val_m = evaluate_model(sub_model, train_loader, val_loader, spike_shape)
+    train_m, val_m = evaluate_model(sub_model, train_loader, val_loader)
 
     os.makedirs(output_dir, exist_ok=True)
     save_model(model, f"{output_dir}/model.pth")

@@ -7,11 +7,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
+from applications.deep_linear.visualize_weights import save_weight_figure
 from spiking.training import TrainingMonitor
 
 
 def save_visualizations(
-    monitor: TrainingMonitor, figures_dir: str, image_shape: tuple[int, int]
+    monitor: TrainingMonitor, figures_dir: str, spike_shape: tuple[int, ...]
 ):
     """Save weight evolution, network evolution, and weight visualization plots."""
     plt.figure(figsize=(12, 5))
@@ -32,13 +33,12 @@ def save_visualizations(
     plt.savefig(f"{figures_dir}/network_evolution.png")
     plt.close()
 
-    monitor.visualize_weights(
-        image_shape,
-        monitor.most_active_neurons(min(32, monitor.model.num_outputs)),
+    save_weight_figure(
+        monitor.model,
+        spike_shape,
+        f"{figures_dir}/weights.png",
         ncols=8,
     )
-    plt.savefig(f"{figures_dir}/weights.png")
-    plt.close()
 
 
 def plot_comparison(all_metrics: dict, output_dir: str):

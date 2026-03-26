@@ -1,3 +1,4 @@
+from .base import BaseLearner
 from .competition import CompetitionMechanism
 from .conv_learner import ConvLearner
 from .learner import Learner
@@ -7,6 +8,7 @@ from .stdp import STDP
 from .wta import WinnerTakesAll
 
 __all__ = [
+    "BaseLearner",
     "CompetitionMechanism",
     "ConvLearner",
     "Learner",
