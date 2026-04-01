@@ -45,6 +45,17 @@ class BaseUnsupervisedTrainer(ABC):
         """
         return prepared_times
 
+    def _write_spike_times(self, layer: SpikingModule, spike_times: torch.Tensor) -> None:
+        """Write inferred spike times into the layer's state buffer.
+
+        Handles lazy spatial buffer initialization for conv layers whose
+        _spike_times buffer doesn't exist until the first forward() call.
+        """
+        if hasattr(layer, "_spatial_initialized") and not layer._spatial_initialized:
+            oH, oW = spike_times.shape[1], spike_times.shape[2]
+            layer._ensure_spatial_buffers(oH, oW)
+        layer._spike_times.copy_(spike_times)
+
     def _forward_analytical(self, prepared: torch.Tensor) -> None:
         """Run analytical spike time inference and write results into model state.
 
@@ -55,11 +66,11 @@ class BaseUnsupervisedTrainer(ABC):
             times = prepared
             for layer in self.model.layers:
                 spike_times = layer.infer_spike_times(times)
-                layer._spike_times.copy_(spike_times)
+                self._write_spike_times(layer, spike_times)
                 times = spike_times
         else:
             spike_times = self.model.infer_spike_times(prepared)
-            self.model._spike_times.copy_(spike_times)
+            self._write_spike_times(self.model, spike_times)
 
     def step_batch(
         self,

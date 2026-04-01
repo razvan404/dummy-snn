@@ -23,8 +23,9 @@ class Cifar10WhitenedDataset(Dataset):
         split: str,
         patch_size: int = 9,
         epsilon: float = 1e-2,
-        rho: float = 0.15,
+        rho: float = 1.0,
         n_patches: int = 1_000_000,
+        num_bins: int = 16,
         kernels: torch.Tensor | None = None,
         mean: torch.Tensor | None = None,
         kernels_path: str | None = None,
@@ -69,7 +70,7 @@ class Cifar10WhitenedDataset(Dataset):
 
         self.all_times = torch.stack(
             [
-                discretize_times(encode_whitened_image(whitened[i]))
+                discretize_times(encode_whitened_image(whitened[i]), num_bins=num_bins)
                 for i in range(len(whitened))
             ]
         )
@@ -90,7 +91,8 @@ class Cifar10WhitenedDataset(Dataset):
 def create_cifar10_whitened(
     patch_size: int = 9,
     epsilon: float = 1e-2,
-    rho: float = 0.15,
+    rho: float = 1.0,
+    num_bins: int = 16,
     kernels_path: str | None = None,
 ) -> tuple[DataLoader, DataLoader]:
     """Create train and test loaders for whitened CIFAR-10.
@@ -104,12 +106,14 @@ def create_cifar10_whitened(
         patch_size=patch_size,
         epsilon=epsilon,
         rho=rho,
+        num_bins=num_bins,
         kernels_path=kernels_path,
     )
     test_dataset = Cifar10WhitenedDataset(
         "data",
         "test",
         patch_size=patch_size,
+        num_bins=num_bins,
         kernels=train_dataset.kernels,
         mean=train_dataset.mean,
     )

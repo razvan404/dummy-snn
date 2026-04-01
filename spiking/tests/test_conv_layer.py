@@ -2,6 +2,7 @@ import torch
 import pytest
 
 from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
+from spiking.layers.integrate_and_fire import IntegrateAndFireLayer
 from spiking.threshold import NormalInitialization, ConstantInitialization
 from spiking import iterate_spikes
 
@@ -204,3 +205,125 @@ class TestConvLayerAnalyticalInference:
         input_times = torch.full((3, 6, 10, 10), float("inf"))
         result = layer.infer_spike_times_batch(input_times)
         assert torch.isinf(result).all()
+
+
+class TestConvFCEquivalence:
+    """Verify ConvIntegrateAndFireLayer matches IntegrateAndFireLayer
+    when applied to the same input with the same weights."""
+
+    def test_5x5_kernel_on_5x5_image(self):
+        """Single 5x5 patch: conv output is 1x1, must match FC layer exactly."""
+        C, K, F = 6, 5, 8
+        torch.manual_seed(0)
+
+        # Create conv layer
+        conv_init = ConstantInitialization(10.0)
+        conv_layer = ConvIntegrateAndFireLayer(
+            in_channels=C, num_filters=F, kernel_size=K,
+            threshold_initialization=conv_init, refractory_period=float("inf"),
+        )
+
+        # Create FC layer with same weights (flattened)
+        fc_init = ConstantInitialization(10.0)
+        fc_layer = IntegrateAndFireLayer(
+            num_inputs=C * K * K, num_outputs=F,
+            threshold_initialization=fc_init, refractory_period=float("inf"),
+        )
+        fc_layer.weights.data.copy_(conv_layer.weights.data.reshape(F, C * K * K))
+        fc_layer.thresholds.data.copy_(conv_layer.thresholds.data)
+
+        # Input: (C, 5, 5) → conv output is (F, 1, 1)
+        input_times = torch.rand(C, K, K)
+        input_times = (input_times * 16).floor() / 16
+        input_times[input_times >= 1.0] = float("inf")
+
+        conv_result = conv_layer.infer_spike_times(input_times)  # (F, 1, 1)
+        fc_result = fc_layer.infer_spike_times(input_times.flatten())  # (F,)
+
+        assert conv_result.shape == (F, 1, 1)
+        assert fc_result.shape == (F,)
+        assert torch.allclose(conv_result.squeeze(), fc_result), (
+            f"Conv and FC outputs differ:\n"
+            f"  conv: {conv_result.squeeze()}\n"
+            f"  fc:   {fc_result}"
+        )
+
+    def test_5x5_kernel_on_7x7_image_3x3_positions(self):
+        """7x7 image with 5x5 kernel gives 3x3 output. Each spatial position
+        must match the FC layer applied to the corresponding flattened patch."""
+        C, K, F = 6, 5, 8
+        H, W = 7, 7
+        oH, oW = H - K + 1, W - K + 1  # 3, 3
+        torch.manual_seed(1)
+
+        conv_init = ConstantInitialization(10.0)
+        conv_layer = ConvIntegrateAndFireLayer(
+            in_channels=C, num_filters=F, kernel_size=K,
+            threshold_initialization=conv_init, refractory_period=float("inf"),
+        )
+
+        fc_init = ConstantInitialization(10.0)
+        fc_layer = IntegrateAndFireLayer(
+            num_inputs=C * K * K, num_outputs=F,
+            threshold_initialization=fc_init, refractory_period=float("inf"),
+        )
+        fc_layer.weights.data.copy_(conv_layer.weights.data.reshape(F, C * K * K))
+        fc_layer.thresholds.data.copy_(conv_layer.thresholds.data)
+
+        # Input: (C, 7, 7)
+        input_times = torch.rand(C, H, W)
+        input_times = (input_times * 16).floor() / 16
+        input_times[input_times >= 1.0] = float("inf")
+
+        conv_result = conv_layer.infer_spike_times(input_times)  # (F, 3, 3)
+        assert conv_result.shape == (F, oH, oW)
+
+        # Check each of the 3x3 spatial positions against FC layer
+        for r in range(oH):
+            for c in range(oW):
+                patch = input_times[:, r : r + K, c : c + K].flatten()
+                fc_result = fc_layer.infer_spike_times(patch)  # (F,)
+                conv_at_pos = conv_result[:, r, c]
+                assert torch.allclose(conv_at_pos, fc_result), (
+                    f"Mismatch at position ({r},{c}):\n"
+                    f"  conv: {conv_at_pos}\n"
+                    f"  fc:   {fc_result}"
+                )
+
+    def test_batch_5x5_kernel_on_7x7_image(self):
+        """Batch version: same test as above but using infer_spike_times_batch."""
+        C, K, F = 6, 5, 8
+        H, W = 7, 7
+        B = 4
+        torch.manual_seed(2)
+
+        conv_init = ConstantInitialization(10.0)
+        conv_layer = ConvIntegrateAndFireLayer(
+            in_channels=C, num_filters=F, kernel_size=K,
+            threshold_initialization=conv_init, refractory_period=float("inf"),
+        )
+
+        fc_init = ConstantInitialization(10.0)
+        fc_layer = IntegrateAndFireLayer(
+            num_inputs=C * K * K, num_outputs=F,
+            threshold_initialization=fc_init, refractory_period=float("inf"),
+        )
+        fc_layer.weights.data.copy_(conv_layer.weights.data.reshape(F, C * K * K))
+        fc_layer.thresholds.data.copy_(conv_layer.thresholds.data)
+
+        input_times = torch.rand(B, C, H, W)
+        input_times = (input_times * 16).floor() / 16
+        input_times[input_times >= 1.0] = float("inf")
+
+        conv_result = conv_layer.infer_spike_times_batch(input_times)  # (B, F, 3, 3)
+
+        # Verify each batch element and spatial position
+        oH, oW = H - K + 1, W - K + 1
+        for b in range(B):
+            for r in range(oH):
+                for c in range(oW):
+                    patch = input_times[b, :, r : r + K, c : c + K].flatten()
+                    fc_result = fc_layer.infer_spike_times(patch)
+                    assert torch.allclose(conv_result[b, :, r, c], fc_result), (
+                        f"Mismatch at batch={b}, pos=({r},{c})"
+                    )

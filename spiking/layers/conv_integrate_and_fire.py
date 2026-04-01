@@ -135,6 +135,9 @@ class ConvIntegrateAndFireLayer(SpikingModule):
     def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
         """Compute first spike times analytically without mutating model state.
 
+        Vectorized: builds all time-step masks at once, runs a single batched
+        conv2d, then uses cumsum to find the first threshold crossing.
+
         Args:
             input_times: (C, H, W) tensor of spike times (inf = no spike).
 
@@ -153,34 +156,34 @@ class ConvIntegrateAndFireLayer(SpikingModule):
             return result
 
         unique_times = input_times[finite_mask].unique().sort()[0]
+        K = len(unique_times)
 
-        cum_potential = torch.zeros((self.num_filters, oH, oW), dtype=input_times.dtype)
-        not_yet_spiked = torch.ones((self.num_filters, oH, oW), dtype=torch.bool)
+        # Build all K binary masks at once: (K, C, H, W)
+        masks = (input_times.unsqueeze(0) == unique_times.view(K, 1, 1, 1)).float()
 
-        for t in unique_times:
-            active = (input_times == t).float()  # (C, H, W)
-            contrib = F.conv2d(
-                active.unsqueeze(0),
-                self.weights,
-                stride=self.stride,
-                padding=self.padding,
-            ).squeeze(
-                0
-            )  # (F, oH, oW)
-            cum_potential += contrib
+        # Single batched conv2d: (K, F, oH, oW)
+        contribs = F.conv2d(
+            masks, self.weights, stride=self.stride, padding=self.padding
+        )
 
-            crossed = (cum_potential >= self.thresholds.view(-1, 1, 1)) & not_yet_spiked
-            result[crossed] = t
-            not_yet_spiked &= ~crossed
+        # Cumulative potential over time steps
+        cum_potential = contribs.cumsum(dim=0)  # (K, F, oH, oW)
 
-            if not not_yet_spiked.any():
-                break
+        # Find first threshold crossing per (F, oH, oW)
+        crossed = cum_potential >= self.thresholds.view(1, -1, 1, 1)  # (K, F, oH, oW)
+        # argmax on bool returns index of first True; returns 0 if all False
+        first_idx = crossed.to(torch.uint8).argmax(dim=0)  # (F, oH, oW)
+        any_crossed = crossed.any(dim=0)
 
+        result[any_crossed] = unique_times[first_idx[any_crossed]]
         return result
 
     @torch.no_grad()
     def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
         """Batched analytical spike time inference.
+
+        Iterates over unique input time steps (typically 16 bins), running one
+        conv2d per step across the full batch. Memory-efficient for large batches.
 
         Args:
             input_times: (B, C, H, W) tensor of spike times.
@@ -209,11 +212,8 @@ class ConvIntegrateAndFireLayer(SpikingModule):
         for t in unique_times:
             active = (input_times == t).float()  # (B, C, H, W)
             contrib = F.conv2d(
-                active,
-                self.weights,
-                stride=self.stride,
-                padding=self.padding,
-            )  # (B, F, oH, oW)
+                active, self.weights, stride=self.stride, padding=self.padding
+            )
             cum_potential += contrib
 
             crossed = (

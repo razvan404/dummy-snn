@@ -4,7 +4,7 @@ import pytest
 from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 from spiking.learning.conv_learner import ConvLearner
 from spiking.learning.multiplicative_stdp import MultiplicativeSTDP
-from spiking.learning.stdp import STDP
+from spiking.learning.biological_stdp import BiologicalSTDP
 from spiking.learning.wta import WinnerTakesAll
 from spiking.threshold import (
     ConstantInitialization,
@@ -35,7 +35,7 @@ def make_multiplicative_stdp():
 
 
 def make_biological_stdp():
-    return STDP(
+    return BiologicalSTDP(
         tau_pre=0.1,
         tau_post=0.1,
         max_pre_spike_time=1.0,

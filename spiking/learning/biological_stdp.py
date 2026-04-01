@@ -2,7 +2,7 @@ import torch
 from spiking.learning.mechanism import LearningMechanism
 
 
-class STDP(LearningMechanism):
+class BiologicalSTDP(LearningMechanism):
     def __init__(
         self,
         tau_pre: float = 20,

@@ -19,7 +19,7 @@ from applications.deep_linear.visualize_weights import save_weight_figure
 from applications import default_hyperparams
 from spiking import (
     Learner,
-    STDP,
+    BiologicalSTDP,
     WinnerTakesAll,
     CompetitiveThresholdAdaptation,
     TargetTimestampAdaptation,
@@ -82,7 +82,7 @@ def train_with_metrics(
 
     learner = Learner(
         layer,
-        learning_mechanism=STDP(**default_hyperparams.STDP),
+        learning_mechanism=BiologicalSTDP(**default_hyperparams.STDP),
         competition=WinnerTakesAll(),
         threshold_adaptation=adaptation,
     )

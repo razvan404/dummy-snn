@@ -11,7 +11,7 @@ from applications.common import set_seed, evaluate_model
 from applications.datasets import create_dataset
 from applications.single_layer.visualize import plot_comparison
 from spiking import iterate_spikes
-from spiking.learning import Learner, STDP
+from spiking.learning import Learner, BiologicalSTDP
 from spiking.utils import load_model, save_model
 
 
@@ -207,7 +207,7 @@ def main():
     device = torch.device("cpu")
     model = model.to(device)
 
-    stdp = STDP(
+    stdp = BiologicalSTDP(
         tau_pre=0.1,
         tau_post=0.1,
         max_pre_spike_time=1.0,

@@ -72,7 +72,7 @@ def fit_whitening_kernels(
     patch_size: int = 9,
     n_patches: int = 1_000_000,
     epsilon: float = 1e-2,
-    rho: float = 0.15,
+    rho: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Fit whitening kernels from image patches (Falez 2020 Eqs 8-12).
 

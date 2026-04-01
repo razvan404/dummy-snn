@@ -25,19 +25,19 @@ class CompetitiveThresholdAdaptation(ThresholdAdaptation):
             raise ValueError("`neurons_to_learn` must be provided.")
 
         winners_neurons = neurons_to_learn
-        winners_divisor = len(winners_neurons)
+        N = len(current_thresholds)
 
         losers_mask = torch.ones(
-            len(current_thresholds), dtype=torch.bool, device=current_thresholds.device
+            N, dtype=torch.bool, device=current_thresholds.device
         )
         losers_mask[winners_neurons] = False
-        losers_divisor = losers_mask.sum().item()
 
-        threshold_updates = torch.ones_like(current_thresholds)
-        if winners_divisor > 0:
-            threshold_updates[winners_neurons] *= self.learning_rate / winners_divisor
-        if losers_divisor > 0:
-            threshold_updates[losers_mask] *= -self.learning_rate / losers_divisor
+        # Paper 19 Eq 9: winner gets +eta_th, losers get -eta_th/N
+        threshold_updates = torch.zeros_like(current_thresholds)
+        if len(winners_neurons) > 0:
+            threshold_updates[winners_neurons] = self.learning_rate
+        if losers_mask.any():
+            threshold_updates[losers_mask] = -self.learning_rate / N
 
         return torch.clamp(
             current_thresholds + threshold_updates, min=self.min_threshold

@@ -1,5 +1,5 @@
 from spiking.layers import IntegrateAndFireMultilayer, SpikingSequential
-from spiking.learning import Learner, STDP, WinnerTakesAll
+from spiking.learning import Learner, BiologicalSTDP, WinnerTakesAll
 from spiking.threshold import (
     NormalInitialization,
     CompetitiveThresholdAdaptation,
@@ -34,7 +34,7 @@ def create_learner(
     """Create a fresh Learner targeting a specific layer of the model."""
     return Learner(
         model.layers[layer_idx],
-        learning_mechanism=STDP(**setup["stdp"]),
+        learning_mechanism=BiologicalSTDP(**setup["stdp"]),
         competition=WinnerTakesAll(),
         threshold_adaptation=CompetitiveThresholdAdaptation(
             **setup["threshold_adaptation"]

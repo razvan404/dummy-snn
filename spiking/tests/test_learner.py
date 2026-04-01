@@ -2,7 +2,7 @@ import torch
 import pytest
 
 from spiking.learning.learner import Learner
-from spiking.learning.stdp import STDP
+from spiking.learning.biological_stdp import BiologicalSTDP
 from spiking.learning.wta import WinnerTakesAll
 from spiking.threshold import NormalInitialization
 from spiking.layers.integrate_and_fire import IntegrateAndFireLayer
@@ -24,7 +24,7 @@ def make_layer(num_inputs=10, num_outputs=5):
 
 
 def make_stdp():
-    return STDP(
+    return BiologicalSTDP(
         tau_pre=0.1,
         tau_post=0.1,
         max_pre_spike_time=1.0,
@@ -208,7 +208,7 @@ class TestLearnerStepVectorized:
 
         neurons = torch.tensor([0, 2, 4])
         ref_total_dw = 0.0
-        ref_stdp = STDP(tau_pre=0.1, tau_post=0.1, max_pre_spike_time=1.0, learning_rate=0.1)
+        ref_stdp = BiologicalSTDP(tau_pre=0.1, tau_post=0.1, max_pre_spike_time=1.0, learning_rate=0.1)
         with torch.no_grad():
             for idx in neurons:
                 i = idx.item()
@@ -268,7 +268,7 @@ class TestLearnerNeuronsToLearn:
 class TestLearnerLearningRateStep:
     def test_learning_rate_step_decays_learning_rate(self):
         layer = make_layer()
-        stdp = STDP(
+        stdp = BiologicalSTDP(
             tau_pre=0.1,
             tau_post=0.1,
             max_pre_spike_time=1.0,
@@ -791,8 +791,11 @@ class TestSequentialThresholdAdaptation:
         spike_times = torch.tensor([0.3, float("inf"), float("inf")])
         neurons_to_learn = torch.tensor([0])
 
-        # Apply adaptation1 alone
-        after_first = adaptation1.update(thresholds.clone(), spike_times)
+        # Apply adaptation1 with neurons_to_learn (Falez Eq 6: uses winner's
+        # spike time to update ALL neurons)
+        after_first = adaptation1.update(
+            thresholds.clone(), spike_times, neurons_to_learn=neurons_to_learn
+        )
         # Then apply adaptation2 to that result
         expected = adaptation2.update(
             after_first, spike_times, neurons_to_learn=neurons_to_learn

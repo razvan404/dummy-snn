@@ -2,7 +2,7 @@ import numpy as np
 
 from applications import default_hyperparams
 from spiking.layers import IntegrateAndFireLayer
-from spiking.learning import Learner, STDP, WinnerTakesAll
+from spiking.learning import Learner, BiologicalSTDP, WinnerTakesAll
 from spiking.threshold import NormalInitialization, CompetitiveThresholdAdaptation
 
 
@@ -15,7 +15,7 @@ def create_model_and_learner(setup: dict, num_inputs: int, num_outputs: int):
     )
     learner = Learner(
         model,
-        learning_mechanism=STDP(**setup["stdp"]),
+        learning_mechanism=BiologicalSTDP(**setup["stdp"]),
         competition=WinnerTakesAll(),
         threshold_adaptation=CompetitiveThresholdAdaptation(
             **setup["threshold_adaptation"]

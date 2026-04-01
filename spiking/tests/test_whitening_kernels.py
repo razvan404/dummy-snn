@@ -25,10 +25,10 @@ class TestFitWhiteningKernels:
         assert kernels.shape == (1, 1, 3, 3)
 
     def test_default_rho(self):
-        """Default rho should be 0.15 per Falez 2020."""
+        """Default rho=1.0 per Falez 2020 Table I; all eigenvalues retained."""
         images = make_random_rgb_images(n=50)
         kernels, mean = fit_whitening_kernels(images, patch_size=5, n_patches=500)
-        # With rho=0.15, only ~15% of eigenvalues retained, but kernel shape stays the same
+        # With rho=1.0, all eigenvalues retained; kernel shape unchanged
         assert kernels.shape == (3, 3, 5, 5)
 
     def test_filter_mean_is_zero(self):

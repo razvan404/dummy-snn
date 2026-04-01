@@ -7,7 +7,7 @@ from .layers import (
     IntegrateAndFireMultilayer,
     SpikingSequential,
 )
-from .learning import ConvLearner, Learner, MultiplicativeSTDP, STDP, WinnerTakesAll
+from .learning import BiologicalSTDP, ConvLearner, Learner, MultiplicativeSTDP, WinnerTakesAll
 from .threshold import (
     CompetitiveThresholdAdaptation,
     TargetTimestampAdaptation,
@@ -40,10 +40,10 @@ __all__ = [
     "ConvIntegrateAndFireLayer",
     "IntegrateAndFireMultilayer",
     "SpikingSequential",
+    "BiologicalSTDP",
     "ConvLearner",
     "Learner",
     "MultiplicativeSTDP",
-    "STDP",
     "WinnerTakesAll",
     "CompetitiveThresholdAdaptation",
     "TargetTimestampAdaptation",

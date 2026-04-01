@@ -4,7 +4,7 @@ import torch
 from spiking import (
     IntegrateAndFireLayer,
     Learner,
-    STDP,
+    BiologicalSTDP,
     WinnerTakesAll,
     CompetitiveThresholdAdaptation,
     NormalInitialization,
@@ -34,7 +34,7 @@ def make_layer():
 def make_learner(layer):
     return Learner(
         layer,
-        learning_mechanism=STDP(
+        learning_mechanism=BiologicalSTDP(
             tau_pre=0.1,
             tau_post=0.1,
             max_pre_spike_time=1.0,
