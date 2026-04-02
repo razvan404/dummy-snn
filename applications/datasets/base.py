@@ -18,13 +18,12 @@ class SpikeEncodingDataset(Dataset):
     patches instead of the full image. Patch positions are sampled uniformly
     (distinct per image) and cached for reproducibility.
 
-    Args:
-        inputs: (N, H, W) raw images.
-        outputs: (N,) integer labels.
-        image_shape: Optional resize target (H, W).
-        cache_path: Path for caching spike times (and patch positions).
-        patch_size: Side length of square patches. None to disable.
-        num_patches: Number of patches per image. 0 to disable.
+    :param inputs: (N, H, W) raw images.
+    :param outputs: (N,) integer labels.
+    :param image_shape: Optional resize target (H, W).
+    :param cache_path: Path for caching spike times (and patch positions).
+    :param patch_size: Side length of square patches. None to disable.
+    :param num_patches: Number of patches per image. 0 to disable.
     """
 
     def __init__(
@@ -84,14 +83,12 @@ class SpikeEncodingDataset(Dataset):
     ) -> torch.Tensor:
         """Generate distinct uniform patch positions for each image.
 
-        Args:
-            N: Number of images.
-            H, W: Spatial dimensions of encoded images.
-            patch_size: Patch side length.
-            num_patches: Patches per image.
-
-        Returns:
-            (N, num_patches, 2) int tensor of (row, col) positions.
+        :param N: Number of images.
+        :param H: Spatial height of encoded images.
+        :param W: Spatial width of encoded images.
+        :param patch_size: Patch side length.
+        :param num_patches: Patches per image.
+        :returns: (N, num_patches, 2) int tensor of (row, col) positions.
         """
         max_row = H - patch_size
         max_col = W - patch_size

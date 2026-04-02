@@ -8,7 +8,11 @@ from .decoding import (
     ScaledInversion,
     TargetRelative,
 )
-from .feature_extraction import extract_features, extract_spike_times, spike_times_to_features
+from .feature_extraction import (
+    extract_features,
+    extract_spike_times,
+    spike_times_to_features,
+)
 from .eval_classifier import evaluate_classifier, plot_reduced_features
 from .eval_utils import compute_metrics, plot_confusion_matrix
 from .ridge_column_swap import RidgeColumnSwap

@@ -30,7 +30,6 @@ from spiking.evaluation import evaluate_classifier
 from spiking.evaluation.conv_feature_extraction import sum_pool_features
 from spiking.evaluation.feature_extraction import spike_times_to_features
 
-
 # Paper hyperparameters (Falez 2020 Table I), sourced from dataset-aware defaults
 _CIFAR10_PARAMS = get_common_hyperparams("cifar10_whitened")
 DEFAULTS = {
@@ -57,11 +56,10 @@ DEFAULTS = {
 def save_weight_figures(weights: torch.Tensor, output_path: str, ncols: int = 16):
     """Save a grid of learned filter weights as a PNG image.
 
-    Args:
-        weights: (num_filters, in_channels, kH, kW) filter weights.
-            First 3 channels are positive RGB, next 3 are negative RGB.
-        output_path: File path for the output PNG.
-        ncols: Number of columns in the grid.
+    :param weights: (num_filters, in_channels, kH, kW) filter weights.
+        First 3 channels are positive RGB, next 3 are negative RGB.
+    :param output_path: File path for the output PNG.
+    :param ncols: Number of columns in the grid.
     """
     num_filters = weights.shape[0]
     nrows = (num_filters + ncols - 1) // ncols
@@ -138,12 +136,9 @@ def _extract_random_patches(
 ) -> torch.Tensor:
     """Extract one random patch per image as flattened spike times.
 
-    Args:
-        images: (N, C, H, W) whitened+encoded spike times.
-        kernel_size: Patch side length.
-
-    Returns:
-        patches: (N, C*kH*kW) flattened spike times.
+    :param images: (N, C, H, W) whitened+encoded spike times.
+    :param kernel_size: Patch side length.
+    :returns: patches: (N, C*kH*kW) flattened spike times.
     """
     N, C, H, W = images.shape
     max_row = H - kernel_size

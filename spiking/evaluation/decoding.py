@@ -10,12 +10,9 @@ class Decoder(ABC):
     def decode(self, spike_times: torch.Tensor) -> torch.Tensor:
         """Convert spike times to features.
 
-        Args:
-            spike_times: (batch, neurons) tensor of spike times. Non-spiking
-                neurons have inf values.
-
-        Returns:
-            (batch, neurons) tensor of feature values in [0, 1].
+        :param spike_times: (batch, neurons) tensor of spike times. Non-spiking
+            neurons have inf values.
+        :returns: (batch, neurons) tensor of feature values in [0, 1].
         """
 
 

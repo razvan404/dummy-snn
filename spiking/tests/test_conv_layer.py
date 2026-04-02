@@ -234,15 +234,20 @@ class TestConvFCEquivalence:
         # Create conv layer
         conv_init = ConstantInitialization(10.0)
         conv_layer = ConvIntegrateAndFireLayer(
-            in_channels=C, num_filters=F, kernel_size=K,
-            threshold_initialization=conv_init, refractory_period=float("inf"),
+            in_channels=C,
+            num_filters=F,
+            kernel_size=K,
+            threshold_initialization=conv_init,
+            refractory_period=float("inf"),
         )
 
         # Create FC layer sharing the same weights (already 2D)
         fc_init = ConstantInitialization(10.0)
         fc_layer = IntegrateAndFireLayer(
-            num_inputs=C * K * K, num_outputs=F,
-            threshold_initialization=fc_init, refractory_period=float("inf"),
+            num_inputs=C * K * K,
+            num_outputs=F,
+            threshold_initialization=fc_init,
+            refractory_period=float("inf"),
         )
         fc_layer.weights.data.copy_(conv_layer.weights.data)
         fc_layer.thresholds.data.copy_(conv_layer.thresholds.data)
@@ -273,14 +278,19 @@ class TestConvFCEquivalence:
 
         conv_init = ConstantInitialization(10.0)
         conv_layer = ConvIntegrateAndFireLayer(
-            in_channels=C, num_filters=F, kernel_size=K,
-            threshold_initialization=conv_init, refractory_period=float("inf"),
+            in_channels=C,
+            num_filters=F,
+            kernel_size=K,
+            threshold_initialization=conv_init,
+            refractory_period=float("inf"),
         )
 
         fc_init = ConstantInitialization(10.0)
         fc_layer = IntegrateAndFireLayer(
-            num_inputs=C * K * K, num_outputs=F,
-            threshold_initialization=fc_init, refractory_period=float("inf"),
+            num_inputs=C * K * K,
+            num_outputs=F,
+            threshold_initialization=fc_init,
+            refractory_period=float("inf"),
         )
         fc_layer.weights.data.copy_(conv_layer.weights.data)
         fc_layer.thresholds.data.copy_(conv_layer.thresholds.data)
@@ -314,14 +324,19 @@ class TestConvFCEquivalence:
 
         conv_init = ConstantInitialization(10.0)
         conv_layer = ConvIntegrateAndFireLayer(
-            in_channels=C, num_filters=F, kernel_size=K,
-            threshold_initialization=conv_init, refractory_period=float("inf"),
+            in_channels=C,
+            num_filters=F,
+            kernel_size=K,
+            threshold_initialization=conv_init,
+            refractory_period=float("inf"),
         )
 
         fc_init = ConstantInitialization(10.0)
         fc_layer = IntegrateAndFireLayer(
-            num_inputs=C * K * K, num_outputs=F,
-            threshold_initialization=fc_init, refractory_period=float("inf"),
+            num_inputs=C * K * K,
+            num_outputs=F,
+            threshold_initialization=fc_init,
+            refractory_period=float("inf"),
         )
         fc_layer.weights.data.copy_(conv_layer.weights.data)
         fc_layer.thresholds.data.copy_(conv_layer.thresholds.data)
@@ -339,9 +354,9 @@ class TestConvFCEquivalence:
                 for c in range(oW):
                     patch = input_times[b, :, r : r + K, c : c + K].flatten()
                     fc_result = fc_layer.infer_spike_times(patch)
-                    assert torch.allclose(conv_result[b, :, r, c], fc_result), (
-                        f"Mismatch at batch={b}, pos=({r},{c})"
-                    )
+                    assert torch.allclose(
+                        conv_result[b, :, r, c], fc_result
+                    ), f"Mismatch at batch={b}, pos=({r},{c})"
 
 
 class TestConv2dVsUnfoldEquivalence:

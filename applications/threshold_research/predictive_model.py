@@ -11,7 +11,9 @@ def compute_predictive_model(
 ) -> dict:
     """Fit linear regression from metrics to optimal_deltas.
 
-    Returns dict with r_squared and per-metric coefficients.
+    :param optimal_deltas: Array of optimal threshold shifts per neuron.
+    :param metrics: Dict mapping metric names to per-neuron arrays.
+    :returns: Dict with r_squared and per-metric coefficients.
     """
     optimal_deltas = np.asarray(optimal_deltas)
     names = list(metrics.keys())
@@ -35,7 +37,11 @@ def compute_nonlinear_predictive_model(
     """Compare linear vs gradient boosting regression for predicting optimal deltas.
 
     Cross-validated R² for fair comparison (GBR can overfit on small sample sizes).
-    Returns dict with linear_cv_r2, gbr_cv_r2, their stds, n_samples, n_features.
+
+    :param optimal_deltas: Array of optimal threshold shifts per neuron.
+    :param metrics: Dict mapping metric names to per-neuron arrays.
+    :param n_folds: Number of cross-validation folds.
+    :returns: Dict with linear_cv_r2, gbr_cv_r2, their stds, n_samples, n_features.
     """
     optimal_deltas = np.asarray(optimal_deltas)
     names = list(metrics.keys())
@@ -66,15 +72,13 @@ def denoise_optimal_deltas(
 ) -> dict:
     """Denoise per-neuron accuracy curves before taking argmax.
 
-    accuracy_matrix: (num_neurons, num_fractions)
-    perturbation_fractions: (num_fractions,) fraction values
-    original_thresholds: (num_neurons,) original threshold per neuron
-    method: "gaussian" or "polynomial"
-    sigma: smoothing width for gaussian method
-
-    Returns dict with:
-      optimal_deltas: (num_neurons,) denoised optimal threshold shifts
-      confidence: (num_neurons,) per-neuron confidence (peak - mean, normalized)
+    :param accuracy_matrix: (num_neurons, num_fractions)
+    :param perturbation_fractions: (num_fractions,) fraction values.
+    :param original_thresholds: (num_neurons,) original threshold per neuron.
+    :param method: "gaussian" or "polynomial".
+    :param sigma: Smoothing width for gaussian method.
+    :returns: Dict with optimal_deltas (num_neurons,) denoised optimal threshold shifts,
+        and confidence (num_neurons,) per-neuron confidence (peak - mean, normalized).
     """
     accuracy_matrix = np.asarray(accuracy_matrix)
     perturbation_fractions = np.asarray(perturbation_fractions)
@@ -127,8 +131,9 @@ def filter_sensitive_neurons(
 ) -> np.ndarray:
     """Return boolean mask of neurons whose accuracy range exceeds min_range.
 
-    accuracy_matrix: (num_neurons, num_fractions)
-    Returns: (num_neurons,) boolean mask
+    :param accuracy_matrix: (num_neurons, num_fractions)
+    :param min_range: Minimum accuracy range to be considered sensitive.
+    :returns: (num_neurons,) boolean mask.
     """
     accuracy_matrix = np.asarray(accuracy_matrix)
     ranges = np.max(accuracy_matrix, axis=1) - np.min(accuracy_matrix, axis=1)

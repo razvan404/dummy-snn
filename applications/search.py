@@ -16,10 +16,10 @@ def resolve_search_space(
 ) -> tuple[list[tuple[str, str]], list[dict]]:
     """Enumerate all grid combinations of list-valued kwargs in the setup dict.
 
-    Returns (tunable_param_names, resolved_configs).
-
-    tunable_param_names: list of (component_key, param_name) for display.
-    resolved_configs: list of setup dicts with all lists resolved to scalars.
+    :param search_space: Setup dict where list-valued kwargs define the search grid.
+    :returns: Tuple of (tunable_param_names, resolved_configs).
+        tunable_param_names is a list of (component_key, param_name) for display.
+        resolved_configs is a list of setup dicts with all lists resolved to scalars.
     """
     tunable_params = []  # (component_key, param_name, [values])
 
@@ -56,12 +56,11 @@ def find_hyperparameters(
 ) -> dict:
     """Grid search over hyperparameters, returning the best resolved config.
 
-    Args:
-        run_experiment: Callable taking a resolved config dict and returning
-            {"train": {...}, "validation": {...}} metrics dict.
-        search_space: Setup dict where list-valued kwargs define the search grid.
-        exp_name: Experiment name — output goes to logs/{exp_name}/.
-        seeds: Random seeds per config. Defaults to [1, 2, 3, 4, 5].
+    :param run_experiment: Callable taking a resolved config dict and returning
+        {"train": {...}, "validation": {...}} metrics dict.
+    :param search_space: Setup dict where list-valued kwargs define the search grid.
+    :param exp_name: Experiment name — output goes to logs/{exp_name}/.
+    :param seeds: Random seeds per config. Defaults to [1, 2, 3, 4, 5].
     """
     if seeds is None:
         seeds = DEFAULT_SEEDS

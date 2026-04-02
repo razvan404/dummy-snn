@@ -4,7 +4,6 @@ from torch.utils.data import DataLoader
 
 from applications.datasets import MnistSubsetDataset
 
-
 IMAGE_SHAPE = (8, 8)
 SPIKE_SHAPE = (2, *IMAGE_SHAPE)
 NUM_INPUTS = IMAGE_SHAPE[0] * IMAGE_SHAPE[1] * 2  # 128

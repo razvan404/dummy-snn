@@ -208,14 +208,18 @@ class TestLearnerStepVectorized:
 
         neurons = torch.tensor([0, 2, 4])
         ref_total_dw = 0.0
-        ref_stdp = BiologicalSTDP(tau_pre=0.1, tau_post=0.1, max_pre_spike_time=1.0, learning_rate=0.1)
+        ref_stdp = BiologicalSTDP(
+            tau_pre=0.1, tau_post=0.1, max_pre_spike_time=1.0, learning_rate=0.1
+        )
         with torch.no_grad():
             for idx in neurons:
                 i = idx.item()
                 updated = ref_stdp.update_weights(
                     weights_before[i], pre_spike_times, ref_layer.spike_times[i]
                 )
-                ref_total_dw += torch.mean(torch.abs(weights_before[i] - updated)).item()
+                ref_total_dw += torch.mean(
+                    torch.abs(weights_before[i] - updated)
+                ).item()
                 ref_layer.weights[i].copy_(updated)
 
         ref_dw = ref_total_dw / len(neurons)
@@ -537,7 +541,10 @@ class TestPlasticityBalanceAdaptation:
         from spiking.threshold import PlasticityBalanceAdaptation
 
         adaptation = PlasticityBalanceAdaptation(
-            tau=20.0, learning_rate=0.1, min_threshold=1.0, max_threshold=100.0,
+            tau=20.0,
+            learning_rate=0.1,
+            min_threshold=1.0,
+            max_threshold=100.0,
         )
         assert adaptation.sign_only is False
 
@@ -696,11 +703,15 @@ class TestTrainFunction:
         stdp.decay_factor = decay
 
         train(
-            layer, learner, mock_loader, num_epochs=3,
-            image_shape=(1, 1, 10), progress=False,
+            layer,
+            learner,
+            mock_loader,
+            num_epochs=3,
+            image_shape=(1, 1, 10),
+            progress=False,
         )
 
-        expected_lr = initial_lr * (decay ** 3)
+        expected_lr = initial_lr * (decay**3)
         assert abs(stdp.learning_rate - expected_lr) < 1e-6
 
     def test_train_calls_callback(self):
@@ -718,7 +729,10 @@ class TestTrainFunction:
 
         calls = []
         train(
-            layer, learner, mock_loader, num_epochs=1,
+            layer,
+            learner,
+            mock_loader,
+            num_epochs=1,
             image_shape=(1, 1, 10),
             on_batch_end=lambda batch_idx, dw, split: calls.append(split),
             progress=False,
@@ -742,8 +756,12 @@ class TestTrainFunction:
 
         # Should not raise
         train(
-            layer, learner, mock_loader, num_epochs=1,
-            image_shape=(1, 1, 10), progress=False,
+            layer,
+            learner,
+            mock_loader,
+            num_epochs=1,
+            image_shape=(1, 1, 10),
+            progress=False,
         )
 
     def test_train_calls_on_epoch_end(self):
@@ -762,8 +780,12 @@ class TestTrainFunction:
 
         epoch_calls = []
         train(
-            layer, learner, mock_loader, num_epochs=3,
-            image_shape=(1, 1, 10), progress=False,
+            layer,
+            learner,
+            mock_loader,
+            num_epochs=3,
+            image_shape=(1, 1, 10),
+            progress=False,
             on_epoch_end=lambda epoch, total: epoch_calls.append((epoch, total)),
         )
 
@@ -834,9 +856,7 @@ class TestSequentialThresholdAdaptation:
             SequentialThresholdAdaptation,
         )
 
-        inner = CompetitiveThresholdAdaptation(
-            min_threshold=1.0, learning_rate=5.0
-        )
+        inner = CompetitiveThresholdAdaptation(min_threshold=1.0, learning_rate=5.0)
         seq = SequentialThresholdAdaptation([inner])
 
         thresholds = torch.tensor([5.0, 5.0])
@@ -862,16 +882,17 @@ class TestSequentialThresholdAdaptation:
         torch.manual_seed(42)
         layer = make_layer()
         stdp = make_stdp()
-        seq = SequentialThresholdAdaptation([
-            TargetTimestampAdaptation(
-                min_threshold=1.0, target_timestamp=0.5, learning_rate=1.0
-            ),
-            CompetitiveThresholdAdaptation(
-                min_threshold=1.0, learning_rate=5.0
-            ),
-        ])
-        learner = Learner(layer, stdp, competition=WinnerTakesAll(),
-                          threshold_adaptation=seq)
+        seq = SequentialThresholdAdaptation(
+            [
+                TargetTimestampAdaptation(
+                    min_threshold=1.0, target_timestamp=0.5, learning_rate=1.0
+                ),
+                CompetitiveThresholdAdaptation(min_threshold=1.0, learning_rate=5.0),
+            ]
+        )
+        learner = Learner(
+            layer, stdp, competition=WinnerTakesAll(), threshold_adaptation=seq
+        )
         layer.train()
 
         thresholds_before = layer.thresholds.detach().clone()

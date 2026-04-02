@@ -46,7 +46,9 @@ class BaseUnsupervisedTrainer(ABC):
         """
         return prepared_times
 
-    def _write_spike_times(self, layer: SpikingModule, spike_times: torch.Tensor) -> None:
+    def _write_spike_times(
+        self, layer: SpikingModule, spike_times: torch.Tensor
+    ) -> None:
         """Write inferred spike times into the layer's state buffer.
 
         Handles lazy spatial buffer initialization for conv layers whose

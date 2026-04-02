@@ -9,8 +9,8 @@ from spiking.layers import SpikingSequential
 def compute_threshold_sensitivity(accuracy_matrix: np.ndarray) -> np.ndarray:
     """Per-neuron sensitivity: std of accuracy across perturbation fractions.
 
-    accuracy_matrix: (num_neurons, num_fractions)
-    Returns: (num_neurons,)
+    :param accuracy_matrix: (num_neurons, num_fractions)
+    :returns: (num_neurons,)
     """
     return np.std(accuracy_matrix, axis=1)
 
@@ -19,7 +19,10 @@ def compute_feature_importance(classifier, X: np.ndarray) -> np.ndarray:
     """Extract per-feature importance from a fitted LinearSVC.
 
     For multi-class, returns mean absolute coefficient across classes.
-    Returns: (num_features,)
+
+    :param classifier: A fitted LinearSVC classifier.
+    :param X: (num_samples, num_features) feature matrix.
+    :returns: (num_features,)
     """
     coefs = np.abs(classifier.coef_)
     return np.mean(coefs, axis=0)
@@ -33,8 +36,12 @@ def compute_post_hoc_metrics(
 ) -> dict:
     """Compute per-neuron metrics from saved model without retraining.
 
-    Returns dict with per-neuron arrays:
-      weight_l2_norm, weight_l1_norm, avg_spike_time, spike_rate, weight_std.
+    :param model_path: Path to the saved model file.
+    :param dataset_loaders: Tuple of (train_loader, val_loader).
+    :param spike_shape: Shape of the spike volume.
+    :param layer_idx: Index of the layer to analyze.
+    :returns: Dict with per-neuron arrays:
+        weight_l2_norm, weight_l1_norm, avg_spike_time, spike_rate, weight_std.
     """
     model = load_model(model_path)
     layer = model.layers[layer_idx]
@@ -133,11 +140,14 @@ def compute_classifier_metrics(
 ) -> dict:
     """Compute per-neuron classifier-aware metrics.
 
-    Returns dict with per-neuron arrays:
-      coef_magnitude: mean |W[:, i]| across classes
-      misclassified_margin_contribution: avg margin contribution on misclassified samples
-      fisher_discriminant_ratio: between-class / within-class variance per feature
-      max_feature_correlation: max |pearson_r| with any other feature
+    :param classifier: A fitted classifier with coef_ attribute.
+    :param X_train: (num_samples, num_features) training feature matrix.
+    :param y_train: (num_samples,) training labels.
+    :param X_val: (num_samples, num_features) validation feature matrix.
+    :param y_val: (num_samples,) validation labels.
+    :returns: Dict with per-neuron arrays:
+        coef_magnitude, misclassified_margin_contribution,
+        fisher_discriminant_ratio, max_feature_correlation.
     """
     num_features = X_train.shape[1]
     coefs = classifier.coef_  # (num_classes, num_features)

@@ -272,7 +272,11 @@ def train_conv(
         layer, stdp, competition=WinnerTakesAll(), threshold_adaptation=adaptation
     )
     trainer = UnsupervisedTrainer(
-        layer, learner, image_shape=(num_inputs,), early_stopping=True, device=device,
+        layer,
+        learner,
+        image_shape=(num_inputs,),
+        early_stopping=True,
+        device=device,
     )
 
     # --- Train on patches ---
@@ -374,7 +378,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--t-obj", type=float, default=None, help="Target spike time override"
     )
-    parser.add_argument("--device", type=str, default="cpu", help="Device (cpu or cuda)")
+    parser.add_argument(
+        "--device", type=str, default="cpu", help="Device (cpu or cuda)"
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=str, default=None)
     args = parser.parse_args()

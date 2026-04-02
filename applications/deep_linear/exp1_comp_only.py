@@ -13,7 +13,13 @@ SEED_START = 1
 DEFAULT_NUM_SEEDS = 5
 
 
-def run(dataset: str, *, num_epochs: int = 10, force: bool = False, num_seeds: int = DEFAULT_NUM_SEEDS):
+def run(
+    dataset: str,
+    *,
+    num_epochs: int = 10,
+    force: bool = False,
+    num_seeds: int = DEFAULT_NUM_SEEDS,
+):
     seeds = list(range(SEED_START, SEED_START + num_seeds))
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
@@ -44,7 +50,10 @@ def run(dataset: str, *, num_epochs: int = 10, force: bool = False, num_seeds: i
                 label = f"thresh={thresh} seed={seed}"
                 pbar.set_postfix_str(label)
                 on_batch_end, on_epoch_end = make_progress_callbacks(
-                    pbar, label, num_epochs, {"train": train_steps},
+                    pbar,
+                    label,
+                    num_epochs,
+                    {"train": train_steps},
                 )
                 train_layer(
                     dataset_loaders=(train_loader, val_loader),

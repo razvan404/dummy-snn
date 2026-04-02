@@ -65,7 +65,9 @@ class TargetTimestampAdaptation(ThresholdAdaptation):
             err = spike_times[finite_mask] - target[finite_mask]
             if self.epsilon > 0:
                 within = err.abs() <= self.epsilon
-                err = torch.where(within, torch.zeros_like(err), err - torch.sign(err) * self.epsilon)
+                err = torch.where(
+                    within, torch.zeros_like(err), err - torch.sign(err) * self.epsilon
+                )
             threshold_delta[finite_mask] = self.learning_rate * err
             updated_thresholds = current_thresholds - threshold_delta
 

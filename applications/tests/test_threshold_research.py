@@ -8,7 +8,6 @@ from torch.utils.data import DataLoader
 
 from applications.datasets import MnistSubsetDataset
 
-
 IMAGE_SHAPE = (8, 8)
 SPIKE_SHAPE = (2, *IMAGE_SHAPE)
 NUM_INPUTS = IMAGE_SHAPE[0] * IMAGE_SHAPE[1] * 2  # 128
@@ -1194,7 +1193,9 @@ class TestCachedPerturbationSweep:
 
 class TestComputePredictiveModel:
     def test_returns_r_squared(self):
-        from applications.threshold_research.predictive_model import compute_predictive_model
+        from applications.threshold_research.predictive_model import (
+            compute_predictive_model,
+        )
 
         num_neurons = 32
         rng = np.random.RandomState(42)
@@ -1213,7 +1214,9 @@ class TestComputePredictiveModel:
         assert len(result["coefficients"]) == len(metrics)
 
     def test_perfect_predictor(self):
-        from applications.threshold_research.predictive_model import compute_predictive_model
+        from applications.threshold_research.predictive_model import (
+            compute_predictive_model,
+        )
 
         # If optimal_delta = 2*x + 3*y, the model should find R² ≈ 1.0
         num_neurons = 50
@@ -1378,7 +1381,9 @@ class TestComputeNonlinearPredictiveModel:
 class TestDenoiseOptimalDeltas:
     def test_gaussian_smoothing_reduces_noise(self):
         """Gaussian smoothing on noisy parabolic accuracy curves recovers vertex."""
-        from applications.threshold_research.predictive_model import denoise_optimal_deltas
+        from applications.threshold_research.predictive_model import (
+            denoise_optimal_deltas,
+        )
 
         num_neurons = 10
         num_fractions = 31
@@ -1394,7 +1399,11 @@ class TestDenoiseOptimalDeltas:
             accuracy_matrix[n] = base + rng.normal(0, 0.002, num_fractions)
 
         result = denoise_optimal_deltas(
-            accuracy_matrix, fractions, original_thresholds, method="gaussian", sigma=2.0
+            accuracy_matrix,
+            fractions,
+            original_thresholds,
+            method="gaussian",
+            sigma=2.0,
         )
 
         # Denoised argmax should be close to the true peak for most neurons
@@ -1404,7 +1413,9 @@ class TestDenoiseOptimalDeltas:
 
     def test_polynomial_fit_finds_vertex(self):
         """Polynomial fit on parabolic accuracy curve finds vertex."""
-        from applications.threshold_research.predictive_model import denoise_optimal_deltas
+        from applications.threshold_research.predictive_model import (
+            denoise_optimal_deltas,
+        )
 
         num_neurons = 5
         num_fractions = 31
@@ -1425,7 +1436,9 @@ class TestDenoiseOptimalDeltas:
 
     def test_flat_curve_gives_low_confidence(self):
         """Flat accuracy curve → low confidence score."""
-        from applications.threshold_research.predictive_model import denoise_optimal_deltas
+        from applications.threshold_research.predictive_model import (
+            denoise_optimal_deltas,
+        )
 
         num_neurons = 3
         num_fractions = 31
@@ -1443,7 +1456,9 @@ class TestDenoiseOptimalDeltas:
 
     def test_output_shapes(self):
         """Output arrays match input neuron count."""
-        from applications.threshold_research.predictive_model import denoise_optimal_deltas
+        from applications.threshold_research.predictive_model import (
+            denoise_optimal_deltas,
+        )
 
         num_neurons = 8
         num_fractions = 31
@@ -1463,31 +1478,40 @@ class TestDenoiseOptimalDeltas:
 class TestFilterSensitiveNeurons:
     def test_flat_neurons_filtered_variable_retained(self):
         """Flat neurons are excluded, variable neurons are kept."""
-        from applications.threshold_research.predictive_model import filter_sensitive_neurons
+        from applications.threshold_research.predictive_model import (
+            filter_sensitive_neurons,
+        )
 
         num_fractions = 31
         # Neuron 0: flat, Neuron 1: variable, Neuron 2: barely variable
-        accuracy_matrix = np.array([
-            np.full(num_fractions, 0.9),            # flat
-            np.linspace(0.85, 0.95, num_fractions),  # range = 0.10
-            np.full(num_fractions, 0.9) + np.linspace(0, 0.003, num_fractions),  # range = 0.003
-        ])
+        accuracy_matrix = np.array(
+            [
+                np.full(num_fractions, 0.9),  # flat
+                np.linspace(0.85, 0.95, num_fractions),  # range = 0.10
+                np.full(num_fractions, 0.9)
+                + np.linspace(0, 0.003, num_fractions),  # range = 0.003
+            ]
+        )
 
         mask = filter_sensitive_neurons(accuracy_matrix, min_range=0.005)
 
         assert mask.shape == (3,)
         assert mask[0] == False  # flat → excluded
-        assert mask[1] == True   # variable → kept
+        assert mask[1] == True  # variable → kept
         assert mask[2] == False  # below threshold → excluded
 
     def test_all_sensitive(self):
         """All neurons above threshold → all True."""
-        from applications.threshold_research.predictive_model import filter_sensitive_neurons
+        from applications.threshold_research.predictive_model import (
+            filter_sensitive_neurons,
+        )
 
-        accuracy_matrix = np.array([
-            np.linspace(0.8, 0.95, 10),
-            np.linspace(0.7, 0.9, 10),
-        ])
+        accuracy_matrix = np.array(
+            [
+                np.linspace(0.8, 0.95, 10),
+                np.linspace(0.7, 0.9, 10),
+            ]
+        )
 
         mask = filter_sensitive_neurons(accuracy_matrix, min_range=0.005)
         assert np.all(mask)
@@ -1584,7 +1608,10 @@ class TestComputeClassifierMetrics:
         # negative or lower margin contribution than the helpful neuron
         # (If classifier is perfect, margin contribution is 0 for all — that's fine too)
         if not np.allclose(result["misclassified_margin_contribution"], 0.0):
-            assert result["misclassified_margin_contribution"][0] > result["misclassified_margin_contribution"][1]
+            assert (
+                result["misclassified_margin_contribution"][0]
+                > result["misclassified_margin_contribution"][1]
+            )
 
     def test_fisher_ratio_high_for_separable(self):
         """Fisher discriminant ratio is high for perfectly separable feature."""
@@ -1610,7 +1637,10 @@ class TestComputeClassifierMetrics:
         result = compute_classifier_metrics(clf, X_train, y_train, X_val, y_val)
 
         # Feature 0 should have much higher fisher ratio than features 1, 2
-        assert result["fisher_discriminant_ratio"][0] > 10 * result["fisher_discriminant_ratio"][1]
+        assert (
+            result["fisher_discriminant_ratio"][0]
+            > 10 * result["fisher_discriminant_ratio"][1]
+        )
 
     def test_max_correlation_for_duplicate_columns(self):
         """Duplicate feature columns should have max_feature_correlation = 1.0."""
@@ -1701,12 +1731,18 @@ class TestEvaluatePerturbationsWoodbury:
         rng = np.random.RandomState(42)
 
         features = {
-            "baseline_train": rng.randn(num_samples_train, num_neurons).astype(np.float32),
+            "baseline_train": rng.randn(num_samples_train, num_neurons).astype(
+                np.float32
+            ),
             "baseline_val": rng.randn(num_samples_val, num_neurons).astype(np.float32),
             "labels_train": rng.randint(0, 3, num_samples_train),
             "labels_val": rng.randint(0, 3, num_samples_val),
-            "perturbed_train": rng.randn(num_fracs, num_samples_train, num_neurons).astype(np.float32),
-            "perturbed_val": rng.randn(num_fracs, num_samples_val, num_neurons).astype(np.float32),
+            "perturbed_train": rng.randn(
+                num_fracs, num_samples_train, num_neurons
+            ).astype(np.float32),
+            "perturbed_val": rng.randn(num_fracs, num_samples_val, num_neurons).astype(
+                np.float32
+            ),
             "original_thresholds": [5.0] * num_neurons,
             "perturbation_fractions": [-0.1, 0.0, 0.1],
         }
@@ -1788,9 +1824,7 @@ class TestSequentialOptimize:
         perturbed_train = np.stack(
             [baseline_train * 0.5, baseline_train, baseline_train * 1.5]
         )
-        perturbed_val = np.stack(
-            [baseline_val * 0.5, baseline_val, baseline_val * 1.5]
-        )
+        perturbed_val = np.stack([baseline_val * 0.5, baseline_val, baseline_val * 1.5])
 
         features = {
             "baseline_train": baseline_train,
@@ -1808,9 +1842,9 @@ class TestSequentialOptimize:
 
         # Since frac=0.0 (identity) is always available, accuracy cannot decrease
         for i in range(1, len(acc)):
-            assert acc[i] >= acc[i - 1] - 1e-10, (
-                f"Accuracy decreased at step {i}: {acc[i-1]:.4f} -> {acc[i]:.4f}"
-            )
+            assert (
+                acc[i] >= acc[i - 1] - 1e-10
+            ), f"Accuracy decreased at step {i}: {acc[i-1]:.4f} -> {acc[i]:.4f}"
 
     def test_cols_per_unit_for_conv(self):
         """Sequential optimize with cols_per_unit > 1 should work for conv."""
@@ -1836,9 +1870,7 @@ class TestSequentialOptimize:
             "perturbation_fractions": [-0.1, 0.0, 0.1],
         }
 
-        result = sequential_optimize(
-            features=features, cols_per_unit=cols_per_filter
-        )
+        result = sequential_optimize(features=features, cols_per_unit=cols_per_filter)
 
         assert len(result["steps"]) == num_filters
         assert len(result["optimal_thresholds"]) == num_filters

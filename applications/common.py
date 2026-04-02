@@ -32,8 +32,8 @@ def evaluate_model(model, train_loader, val_loader, t_target=None):
 def aggregate_metrics(all_metrics: list[dict]) -> dict:
     """Compute mean and std for each metric across seeds.
 
-    all_metrics: list of {"train": {...}, "validation": {...}} dicts.
-    Returns: {"train": {"accuracy": {"mean": ..., "std": ...}, ...}, ...}
+    :param all_metrics: List of {"train": {...}, "validation": {...}} dicts.
+    :returns: {"train": {"accuracy": {"mean": ..., "std": ...}, ...}, ...}
     """
     splits = all_metrics[0].keys()
     metric_keys = all_metrics[0][next(iter(splits))].keys()

@@ -154,10 +154,10 @@ class IntegrateAndFireLayer(SpikingModule):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Batched analytical spike time inference, also returning final potentials.
 
-        input_times: (B, num_inputs)
-        Returns: (spike_times, cum_potential) both (B, num_outputs).
-          cum_potential holds each neuron's cumulative membrane potential at the
-          end of the input window (or at the moment it spiked).
+        :param input_times: (B, num_inputs)
+        :returns: (spike_times, cum_potential) both (B, num_outputs).
+            cum_potential holds each neuron's cumulative membrane potential at the
+            end of the input window (or at the moment it spiked).
         """
         B = input_times.shape[0]
         result = torch.full(
@@ -194,8 +194,8 @@ class IntegrateAndFireLayer(SpikingModule):
         Iterates over unique input times and accumulates membrane potentials
         via batched matmul. Efficient when inputs are discretized to few bins.
 
-        input_times: (B, num_inputs)
-        Returns: (B, num_outputs)
+        :param input_times: (B, num_inputs)
+        :returns: (B, num_outputs)
         """
         result, _ = self.infer_spike_times_and_potentials_batch(input_times)
         return result

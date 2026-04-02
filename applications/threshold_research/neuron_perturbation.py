@@ -23,12 +23,10 @@ def precompute_cumulative_potentials(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Precompute cumulative membrane potentials at each unique input time boundary.
 
-    input_times: (B, I) — spike times for each input, inf means no spike.
-    weights: (O, I) — layer weights.
-
-    Returns:
-        cum_potentials: (B, O, G) — cumulative potential at each boundary time.
-        boundary_times: (G,) — sorted unique finite input times.
+    :param input_times: (B, I) — spike times for each input, inf means no spike.
+    :param weights: (O, I) — layer weights.
+    :returns: Tuple of cum_potentials (B, O, G) — cumulative potential at each boundary time,
+        and boundary_times (G,) — sorted unique finite input times.
     """
     B, I = input_times.shape
     O = weights.shape[0]
@@ -59,11 +57,10 @@ def spike_times_from_potentials(
 ) -> torch.Tensor:
     """Find first threshold crossing time from precomputed cumulative potentials.
 
-    cum_potentials: (B, G) — cumulative potential for one neuron across boundary times.
-    boundary_times: (G,) — sorted unique times.
-    threshold: scalar threshold value.
-
-    Returns: (B,) — spike time for each sample (inf if no crossing).
+    :param cum_potentials: (B, G) — cumulative potential for one neuron across boundary times.
+    :param boundary_times: (G,) — sorted unique times.
+    :param threshold: Scalar threshold value.
+    :returns: (B,) — spike time for each sample (inf if no crossing).
     """
     B = cum_potentials.shape[0]
     if cum_potentials.shape[1] == 0:
@@ -322,7 +319,7 @@ def evaluate_perturbations(
 
         # For each neuron, swap that column and evaluate via Woodbury
         for neuron_idx in range(num_outputs):
-            new_train_col = perturbed_train[frac_idx, :, neuron_idx:neuron_idx + 1]
+            new_train_col = perturbed_train[frac_idx, :, neuron_idx : neuron_idx + 1]
             X_val_mod = X_val.copy()
             X_val_mod[:, neuron_idx] = perturbed_val[frac_idx, :, neuron_idx]
 
@@ -376,13 +373,10 @@ def sequential_optimize(
     from s1, and so on. Each step uses apply_swap to permanently update the
     Ridge classifier state via Woodbury, so no full refit is ever needed.
 
-    Args:
-        features: Dict with baseline_train/val, perturbed_train/val, etc.
-        cols_per_unit: Number of feature columns per unit (1 for FC, pool_size² for conv).
-        alpha: Ridge regularization strength.
-
-    Returns:
-        Dict with per-unit results including the sequential optimization path,
+    :param features: Dict with baseline_train/val, perturbed_train/val, etc.
+    :param cols_per_unit: Number of feature columns per unit (1 for FC, pool_size² for conv).
+    :param alpha: Ridge regularization strength.
+    :returns: Dict with per-unit results including the sequential optimization path,
         cumulative accuracy at each step, and final optimized thresholds.
     """
     X_train = features["baseline_train"].copy()

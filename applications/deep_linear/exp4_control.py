@@ -3,7 +3,10 @@ from pathlib import Path
 
 from applications.datasets import create_dataset
 from applications.deep_linear.random_thresholds import random_thresholds
-from applications.deep_linear.sweep_post_training import find_trained_models, sweep_post_training
+from applications.deep_linear.sweep_post_training import (
+    find_trained_models,
+    sweep_post_training,
+)
 
 SEED_START = 200
 DEFAULT_NUM_SEEDS = 3
@@ -40,7 +43,9 @@ def run(dataset: str, *, force: bool = False, num_seeds: int = DEFAULT_NUM_SEEDS
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Exp 4: random threshold control")
     parser.add_argument("dataset", type=str)
-    parser.add_argument("--force", action="store_true", help="re-run even if results exist")
+    parser.add_argument(
+        "--force", action="store_true", help="re-run even if results exist"
+    )
     parser.add_argument("--seeds", type=int, default=DEFAULT_NUM_SEEDS)
     args = parser.parse_args()
 

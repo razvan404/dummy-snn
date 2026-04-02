@@ -1,0 +1,39 @@
+[project]
+name = "dummy-snn"
+version = "0.1.0"
+description = "Unsupervised convolutional spiking neural networks with STDP"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.1",
+    "scipy>=1.14",
+    "matplotlib>=3.9",
+    "scikit-learn>=1.6",
+    "tqdm>=4.67",
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "seaborn>=0.13",
+    "pillow>=10.1",
+    "kagglehub>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "black>=24.0",
+]
+
+[tool.black]
+target-version = ["py310"]
+line-length = 88
+
+[tool.uv]
+default-groups = ["dev"]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu124" }]
+torchvision = [{ index = "pytorch-cu124" }]

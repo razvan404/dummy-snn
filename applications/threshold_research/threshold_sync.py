@@ -26,16 +26,15 @@ def compute_fisher_thresholds(
     feature column and measures train accuracy with the baseline classifier.
     Tie-break: keep original (frac=0).
 
-    cum_potentials: (B, O, G) — precomputed cumulative membrane potentials.
-    boundary_times: (G,) — sorted unique input spike times.
-    original_thresholds: (O,) — current thresholds.
-    labels: (B,) — integer class labels.
-    t_target: target spike time for feature computation.
-    n_fractions: number of multipliers to search.
-    frac_min: minimum fraction (inclusive).
-    frac_max: maximum fraction (inclusive).
-
-    Returns: (O,) adjusted thresholds.
+    :param cum_potentials: (B, O, G) — precomputed cumulative membrane potentials.
+    :param boundary_times: (G,) — sorted unique input spike times.
+    :param original_thresholds: (O,) — current thresholds.
+    :param labels: (B,) — integer class labels.
+    :param t_target: Target spike time for feature computation.
+    :param n_fractions: Number of multipliers to search.
+    :param frac_min: Minimum fraction (inclusive).
+    :param frac_max: Maximum fraction (inclusive).
+    :returns: (O,) adjusted thresholds.
     """
     O = original_thresholds.shape[0]
     fractions = np.linspace(frac_min, frac_max, n_fractions)

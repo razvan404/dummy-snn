@@ -134,13 +134,12 @@ def create_threshold_gif(
 ):
     """Create an animated GIF from threshold evolution data.
 
-    Args:
-        json_path: Path to thresholds.json file
-        output_path: Path where GIF will be saved
-        setup_path: Path to setup.json file
-        duration: Duration of each frame in milliseconds
-        bins: Number of bins for histograms
-        num_workers: Number of parallel workers (default: cpu_count())
+    :param json_path: Path to thresholds.json file.
+    :param output_path: Path where GIF will be saved.
+    :param setup_path: Path to setup.json file.
+    :param duration: Duration of each frame in milliseconds.
+    :param bins: Number of bins for histograms.
+    :param num_workers: Number of parallel workers (default: cpu_count()).
     """
     import tqdm
 

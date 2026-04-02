@@ -10,11 +10,8 @@ def encode_whitened_image(whitened_image: torch.Tensor) -> torch.Tensor:
     2. Split into positive (X+) and negative (X-) channels, interleaved.
     3. Apply latency encoding: t = 1 - x (brighter spikes earlier).
 
-    Args:
-        whitened_image: (C, H, W) whitened image tensor.
-
-    Returns:
-        (2*C, H, W) spike times. Channel order: [C0+, C0-, C1+, C1-, ...].
+    :param whitened_image: (C, H, W) whitened image tensor.
+    :returns: (2*C, H, W) spike times. Channel order: [C0+, C0-, C1+, C1-, ...].
     """
     C, H, W = whitened_image.shape
 

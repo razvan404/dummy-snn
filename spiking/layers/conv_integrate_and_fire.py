@@ -82,11 +82,8 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
     def _unfold_patches(self, input_times: torch.Tensor) -> torch.Tensor:
         """Extract patches from spatial input.
 
-        Args:
-            input_times: (C, H, W) or (B, C, H, W) tensor of spike times.
-
-        Returns:
-            (L, dim) or (B, L, dim) tensor of unfolded patches,
+        :param input_times: (C, H, W) or (B, C, H, W) tensor of spike times.
+        :returns: (L, dim) or (B, L, dim) tensor of unfolded patches,
             where L = oH * oW and dim = C * kH * kW.
         """
         has_batch = input_times.dim() == 4
@@ -181,11 +178,8 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         Flat inputs delegate to the base class FC inference (useful for
         patch-based training where patches are flattened).
 
-        Args:
-            input_times: (C, H, W) or (num_inputs,) tensor of spike times.
-
-        Returns:
-            (F, oH, oW) for spatial input, (num_outputs,) for flat input.
+        :param input_times: (C, H, W) or (num_inputs,) tensor of spike times.
+        :returns: (F, oH, oW) for spatial input, (num_outputs,) for flat input.
         """
         if input_times.dim() == 1:
             return super().infer_spike_times(input_times)
@@ -204,11 +198,8 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Core conv2d accumulation loop shared by batch inference methods.
 
-        Args:
-            input_times: (B, C, H, W) tensor of spike times.
-
-        Returns:
-            (spike_times, cum_potential) both (B, F, oH, oW).
+        :param input_times: (B, C, H, W) tensor of spike times.
+        :returns: (spike_times, cum_potential) both (B, F, oH, oW).
         """
         B, C, H, W = input_times.shape
         oH, oW = self._compute_output_size(H, W)
@@ -255,11 +246,8 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Batched analytical spike time inference using conv2d, also returning potentials.
 
-        Args:
-            input_times: (B, C, H, W) tensor of spike times.
-
-        Returns:
-            (spike_times, cum_potential) both (B, F, oH, oW).
+        :param input_times: (B, C, H, W) tensor of spike times.
+        :returns: (spike_times, cum_potential) both (B, F, oH, oW).
         """
         if input_times.dim() == 2:
             # Called from base class delegation (e.g. infer_spike_times on patches)
@@ -270,11 +258,8 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
     def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
         """Batched analytical spike time inference using conv2d.
 
-        Args:
-            input_times: (B, C, H, W) tensor of spike times.
-
-        Returns:
-            (B, F, oH, oW) tensor of output spike times.
+        :param input_times: (B, C, H, W) tensor of spike times.
+        :returns: (B, F, oH, oW) tensor of output spike times.
         """
         if input_times.dim() == 2:
             # Called from base class delegation (e.g. infer_spike_times on patches)
@@ -289,11 +274,8 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         Slower than conv2d-based infer_spike_times_batch but useful as a
         reference implementation that directly reuses the base class logic.
 
-        Args:
-            input_times: (B, C, H, W) tensor of spike times.
-
-        Returns:
-            (B, F, oH, oW) tensor of output spike times.
+        :param input_times: (B, C, H, W) tensor of spike times.
+        :returns: (B, F, oH, oW) tensor of output spike times.
         """
         B, C, H, W = input_times.shape
         oH, oW = self._compute_output_size(H, W)

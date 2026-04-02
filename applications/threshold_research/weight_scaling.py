@@ -92,7 +92,7 @@ def weight_scaling_sweep(
     Precomputes cumulative potentials once, then derives all factors' spike times
     analytically (factor * cum_potential >= threshold).
 
-    Returns: {"baseline": metrics_dict, "factors": {0.7: metrics_dict, ...}}
+    :returns: {"baseline": metrics_dict, "factors": {0.7: metrics_dict, ...}}
     """
     if scale_factors is None:
         scale_factors = DEFAULT_SCALE_FACTORS

@@ -9,8 +9,7 @@ class Cifar10PatchDataset:
     Each round presents one patch per image in a pre-determined shuffled order,
     ensuring every image is seen exactly once per round with reproducible ordering.
 
-    Args:
-        processed_dir: Path to directory with train.pt, kernels.pt, mean.pt, config.json.
+    :param processed_dir: Path to directory with train.pt, kernels.pt, mean.pt, config.json.
     """
 
     def __init__(self, processed_dir: str):
@@ -46,12 +45,9 @@ class Cifar10PatchDataset:
     ) -> tuple[torch.Tensor, int]:
         """Extract a single flattened patch for the given round and position.
 
-        Args:
-            round_idx: Which round (0 to num_rounds - 1).
-            position_in_round: Position within the round's shuffled order (0 to num_images - 1).
-
-        Returns:
-            (patch, label) where patch is (C * patch_size * patch_size,) flattened.
+        :param round_idx: Which round (0 to num_rounds - 1).
+        :param position_in_round: Position within the round's shuffled order (0 to num_images - 1).
+        :returns: (patch, label) where patch is (C * patch_size * patch_size,) flattened.
         """
         img_idx = self.round_orders[round_idx, position_in_round].item()
         row = self.patch_positions[img_idx, round_idx, 0].item()

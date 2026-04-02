@@ -34,9 +34,7 @@ class TestEvaluateModel:
         train_loader = make_fake_dataloader(num_samples=10, shape=shape)
         val_loader = make_fake_dataloader(num_samples=5, shape=shape)
 
-        train_metrics, val_metrics = evaluate_model(
-            layer, train_loader, val_loader
-        )
+        train_metrics, val_metrics = evaluate_model(layer, train_loader, val_loader)
 
         for metrics in (train_metrics, val_metrics):
             assert isinstance(metrics, dict)
@@ -44,7 +42,6 @@ class TestEvaluateModel:
             assert "precision" in metrics
             assert "recall" in metrics
             assert "f1" in metrics
-
 
 
 class TestCreateDataset:

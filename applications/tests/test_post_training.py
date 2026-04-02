@@ -7,7 +7,6 @@ from torch.utils.data import DataLoader
 
 from spiking.tests.test_evaluation import FakeDataset
 
-
 SPIKE_SHAPE = (2, 4, 4)
 TINY_ARCHITECTURE = [8, 4, 2]
 

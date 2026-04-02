@@ -13,8 +13,7 @@ class RidgeColumnSwap:
     This is useful for perturbation analysis where you repeatedly swap one
     neuron/filter's features while keeping the rest fixed.
 
-    Args:
-        alpha: Regularization strength (same as sklearn RidgeClassifier).
+    :param alpha: Regularization strength (same as sklearn RidgeClassifier).
     """
 
     def __init__(self, alpha: float = 1.0):
@@ -23,12 +22,9 @@ class RidgeColumnSwap:
     def fit(self, X: np.ndarray, y: np.ndarray) -> "RidgeColumnSwap":
         """Fit baseline classifier and precompute inverse.
 
-        Args:
-            X: (n, d) training features.
-            y: (n,) integer class labels.
-
-        Returns:
-            self
+        :param X: (n, d) training features.
+        :param y: (n,) integer class labels.
+        :returns: self
         """
         n, d = X.shape
         self._binarizer = LabelBinarizer(neg_label=-1, pos_label=1)
@@ -64,11 +60,8 @@ class RidgeColumnSwap:
     def predict(self, X_val: np.ndarray) -> np.ndarray:
         """Predict class labels using baseline weights.
 
-        Args:
-            X_val: (m, d) validation features.
-
-        Returns:
-            (m,) predicted class labels.
+        :param X_val: (m, d) validation features.
+        :returns: (m,) predicted class labels.
         """
         scores = X_val @ self._w + self._intercept  # (m, K)
         return self._decode(scores)
@@ -87,13 +80,10 @@ class RidgeColumnSwap:
 
         Cost: O(d²k + mk) where k = len(col_indices), m = X_val_mod.shape[0].
 
-        Args:
-            col_indices: Indices of columns to replace.
-            new_train_cols: (n, k) new values for training data columns.
-            X_val_mod: (m, d) validation features with the same columns already replaced.
-
-        Returns:
-            (m,) predicted class labels.
+        :param col_indices: Indices of columns to replace.
+        :param new_train_cols: (n, k) new values for training data columns.
+        :param X_val_mod: (m, d) validation features with the same columns already replaced.
+        :returns: (m,) predicted class labels.
         """
         col_indices = np.asarray(col_indices)
         k = len(col_indices)
@@ -156,9 +146,8 @@ class RidgeColumnSwap:
 
         Cost: O(d²k) — same as predict_swapped, no O(d³) refit needed.
 
-        Args:
-            col_indices: Indices of columns to replace permanently.
-            new_train_cols: (n, k) new column values for training data.
+        :param col_indices: Indices of columns to replace permanently.
+        :param new_train_cols: (n, k) new column values for training data.
         """
         col_indices = np.asarray(col_indices)
         k = len(col_indices)

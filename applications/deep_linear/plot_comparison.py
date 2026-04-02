@@ -9,7 +9,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-
 SERIES_COLORS = {
     "baseline": "#1f77b4",
     "pbtr": "#ff7f0e",

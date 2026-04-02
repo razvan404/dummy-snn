@@ -26,13 +26,10 @@ def apply_difference_of_gaussians_filter_batch(
 ) -> torch.Tensor:
     """Apply DoG filter to a batch of images.
 
-    Args:
-        images: (B, H, W) tensor of grayscale images.
-        sigma_center: Standard deviation for the center Gaussian.
-        sigma_surround: Standard deviation for the surround Gaussian.
-
-    Returns:
-        (B, 2, H, W) tensor with on/off DoG channels.
+    :param images: (B, H, W) tensor of grayscale images.
+    :param sigma_center: Standard deviation for the center Gaussian.
+    :param sigma_surround: Standard deviation for the surround Gaussian.
+    :returns: (B, 2, H, W) tensor with on/off DoG channels.
     """
     imgs = images.unsqueeze(1)  # (B, 1, H, W)
     kc = _make_gaussian_kernel(sigma_center, images.device)
@@ -56,12 +53,11 @@ def apply_difference_of_gaussians_filter(
 ) -> torch.Tensor:
     """
     Apply the Difference-of-Gaussians (DoG) filter to an image.
-    Args:
-        image: 2D tensor representing the grayscale image (H x W) or 3D tensor (C x H x W).
-        sigma_center: Standard deviation for the center Gaussian.
-        sigma_surround: Standard deviation for the surround Gaussian.
-    Returns:
-        Tensor of shape (2, H, W) containing DoG on/off channels.
+
+    :param image: 2D tensor representing the grayscale image (H x W) or 3D tensor (C x H x W).
+    :param sigma_center: Standard deviation for the center Gaussian.
+    :param sigma_surround: Standard deviation for the surround Gaussian.
+    :returns: Tensor of shape (2, H, W) containing DoG on/off channels.
     """
     if image.ndim == 2:
         image = image.unsqueeze(0)

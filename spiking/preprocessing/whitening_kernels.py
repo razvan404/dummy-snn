@@ -9,13 +9,10 @@ def _extract_patches(
 
     Uses F.unfold for vectorized extraction rather than per-patch loops.
 
-    Args:
-        images: (N, C, H, W) tensor.
-        patch_size: Side length of square patches.
-        n_patches: Number of patches to extract.
-
-    Returns:
-        (n_patches, C * patch_size * patch_size) flattened patches.
+    :param images: (N, C, H, W) tensor.
+    :param patch_size: Side length of square patches.
+    :param n_patches: Number of patches to extract.
+    :returns: (n_patches, C * patch_size * patch_size) flattened patches.
     """
     N, C, H, W = images.shape
     dim = C * patch_size * patch_size
@@ -40,13 +37,10 @@ def compute_patch_mean(
 ) -> torch.Tensor:
     """Compute the mean patch vector from image patches.
 
-    Args:
-        images: (N, C, H, W) tensor of images in [0, 1].
-        patch_size: Side length of square patches.
-        n_patches: Number of random patches to sample.
-
-    Returns:
-        (C * patch_size * patch_size,) mean vector.
+    :param images: (N, C, H, W) tensor of images in [0, 1].
+    :param patch_size: Side length of square patches.
+    :param n_patches: Number of random patches to sample.
+    :returns: (C * patch_size * patch_size,) mean vector.
     """
     N, C, H, W = images.shape
     max_patches = N * (H - patch_size + 1) * (W - patch_size + 1)
@@ -58,11 +52,8 @@ def compute_patch_mean(
 def load_kernels(path: str) -> torch.Tensor:
     """Load pre-computed whitening kernels from a .pt file.
 
-    Args:
-        path: Path to a .pt file containing a (C, C, kH, kW) tensor.
-
-    Returns:
-        (C, C, kH, kW) kernel tensor.
+    :param path: Path to a .pt file containing a (C, C, kH, kW) tensor.
+    :returns: (C, C, kH, kW) kernel tensor.
     """
     return torch.load(path, weights_only=True)
 
@@ -78,15 +69,12 @@ def fit_whitening_kernels(
 
     Approximates ZCA whitening via cross-channel impulse response kernels.
 
-    Args:
-        images: (N, C, H, W) tensor of images in [0, 1].
-        patch_size: Side length of square patches (must be odd).
-        n_patches: Number of random patches to sample.
-        epsilon: Regularization constant for eigenvalue inversion.
-        rho: Fraction of eigenvalues to retain (0.15 per Falez 2020, reference impl).
-
-    Returns:
-        (kernels, mean) where kernels is (C, C, kH, kW) for cross-channel conv
+    :param images: (N, C, H, W) tensor of images in [0, 1].
+    :param patch_size: Side length of square patches (must be odd).
+    :param n_patches: Number of random patches to sample.
+    :param epsilon: Regularization constant for eigenvalue inversion.
+    :param rho: Fraction of eigenvalues to retain (0.15 per Falez 2020, reference impl).
+    :returns: (kernels, mean) where kernels is (C, C, kH, kW) for cross-channel conv
         and mean is (C * kH * kW,) patch mean vector.
     """
     N, C, H, W = images.shape
@@ -149,14 +137,11 @@ def apply_whitening_kernels(
     The kernels already have DC removal built in (filter mean subtracted during
     fitting), so no additional bias subtraction is needed.
 
-    Args:
-        images: (N, C, H, W) tensor.
-        kernels: (C, C, kH, kW) cross-channel convolution kernels.
-        mean: (C * kH * kW,) patch mean vector from fitting (unused during
-            application, kept for API compatibility).
-
-    Returns:
-        (N, C, H, W) whitened images (same spatial dimensions via padding).
+    :param images: (N, C, H, W) tensor.
+    :param kernels: (C, C, kH, kW) cross-channel convolution kernels.
+    :param mean: (C * kH * kW,) patch mean vector from fitting (unused during
+        application, kept for API compatibility).
+    :returns: (N, C, H, W) whitened images (same spatial dimensions via padding).
     """
     kH = kernels.shape[2]
     padding = kH // 2

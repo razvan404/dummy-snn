@@ -7,7 +7,13 @@ from .layers import (
     IntegrateAndFireMultilayer,
     SpikingSequential,
 )
-from .learning import BiologicalSTDP, ConvLearner, Learner, MultiplicativeSTDP, WinnerTakesAll
+from .learning import (
+    BiologicalSTDP,
+    ConvLearner,
+    Learner,
+    MultiplicativeSTDP,
+    WinnerTakesAll,
+)
 from .threshold import (
     CompetitiveThresholdAdaptation,
     TargetTimestampAdaptation,
@@ -16,7 +22,12 @@ from .threshold import (
     NormalInitialization,
     ConstantInitialization,
 )
-from .training import ConvUnsupervisedTrainer, TrainingMonitor, UnsupervisedTrainer, train
+from .training import (
+    ConvUnsupervisedTrainer,
+    TrainingMonitor,
+    UnsupervisedTrainer,
+    train,
+)
 from .evaluation import (
     BinaryFirstSpike,
     BinaryWindowFirstSpike,

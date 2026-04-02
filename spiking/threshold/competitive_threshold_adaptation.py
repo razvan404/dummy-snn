@@ -27,9 +27,7 @@ class CompetitiveThresholdAdaptation(ThresholdAdaptation):
         winners_neurons = neurons_to_learn
         N = len(current_thresholds)
 
-        losers_mask = torch.ones(
-            N, dtype=torch.bool, device=current_thresholds.device
-        )
+        losers_mask = torch.ones(N, dtype=torch.bool, device=current_thresholds.device)
         losers_mask[winners_neurons] = False
 
         # Paper 19 Eq 9: winner gets +eta_th, losers get -eta_th/N

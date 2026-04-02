@@ -8,7 +8,6 @@ from torch.utils.data import DataLoader
 
 from spiking.tests.test_evaluation import FakeDataset
 
-
 SPIKE_SHAPE = (2, 4, 4)
 TINY_ARCHITECTURE = [8, 4, 2]
 
@@ -122,7 +121,9 @@ class TestTrainLayer:
         model = load_model(str(tmp_path / "model.pth"))
         assert isinstance(model, IntegrateAndFireMultilayer)
 
-    def test_saves_winner_counts_and_threshold_distribution(self, tmp_path, fake_loaders):
+    def test_saves_winner_counts_and_threshold_distribution(
+        self, tmp_path, fake_loaders
+    ):
         from applications.deep_linear.train import train_layer
 
         train_layer(
@@ -153,7 +154,9 @@ class TestTrainLayer:
             captured["model"] = model
 
         with patch("applications.deep_linear.train.train", side_effect=capture_train):
-            with patch("applications.deep_linear.train.evaluate_model", return_value=({}, {})):
+            with patch(
+                "applications.deep_linear.train.evaluate_model", return_value=({}, {})
+            ):
                 train_layer(
                     dataset_loaders=fake_loaders,
                     spike_shape=SPIKE_SHAPE,
@@ -178,7 +181,10 @@ class TestTrainLayer:
             return {"accuracy": 0.0}, {"accuracy": 0.0}
 
         with patch("applications.deep_linear.train.train"):
-            with patch("applications.deep_linear.train.evaluate_model", side_effect=capture_eval):
+            with patch(
+                "applications.deep_linear.train.evaluate_model",
+                side_effect=capture_eval,
+            ):
                 train_layer(
                     dataset_loaders=fake_loaders,
                     spike_shape=SPIKE_SHAPE,
@@ -243,7 +249,9 @@ class TestApplyPbtr:
         model_after = load_model(f"{output_dir}/model.pth")
         assert not torch.equal(model_after.layers[0].thresholds, thresholds_before)
 
-    def test_does_not_save_weights_figure(self, tmp_path, trained_model_path, fake_loaders):
+    def test_does_not_save_weights_figure(
+        self, tmp_path, trained_model_path, fake_loaders
+    ):
         from applications.deep_linear.apply_pbtr import apply_pbtr
 
         output_dir = str(tmp_path / "pbtr_output")
@@ -257,7 +265,9 @@ class TestApplyPbtr:
         )
         assert not os.path.exists(f"{output_dir}/weights.png")
 
-    def test_saves_threshold_distribution(self, tmp_path, trained_model_path, fake_loaders):
+    def test_saves_threshold_distribution(
+        self, tmp_path, trained_model_path, fake_loaders
+    ):
         from applications.deep_linear.apply_pbtr import apply_pbtr
 
         output_dir = str(tmp_path / "pbtr_output")
@@ -271,7 +281,9 @@ class TestApplyPbtr:
         )
         assert os.path.exists(f"{output_dir}/threshold_distribution.png")
 
-    def test_trains_sub_model_for_layer_0(self, tmp_path, trained_model_path, fake_loaders):
+    def test_trains_sub_model_for_layer_0(
+        self, tmp_path, trained_model_path, fake_loaders
+    ):
         """apply_pbtr should pass a sub-model (not the full model) to train()."""
         from applications.deep_linear.apply_pbtr import apply_pbtr
 
@@ -280,8 +292,13 @@ class TestApplyPbtr:
         def capture_train(model, *args, **kwargs):
             captured["model"] = model
 
-        with patch("applications.deep_linear.apply_pbtr.train", side_effect=capture_train):
-            with patch("applications.deep_linear.apply_pbtr.evaluate_model", return_value=({}, {})):
+        with patch(
+            "applications.deep_linear.apply_pbtr.train", side_effect=capture_train
+        ):
+            with patch(
+                "applications.deep_linear.apply_pbtr.evaluate_model",
+                return_value=({}, {}),
+            ):
                 apply_pbtr(
                     model_path=trained_model_path,
                     dataset_loaders=fake_loaders,
@@ -293,7 +310,9 @@ class TestApplyPbtr:
 
         assert len(captured["model"].layers) == 1
 
-    def test_evaluates_sub_model_for_layer_0(self, tmp_path, trained_model_path, fake_loaders):
+    def test_evaluates_sub_model_for_layer_0(
+        self, tmp_path, trained_model_path, fake_loaders
+    ):
         """apply_pbtr should pass a sub-model to evaluate_model()."""
         from applications.deep_linear.apply_pbtr import apply_pbtr
 
@@ -304,7 +323,10 @@ class TestApplyPbtr:
             return {"accuracy": 0.0}, {"accuracy": 0.0}
 
         with patch("applications.deep_linear.apply_pbtr.train"):
-            with patch("applications.deep_linear.apply_pbtr.evaluate_model", side_effect=capture_eval):
+            with patch(
+                "applications.deep_linear.apply_pbtr.evaluate_model",
+                side_effect=capture_eval,
+            ):
                 apply_pbtr(
                     model_path=trained_model_path,
                     dataset_loaders=fake_loaders,

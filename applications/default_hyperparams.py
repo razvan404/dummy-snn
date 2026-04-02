@@ -83,14 +83,9 @@ _DATASET_HYPERPARAMS = {
 def get_common_hyperparams(dataset: str) -> dict:
     """Return dataset-specific hyperparameter defaults.
 
-    Args:
-        dataset: Dataset name (e.g. 'mnist', 'cifar10_whitened', 'fashion_mnist').
-
-    Returns:
-        Dict of hyperparameters appropriate for the dataset.
-
-    Raises:
-        ValueError: If dataset name is unknown.
+    :param dataset: Dataset name (e.g. 'mnist', 'cifar10_whitened', 'fashion_mnist').
+    :returns: Dict of hyperparameters appropriate for the dataset.
+    :raises ValueError: If dataset name is unknown.
     """
     if dataset not in _DATASET_HYPERPARAMS:
         raise ValueError(

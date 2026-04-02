@@ -300,7 +300,9 @@ class TestEvaluateClassifier:
 
 
 class TestInferSpikeTimes:
-    def _make_layer_with_params(self, weights, thresholds, refractory_period=float("inf")):
+    def _make_layer_with_params(
+        self, weights, thresholds, refractory_period=float("inf")
+    ):
         """Create a layer with exact weights and thresholds."""
         layer = IntegrateAndFireLayer(
             num_inputs=weights.shape[1],
@@ -381,9 +383,9 @@ class TestInferSpikeTimes:
             # Analytical
             analytical_times = layer.infer_spike_times(input_times)
 
-            assert torch.allclose(iterative_times, analytical_times, atol=1e-6), (
-                f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
-            )
+            assert torch.allclose(
+                iterative_times, analytical_times, atol=1e-6
+            ), f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
 
     def test_sequential_equivalence(self):
         """Multi-layer analytical must match iterative."""
@@ -410,12 +412,15 @@ class TestInferSpikeTimes:
             # Analytical
             analytical_times = model.infer_spike_times(input_times)
 
-            assert torch.allclose(iterative_times, analytical_times, atol=1e-6), (
-                f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
-            )
+            assert torch.allclose(
+                iterative_times, analytical_times, atol=1e-6
+            ), f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
+
 
 class TestInferSpikeTimesBatch:
-    def _make_layer_with_params(self, weights, thresholds, refractory_period=float("inf")):
+    def _make_layer_with_params(
+        self, weights, thresholds, refractory_period=float("inf")
+    ):
         """Create a layer with exact weights and thresholds."""
         layer = IntegrateAndFireLayer(
             num_inputs=weights.shape[1],
@@ -670,16 +675,20 @@ class TestBinaryFirstSpike:
         from spiking.evaluation.decoding import BinaryFirstSpike
 
         decoder = BinaryFirstSpike()
-        spike_times = torch.tensor([
-            [0.5, 0.2, 0.8],
-            [0.1, 0.5, 0.5],
-        ])
+        spike_times = torch.tensor(
+            [
+                [0.5, 0.2, 0.8],
+                [0.1, 0.5, 0.5],
+            ]
+        )
         result = decoder.decode(spike_times)
 
-        expected = torch.tensor([
-            [0.0, 1.0, 0.0],
-            [1.0, 0.0, 0.0],
-        ])
+        expected = torch.tensor(
+            [
+                [0.0, 1.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ]
+        )
         torch.testing.assert_close(result, expected)
 
 
@@ -747,18 +756,22 @@ class TestScaledInversion:
 
         decoder = ScaledInversion()
         # Each sample has its own min_t
-        spike_times = torch.tensor([
-            [0.2, 0.6, 1.0],
-            [0.5, 0.7, 0.9],
-        ])
+        spike_times = torch.tensor(
+            [
+                [0.2, 0.6, 1.0],
+                [0.5, 0.7, 0.9],
+            ]
+        )
         result = decoder.decode(spike_times)
 
         # Sample 0: min_t=0.2, denom=0.8
         # Sample 1: min_t=0.5, denom=0.5
-        expected = torch.tensor([
-            [1.0, 0.5, 0.0],
-            [1.0, 0.6, 0.2],
-        ])
+        expected = torch.tensor(
+            [
+                [1.0, 0.5, 0.0],
+                [1.0, 0.6, 0.2],
+            ]
+        )
         torch.testing.assert_close(result, expected, atol=1e-6, rtol=0)
 
 
@@ -871,16 +884,20 @@ class TestBinaryWindowFirstSpike:
         from spiking.evaluation.decoding import BinaryWindowFirstSpike
 
         decoder = BinaryWindowFirstSpike(tolerance=0.05)
-        spike_times = torch.tensor([
-            [0.24, 0.2, 0.8],   # min=0.2, 0.24 within tolerance
-            [0.1, 0.5, 0.14],   # min=0.1, 0.14 within tolerance
-        ])
+        spike_times = torch.tensor(
+            [
+                [0.24, 0.2, 0.8],  # min=0.2, 0.24 within tolerance
+                [0.1, 0.5, 0.14],  # min=0.1, 0.14 within tolerance
+            ]
+        )
         result = decoder.decode(spike_times)
 
-        expected = torch.tensor([
-            [1.0, 1.0, 0.0],
-            [1.0, 0.0, 1.0],
-        ])
+        expected = torch.tensor(
+            [
+                [1.0, 1.0, 0.0],
+                [1.0, 0.0, 1.0],
+            ]
+        )
         torch.testing.assert_close(result, expected)
 
     def test_exact_boundary_included(self):

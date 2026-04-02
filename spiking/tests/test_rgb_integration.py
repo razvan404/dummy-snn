@@ -26,8 +26,7 @@ def run_full_pipeline(
 ) -> tuple[torch.Tensor, ConvIntegrateAndFireLayer]:
     """Run full pipeline: whitening → encoding → discretization → conv inference.
 
-    Returns:
-        (spike_times, layer) where spike_times is (N, F, oH, oW).
+    :returns: (spike_times, layer) where spike_times is (N, F, oH, oW).
     """
     N, C, H, W = images.shape
 

@@ -45,23 +45,17 @@ class BaseLearner(ABC):
     ) -> float:
         """Apply learning rule to selected neurons.
 
-        Args:
-            neurons_to_learn: indices of neurons to update.
-            pre_spike_times: pre-synaptic spike times.
-
-        Returns:
-            Average absolute weight change.
+        :param neurons_to_learn: indices of neurons to update.
+        :param pre_spike_times: pre-synaptic spike times.
+        :returns: Average absolute weight change.
         """
 
     @torch.no_grad()
     def step(self, pre_spike_times: torch.Tensor) -> float:
         """Apply one learning step after a forward pass.
 
-        Args:
-            pre_spike_times: pre-synaptic spike times.
-
-        Returns:
-            Average absolute weight change.
+        :param pre_spike_times: pre-synaptic spike times.
+        :returns: Average absolute weight change.
         """
         neurons_to_learn = self._select_neurons().flatten()
         self.neurons_to_learn = neurons_to_learn

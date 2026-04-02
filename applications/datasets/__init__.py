@@ -16,8 +16,12 @@ def create_dataset(name: str, root_dir: str = "data") -> tuple[DataLoader, DataL
     Access the dataset's native image shape via train_loader.dataset.image_shape.
     """
     if name == "mnist_subset":
-        train_dataset = MnistSubsetDataset(f"{root_dir}/mnist-subset", "train", image_shape=(16, 16))
-        test_dataset = MnistSubsetDataset(f"{root_dir}/mnist-subset", "test", image_shape=(16, 16))
+        train_dataset = MnistSubsetDataset(
+            f"{root_dir}/mnist-subset", "train", image_shape=(16, 16)
+        )
+        test_dataset = MnistSubsetDataset(
+            f"{root_dir}/mnist-subset", "test", image_shape=(16, 16)
+        )
     elif name == "mnist":
         train_dataset = MnistDataset(root_dir, "train")
         test_dataset = MnistDataset(root_dir, "test")
@@ -40,4 +44,11 @@ def create_dataset(name: str, root_dir: str = "data") -> tuple[DataLoader, DataL
     return train_loader, test_loader
 
 
-DATASETS = ["mnist", "mnist_subset", "fashion_mnist", "cifar10", "cifar10_whitened", "fer2013"]
+DATASETS = [
+    "mnist",
+    "mnist_subset",
+    "fashion_mnist",
+    "cifar10",
+    "cifar10_whitened",
+    "fer2013",
+]

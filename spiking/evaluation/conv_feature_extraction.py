@@ -12,12 +12,9 @@ def sum_pool_features(features: torch.Tensor, pool_size: int = 2) -> torch.Tenso
     For pool_size=2 with 28×28 input: divides into 4 quadrants of 14×14 each,
     sums each quadrant → output 2×2 per filter.
 
-    Args:
-        features: (F, oH, oW) or (B, F, oH, oW) feature tensor.
-        pool_size: Number of regions per spatial dimension.
-
-    Returns:
-        Tensor with spatial dims equal to pool_size × pool_size.
+    :param features: (F, oH, oW) or (B, F, oH, oW) feature tensor.
+    :param pool_size: Number of regions per spatial dimension.
+    :returns: Tensor with spatial dims equal to pool_size × pool_size.
     """
     if pool_size == 1:
         return features
@@ -49,14 +46,11 @@ def extract_conv_features(
     Uses batched analytical spike time computation, then applies
     spike_times_to_features and sum pooling.
 
-    Args:
-        model: Convolutional spiking layer.
-        dataloader: DataLoader yielding (times, labels) per sample.
-        pool_size: Sum pooling window size.
-        t_target: Optional target time for feature conversion.
-
-    Returns:
-        (X, y) where X is (N, flat_features) and y is (N,) numpy arrays.
+    :param model: Convolutional spiking layer.
+    :param dataloader: DataLoader yielding (times, labels) per sample.
+    :param pool_size: Sum pooling window size.
+    :param t_target: Optional target time for feature conversion.
+    :returns: (X, y) where X is (N, flat_features) and y is (N,) numpy arrays.
     """
     model.eval()
 

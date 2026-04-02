@@ -59,16 +59,15 @@ def benchmark_architecture(
 ):
     """Train and evaluate an SNN architecture across multiple random seeds.
 
-    Args:
-        create_model: Zero-arg factory returning (model, learner). Called after
-            set_seed(seed), so random initialization is deterministic per seed.
-        train_loader: Training data loader.
-        val_loader: Validation data loader.
-        image_shape: Full spike volume shape, e.g. (2, 16, 16).
-        num_epochs: Number of training epochs per seed.
-        exp_name: Experiment name — output goes to logs/{exp_name}/.
-        seeds: List of random seeds. Defaults to 1-10.
-        setup: Optional metadata dict saved as setup.json per seed.
+    :param create_model: Zero-arg factory returning (model, learner). Called after
+        set_seed(seed), so random initialization is deterministic per seed.
+    :param train_loader: Training data loader.
+    :param val_loader: Validation data loader.
+    :param image_shape: Full spike volume shape, e.g. (2, 16, 16).
+    :param num_epochs: Number of training epochs per seed.
+    :param exp_name: Experiment name — output goes to logs/{exp_name}/.
+    :param seeds: List of random seeds. Defaults to 1-10.
+    :param setup: Optional metadata dict saved as setup.json per seed.
     """
     if seeds is None:
         seeds = DEFAULT_SEEDS

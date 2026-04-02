@@ -31,8 +31,9 @@ def collect_conv_input_times(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Collect input spike times preserving spatial dims, plus labels.
 
-    Returns:
-        (times, labels): times is (N, C, H, W), labels is (N,).
+    :param loader: DataLoader providing (spike_times, labels) batches.
+    :param chunk_size: Batch size for iteration.
+    :returns: Tuple of (times, labels) where times is (N, C, H, W) and labels is (N,).
     """
     batched = DataLoader(loader.dataset, batch_size=chunk_size, shuffle=False)
     time_parts = []
@@ -54,18 +55,15 @@ def multi_threshold_conv_accumulate(
 ) -> torch.Tensor:
     """Single-pass conv2d accumulation checking multiple threshold sets.
 
-    Args:
-        input_times: (B, C, H, W) spike times (inf = no spike).
-            Assumed to be already discretized (e.g. via discretize_times with
-            num_bins=16/64), so the number of unique times is small.
-        weights_4d: (F, C, kH, kW) conv filter weights.
-        thresholds_2d: (num_fracs, F) threshold values per fraction.
-        stride: Conv stride.
-        padding: Conv padding.
-        device: Device for computation.
-
-    Returns:
-        (num_fracs, B, F, oH, oW) spike times tensor.
+    :param input_times: (B, C, H, W) spike times (inf = no spike).
+        Assumed to be already discretized (e.g. via discretize_times with
+        num_bins=16/64), so the number of unique times is small.
+    :param weights_4d: (F, C, kH, kW) conv filter weights.
+    :param thresholds_2d: (num_fracs, F) threshold values per fraction.
+    :param stride: Conv stride.
+    :param padding: Conv padding.
+    :param device: Device for computation.
+    :returns: (num_fracs, B, F, oH, oW) spike times tensor.
     """
     input_times = input_times.to(device)
     weights_4d = weights_4d.to(device)
@@ -123,7 +121,10 @@ def _spike_times_to_pooled_features(
 ) -> np.ndarray:
     """Convert (num_fracs, B, F, oH, oW) spike times to flat pooled features.
 
-    Returns: (num_fracs, B, F * pool_size * pool_size) numpy array.
+    :param spike_times: (num_fracs, B, F, oH, oW) spike times tensor.
+    :param t_target: Target spike time for feature conversion.
+    :param pool_size: Spatial pool size.
+    :returns: (num_fracs, B, F * pool_size * pool_size) numpy array.
     """
     num_fracs, B, F_dim, oH, oW = spike_times.shape
     # Reshape to (num_fracs*B, F, oH, oW) for batch processing
@@ -259,15 +260,12 @@ def evaluate_conv_perturbations(
     Uses RidgeColumnSwap with Woodbury identity for efficient per-filter
     evaluation. Each column swap costs O(d²k) instead of O(d³) refit.
 
-    Args:
-        features: Dict from compute_conv_perturbed_features.
-        num_filters: Number of conv filters.
-        pool_size: Spatial pool size used during feature extraction.
-        cache_dir: Optional directory for incremental saves.
-        alpha: Ridge regularization strength.
-
-    Returns:
-        Dict with baseline metrics, accuracy/f1 matrices, optimal thresholds.
+    :param features: Dict from compute_conv_perturbed_features.
+    :param num_filters: Number of conv filters.
+    :param pool_size: Spatial pool size used during feature extraction.
+    :param cache_dir: Optional directory for incremental saves.
+    :param alpha: Ridge regularization strength.
+    :returns: Dict with baseline metrics, accuracy/f1 matrices, optimal thresholds.
     """
     X_train = features["baseline_train"]
     X_val = features["baseline_val"]

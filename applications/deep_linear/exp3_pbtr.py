@@ -64,7 +64,10 @@ def run(
                 label = f"{seed_dir.name} seed={seed}"
                 pbar.set_postfix_str(label)
                 on_batch_end, on_epoch_end = make_progress_callbacks(
-                    pbar, label, num_epochs, steps,
+                    pbar,
+                    label,
+                    num_epochs,
+                    steps,
                 )
                 apply_pbtr(
                     model_path=str(model_path),
