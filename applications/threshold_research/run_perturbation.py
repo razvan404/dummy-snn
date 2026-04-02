@@ -6,6 +6,10 @@ from tqdm import tqdm
 
 from applications.datasets import DATASETS, create_dataset
 from applications.threshold_research.neuron_perturbation import run_perturbation_sweep
+from applications.threshold_research.conv_neuron_perturbation import (
+    run_conv_perturbation_sweep,
+)
+from applications.threshold_research.perturbation_params import get_perturbation_params
 
 
 def _find_models(base_dir: str) -> list[tuple[str, float, int]]:
@@ -38,9 +42,17 @@ def _find_models(base_dir: str) -> list[tuple[str, float, int]]:
     return models
 
 
-def run(dataset: str, *, force: bool = False, seeds: list[int] | None = None):
+def run(
+    dataset: str,
+    *,
+    force: bool = False,
+    seeds: list[int] | None = None,
+    device: str = "cpu",
+    chunk_size: int = 64,
+):
     train_loader, val_loader = create_dataset(dataset)
     spike_shape = (2, *train_loader.dataset.image_shape)
+    params = get_perturbation_params(dataset)
 
     base_dir = f"logs/{dataset}/threshold_research"
     models = _find_models(base_dir)
@@ -60,15 +72,29 @@ def run(dataset: str, *, force: bool = False, seeds: list[int] | None = None):
 
         tqdm.write(f"  running t_obj={t_obj} seed={seed}")
         cache_dir = os.path.join(os.path.dirname(model_path), "perturbation_cache")
-        result = run_perturbation_sweep(
-            model_path=model_path,
-            dataset_loaders=(train_loader, val_loader),
-            spike_shape=spike_shape,
-            t_target=t_obj,
-            seed=seed,
-            cache_dir=cache_dir,
-            force=force,
-        )
+
+        if params["is_conv"]:
+            result = run_conv_perturbation_sweep(
+                model_path=model_path,
+                dataset_loaders=(train_loader, val_loader),
+                t_target=t_obj,
+                pool_size=params["pool_size"],
+                seed=seed,
+                cache_dir=cache_dir,
+                force=force,
+                device=device,
+                chunk_size=chunk_size,
+            )
+        else:
+            result = run_perturbation_sweep(
+                model_path=model_path,
+                dataset_loaders=(train_loader, val_loader),
+                spike_shape=spike_shape,
+                t_target=t_obj,
+                seed=seed,
+                cache_dir=cache_dir,
+                force=force,
+            )
 
         with open(output_path, "w") as f:
             json.dump(result, f, indent=4)
@@ -85,5 +111,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--seeds", type=int, nargs="+", help="only run these seeds (default: all)"
     )
+    parser.add_argument(
+        "--device", type=str, default="cpu", help="device for conv inference"
+    )
+    parser.add_argument(
+        "--chunk-size", type=int, default=64, help="batch chunk size for conv inference"
+    )
     args = parser.parse_args()
-    run(args.dataset, force=args.force, seeds=args.seeds)
+    run(
+        args.dataset,
+        force=args.force,
+        seeds=args.seeds,
+        device=args.device,
+        chunk_size=args.chunk_size,
+    )
