@@ -7,9 +7,7 @@ from spiking.evaluation.conv_feature_extraction import sum_pool_features
 from spiking.evaluation.feature_extraction import spike_times_to_features
 
 
-def _make_tiny_conv_layer(
-    in_channels=2, num_filters=4, kernel_size=3, image_size=8
-):
+def _make_tiny_conv_layer(in_channels=2, num_filters=4, kernel_size=3, image_size=8):
     """Create a small ConvIntegrateAndFireLayer for testing."""
     torch.manual_seed(42)
     layer = ConvIntegrateAndFireLayer(
@@ -94,7 +92,8 @@ class TestMultiThresholdConvAccumulate:
             layer.thresholds.data = original_thresholds * (1.0 + frac)
             naive = layer.infer_spike_times_batch(input_times)
             torch.testing.assert_close(
-                result[frac_idx], naive,
+                result[frac_idx],
+                naive,
                 msg=f"Mismatch at frac={frac}",
             )
 
@@ -112,8 +111,11 @@ class TestMultiThresholdConvAccumulate:
         thresholds_2d = layer.thresholds.detach().unsqueeze(0)
 
         result = multi_threshold_conv_accumulate(
-            input_times, layer.weights_4d.detach(), thresholds_2d,
-            stride=layer.stride, padding=layer.padding,
+            input_times,
+            layer.weights_4d.detach(),
+            thresholds_2d,
+            stride=layer.stride,
+            padding=layer.padding,
         )
         assert torch.isinf(result).all()
 
@@ -129,8 +131,11 @@ class TestMultiThresholdConvAccumulate:
         # Very low thresholds — everything should spike immediately
         thresholds_2d = torch.full((1, layer.num_filters), 0.01)
         result = multi_threshold_conv_accumulate(
-            input_times, layer.weights_4d.detach(), thresholds_2d,
-            stride=layer.stride, padding=layer.padding,
+            input_times,
+            layer.weights_4d.detach(),
+            thresholds_2d,
+            stride=layer.stride,
+            padding=layer.padding,
         )
         # All outputs should have spiked (no inf)
         assert torch.isfinite(result).all()
@@ -143,7 +148,9 @@ class TestSpikeTimesToPooledFeatures:
         )
 
         spike_times = torch.rand(3, 5, 4, 6, 6)  # (fracs, B, F, oH, oW)
-        result = _spike_times_to_pooled_features(spike_times, t_target=None, pool_size=2)
+        result = _spike_times_to_pooled_features(
+            spike_times, t_target=None, pool_size=2
+        )
         # pool_size=2 on 6x6 → 3x3 grid, but sum_pool divides into 2x2 regions
         # 6 // 2 = 3 per region, so pooled shape: (F, 2, 2) → flat 4*2*2 = 16
         assert result.shape == (3, 5, 4 * 2 * 2)
@@ -154,7 +161,9 @@ class TestSpikeTimesToPooledFeatures:
         )
 
         spike_times = torch.rand(2, 4, 3, 6, 6)
-        result = _spike_times_to_pooled_features(spike_times, t_target=None, pool_size=1)
+        result = _spike_times_to_pooled_features(
+            spike_times, t_target=None, pool_size=1
+        )
         assert result.shape == (2, 4, 3 * 6 * 6)
 
 
@@ -179,10 +188,15 @@ class TestFeatureEquivalence:
         # Multi-threshold with frac=0.0 only
         thresholds_2d = layer.thresholds.detach().unsqueeze(0)  # (1, F)
         result_st = multi_threshold_conv_accumulate(
-            input_times, layer.weights_4d.detach(), thresholds_2d,
-            stride=layer.stride, padding=layer.padding,
+            input_times,
+            layer.weights_4d.detach(),
+            thresholds_2d,
+            stride=layer.stride,
+            padding=layer.padding,
         )
-        result_feat = _spike_times_to_pooled_features(result_st, t_target=None, pool_size=pool_size)
+        result_feat = _spike_times_to_pooled_features(
+            result_st, t_target=None, pool_size=pool_size
+        )
 
         np.testing.assert_allclose(result_feat[0], baseline_pooled, rtol=1e-5)
 

@@ -1092,12 +1092,12 @@ class TestEvaluatePerturbationsStrategies:
             seed=42,
         )
 
-    def test_no_refit_produces_valid_results(self, features):
+    def test_produces_valid_results(self, features):
         from applications.threshold_research.neuron_perturbation import (
             evaluate_perturbations,
         )
 
-        result = evaluate_perturbations(features=features, refit=False)
+        result = evaluate_perturbations(features=features)
 
         num_outputs = features["baseline_train"].shape[1]
         num_fracs = len(features["perturbation_fractions"])
@@ -1106,49 +1106,38 @@ class TestEvaluatePerturbationsStrategies:
         assert "accuracy" in result["baseline"]
         assert len(result["optimal_deltas"]) == num_outputs
 
-    def test_custom_classifier_factory(self, features):
-        from sklearn.neighbors import NearestCentroid
-
+    def test_different_alpha(self, features):
         from applications.threshold_research.neuron_perturbation import (
             evaluate_perturbations,
         )
 
-        result = evaluate_perturbations(
-            features=features,
-            classifier_factory=lambda: NearestCentroid(),
-        )
+        result_default = evaluate_perturbations(features=features, alpha=1.0)
+        result_strong = evaluate_perturbations(features=features, alpha=100.0)
 
+        # Both should produce valid results
         num_outputs = features["baseline_train"].shape[1]
         num_fracs = len(features["perturbation_fractions"])
+        assert np.array(result_default["accuracy_matrix"]).shape == (
+            num_outputs,
+            num_fracs,
+        )
+        assert np.array(result_strong["accuracy_matrix"]).shape == (
+            num_outputs,
+            num_fracs,
+        )
 
-        assert np.array(result["accuracy_matrix"]).shape == (num_outputs, num_fracs)
-        assert "accuracy" in result["baseline"]
-
-    def test_no_refit_larger_variation(self, features):
-        """No-refit should produce larger accuracy variation than refit.
-
-        When the classifier is not re-fit, it cannot compensate for
-        perturbed features, so accuracy should vary more across fractions.
-        """
+    def test_woodbury_produces_variation(self, features):
+        """Woodbury-based evaluation should produce variation across fractions."""
         from applications.threshold_research.neuron_perturbation import (
             evaluate_perturbations,
         )
 
-        refit_result = evaluate_perturbations(features=features, refit=True)
-        no_refit_result = evaluate_perturbations(features=features, refit=False)
+        result = evaluate_perturbations(features=features)
+        acc = np.array(result["accuracy_matrix"])
 
-        refit_acc = np.array(refit_result["accuracy_matrix"])
-        no_refit_acc = np.array(no_refit_result["accuracy_matrix"])
-
-        # Compare per-neuron accuracy range (max - min across fractions)
-        refit_ranges = np.ptp(refit_acc, axis=1)
-        no_refit_ranges = np.ptp(no_refit_acc, axis=1)
-
-        assert no_refit_ranges.mean() >= refit_ranges.mean(), (
-            f"Expected no-refit to have larger accuracy variation "
-            f"(mean range {no_refit_ranges.mean():.6f}) than refit "
-            f"({refit_ranges.mean():.6f})"
-        )
+        # At least some neurons should show accuracy variation across fractions
+        ranges = np.ptp(acc, axis=1)
+        assert ranges.max() > 0, "Expected some accuracy variation across fractions"
 
 
 class TestCachedPerturbationSweep:
@@ -1698,9 +1687,9 @@ class TestCorrelationsReportWithClassifierMetrics:
         assert "coef_magnitude_vs_delta" not in report
 
 
-class TestEvaluatePerturbationsClassifierInfo:
-    def test_returns_classifier_coef_and_intercept(self):
-        """evaluate_perturbations returns baseline classifier coef and intercept."""
+class TestEvaluatePerturbationsWoodbury:
+    def test_woodbury_returns_expected_keys(self):
+        """evaluate_perturbations returns expected result keys."""
         from applications.threshold_research.neuron_perturbation import (
             evaluate_perturbations,
         )
@@ -1724,10 +1713,10 @@ class TestEvaluatePerturbationsClassifierInfo:
 
         result = evaluate_perturbations(features=features)
 
-        assert "baseline_classifier_coef" in result
-        assert "baseline_classifier_intercept" in result
-        coef = np.array(result["baseline_classifier_coef"])
-        intercept = np.array(result["baseline_classifier_intercept"])
-        # RidgeClassifier with 3 classes → coef shape (3, num_neurons)
-        assert coef.shape[1] == num_neurons
-        assert intercept.shape[0] == coef.shape[0]
+        assert "baseline" in result
+        assert "accuracy_matrix" in result
+        assert "f1_matrix" in result
+        assert "optimal_thresholds" in result
+        assert "optimal_deltas" in result
+        acc = np.array(result["accuracy_matrix"])
+        assert acc.shape == (num_neurons, num_fracs)

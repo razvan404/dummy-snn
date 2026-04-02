@@ -3,7 +3,6 @@ from typing import Callable
 import numpy as np
 import torch
 import torch.nn.functional as F
-from sklearn.linear_model import RidgeClassifier
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -12,6 +11,7 @@ from spiking import load_model
 from spiking.evaluation.conv_feature_extraction import sum_pool_features
 from spiking.evaluation.feature_extraction import spike_times_to_features
 from spiking.evaluation.eval_utils import compute_metrics
+from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
 from spiking.layers import SpikingSequential
 from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 
@@ -252,28 +252,23 @@ def evaluate_conv_perturbations(
     num_filters: int,
     pool_size: int,
     cache_dir: str | None = None,
-    classifier_factory: Callable | None = None,
-    refit: bool = False,
+    alpha: float = 1.0,
 ) -> dict:
     """Per-filter perturbation evaluation for conv layers.
 
-    Like the FC evaluate_perturbations but swaps pool_size*pool_size columns
-    per filter instead of 1 column per neuron.
+    Uses RidgeColumnSwap with Woodbury identity for efficient per-filter
+    evaluation. Each column swap costs O(d²k) instead of O(d³) refit.
 
     Args:
         features: Dict from compute_conv_perturbed_features.
         num_filters: Number of conv filters.
         pool_size: Spatial pool size used during feature extraction.
         cache_dir: Optional directory for incremental saves.
-        classifier_factory: Callable returning a classifier (default RidgeClassifier).
-        refit: If True, refit classifier for each perturbation.
+        alpha: Ridge regularization strength.
 
     Returns:
         Dict with baseline metrics, accuracy/f1 matrices, optimal thresholds.
     """
-    if classifier_factory is None:
-        classifier_factory = RidgeClassifier
-
     X_train = features["baseline_train"]
     X_val = features["baseline_val"]
     y_train = features["labels_train"]
@@ -286,8 +281,8 @@ def evaluate_conv_perturbations(
     num_fracs = len(perturbation_fractions)
     cols_per_filter = pool_size * pool_size
 
-    # Baseline classifier
-    baseline_clf = classifier_factory()
+    # Baseline classifier with precomputed inverse for Woodbury updates
+    baseline_clf = RidgeColumnSwap(alpha=alpha)
     baseline_clf.fit(X_train, y_train)
     baseline_metrics = compute_metrics(y_val, baseline_clf.predict(X_val))
 
@@ -321,22 +316,17 @@ def evaluate_conv_perturbations(
         for filter_idx in range(num_filters):
             col_start = filter_idx * cols_per_filter
             col_end = col_start + cols_per_filter
+            col_indices = list(range(col_start, col_end))
 
-            X_train_mod = X_train.copy()
-            X_train_mod[:, col_start:col_end] = perturbed_train[
-                frac_idx, :, col_start:col_end
-            ]
+            new_train_cols = perturbed_train[frac_idx, :, col_start:col_end]
             X_val_mod = X_val.copy()
             X_val_mod[:, col_start:col_end] = perturbed_val[
                 frac_idx, :, col_start:col_end
             ]
 
-            if refit:
-                clf = classifier_factory()
-                clf.fit(X_train_mod, y_train)
-                y_pred = clf.predict(X_val_mod)
-            else:
-                y_pred = baseline_clf.predict(X_val_mod)
+            y_pred = baseline_clf.predict_swapped(
+                col_indices, new_train_cols, X_val_mod
+            )
             metrics = compute_metrics(y_val, y_pred)
             accuracy_matrix[filter_idx, frac_idx] = metrics["accuracy"]
             f1_matrix[filter_idx, frac_idx] = metrics["f1"]

@@ -3,12 +3,12 @@ import os
 
 import numpy as np
 import torch
-from sklearn.linear_model import RidgeClassifier
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from applications.common import set_seed
 from spiking import load_model
+from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
 from spiking.evaluation.feature_extraction import (
     spike_times_to_features,
     extract_features,
@@ -266,19 +266,16 @@ def evaluate_perturbations(
     *,
     features: dict,
     cache_dir: str | None = None,
-    classifier_factory=None,
-    refit: bool = False,
+    alpha: float = 1.0,
 ) -> dict:
-    """Run per-neuron classifier fits on precomputed features.
+    """Run per-neuron perturbation evaluation using Woodbury-accelerated Ridge.
 
-    classifier_factory: callable returning a classifier (default RidgeClassifier).
-    refit: if False, use the baseline classifier for predictions without re-fitting.
+    Uses RidgeColumnSwap with Sherman-Morrison/Woodbury identity for efficient
+    per-column evaluation. Each swap costs O(d²) instead of O(d³) refit.
+
     If cache_dir is provided, saves results incrementally after each fraction
     and resumes from partial results on restart.
     """
-    if classifier_factory is None:
-        classifier_factory = RidgeClassifier
-
     X_train = features["baseline_train"]
     X_val = features["baseline_val"]
     y_train = features["labels_train"]
@@ -291,8 +288,8 @@ def evaluate_perturbations(
     num_outputs = X_train.shape[1]
     num_fracs = len(perturbation_fractions)
 
-    # Baseline classifier
-    baseline_clf = classifier_factory()
+    # Baseline classifier with precomputed inverse for Woodbury updates
+    baseline_clf = RidgeColumnSwap(alpha=alpha)
     baseline_clf.fit(X_train, y_train)
     baseline_metrics = compute_metrics(y_val, baseline_clf.predict(X_val))
 
@@ -323,19 +320,15 @@ def evaluate_perturbations(
         frac = perturbation_fractions[frac_idx]
         pbar.set_postfix_str(f"frac={frac:+.3f} ({num_outputs} neurons)")
 
-        # For each neuron, swap that column and evaluate
+        # For each neuron, swap that column and evaluate via Woodbury
         for neuron_idx in range(num_outputs):
-            X_train_mod = X_train.copy()
-            X_train_mod[:, neuron_idx] = perturbed_train[frac_idx, :, neuron_idx]
+            new_train_col = perturbed_train[frac_idx, :, neuron_idx:neuron_idx + 1]
             X_val_mod = X_val.copy()
             X_val_mod[:, neuron_idx] = perturbed_val[frac_idx, :, neuron_idx]
 
-            if refit:
-                clf = classifier_factory()
-                clf.fit(X_train_mod, y_train)
-                y_pred = clf.predict(X_val_mod)
-            else:
-                y_pred = baseline_clf.predict(X_val_mod)
+            y_pred = baseline_clf.predict_swapped(
+                [neuron_idx], new_train_col, X_val_mod
+            )
             metrics = compute_metrics(y_val, y_pred)
             accuracy_matrix[neuron_idx, frac_idx] = metrics["accuracy"]
             f1_matrix[neuron_idx, frac_idx] = metrics["f1"]
@@ -364,14 +357,6 @@ def evaluate_perturbations(
         "f1_matrix": f1_matrix.tolist(),
         "optimal_thresholds": optimal_thresholds,
         "optimal_deltas": optimal_deltas,
-        **(
-            {
-                "baseline_classifier_coef": baseline_clf.coef_.tolist(),
-                "baseline_classifier_intercept": baseline_clf.intercept_.tolist(),
-            }
-            if hasattr(baseline_clf, "coef_")
-            else {}
-        ),
     }
 
 
