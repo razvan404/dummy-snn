@@ -129,6 +129,7 @@ def _evaluate_split(
     pool_size: int = 2,
     t_target: float | None = None,
     chunk_size: int = 100,
+    device: str = "cpu",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract conv features from full images with pooling.
 
@@ -136,16 +137,18 @@ def _evaluate_split(
     via the conv2d path — same weights, different inference mode.
     """
     layer.eval()
+    layer.to(device)
     flat_dim = layer.num_filters * pool_size * pool_size
     X = np.empty((len(all_times), flat_dim), dtype=np.float32)
 
     for start in range(0, len(all_times), chunk_size):
         end = min(start + chunk_size, len(all_times))
-        spike_times = layer.infer_spike_times_batch(all_times[start:end])
-        features = spike_times_to_features(spike_times, t_target=t_target)
+        chunk = all_times[start:end].to(device)
+        spike_times = layer.infer_spike_times_batch(chunk)
+        features = spike_times_to_features(spike_times.cpu(), t_target=t_target)
         pooled = sum_pool_features(features, pool_size)
         X[start:end] = pooled.flatten(1).numpy()
-        del spike_times, features, pooled
+        del spike_times, features, pooled, chunk
 
     return X, labels.numpy()
 
@@ -161,6 +164,7 @@ def train_conv(
     num_epochs: int = 20,
     pool_size: int = 2,
     t_obj: float | None = None,
+    device: str = "cpu",
     output_dir: str | None = None,
 ):
     """Unified patch-based conv SNN training.
@@ -268,7 +272,7 @@ def train_conv(
         layer, stdp, competition=WinnerTakesAll(), threshold_adaptation=adaptation
     )
     trainer = UnsupervisedTrainer(
-        layer, learner, image_shape=(num_inputs,), early_stopping=True
+        layer, learner, image_shape=(num_inputs,), early_stopping=True, device=device,
     )
 
     # --- Train on patches ---
@@ -302,6 +306,7 @@ def train_conv(
         all_train_labels,
         pool_size=pool_size,
         t_target=t_target,
+        device=device,
     )
     X_val, y_val = _evaluate_split(
         layer,
@@ -309,6 +314,7 @@ def train_conv(
         all_val_labels,
         pool_size=pool_size,
         t_target=t_target,
+        device=device,
     )
 
     train_m, val_m = evaluate_classifier(X_train, y_train, X_val, y_val)
@@ -368,6 +374,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--t-obj", type=float, default=None, help="Target spike time override"
     )
+    parser.add_argument("--device", type=str, default="cpu", help="Device (cpu or cuda)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=str, default=None)
     args = parser.parse_args()
@@ -382,5 +389,6 @@ if __name__ == "__main__":
         num_epochs=args.num_epochs,
         pool_size=args.pool_size,
         t_obj=args.t_obj,
+        device=args.device,
         output_dir=args.output_dir,
     )

@@ -25,8 +25,9 @@ class BaseUnsupervisedTrainer(ABC):
         image_shape: tuple[int, int, int],
         on_batch_end: Callable[[int, float, str], None] | None = None,
         early_stopping: bool = True,
+        device: str | torch.device = "cpu",
     ):
-        self.device = torch.device("cpu")
+        self.device = torch.device(device)
         self.model = model.to(self.device)
         self.learner = learner
         self.image_shape = image_shape
