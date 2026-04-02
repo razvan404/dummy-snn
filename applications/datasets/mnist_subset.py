@@ -12,6 +12,7 @@ class MnistSubsetDataset(SpikeEncodingDataset):
         path: str,
         split: str,
         image_shape: tuple[int, int] = None,
+        **kwargs,
     ):
         if split not in ["train", "test"]:
             raise ValueError("Invalid split")
@@ -34,4 +35,4 @@ class MnistSubsetDataset(SpikeEncodingDataset):
         if inputs.shape[0] != outputs.shape[0]:
             raise ValueError("Invalid shape of the data")
 
-        super().__init__(inputs, outputs, image_shape)
+        super().__init__(inputs, outputs, image_shape, **kwargs)

@@ -72,7 +72,7 @@ def fit_whitening_kernels(
     patch_size: int = 9,
     n_patches: int = 1_000_000,
     epsilon: float = 1e-2,
-    rho: float = 1.0,
+    rho: float = 0.15,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Fit whitening kernels from image patches (Falez 2020 Eqs 8-12).
 
@@ -83,7 +83,7 @@ def fit_whitening_kernels(
         patch_size: Side length of square patches (must be odd).
         n_patches: Number of random patches to sample.
         epsilon: Regularization constant for eigenvalue inversion.
-        rho: Fraction of eigenvalues to retain (0.15 per Falez 2020).
+        rho: Fraction of eigenvalues to retain (0.15 per Falez 2020, reference impl).
 
     Returns:
         (kernels, mean) where kernels is (C, C, kH, kW) for cross-channel conv

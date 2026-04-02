@@ -9,6 +9,7 @@ class FashionMnistDataset(SpikeEncodingDataset):
         root: str,
         split: str,
         image_shape: tuple[int, int] | None = None,
+        **kwargs,
     ):
         if split not in ("train", "test"):
             raise ValueError(f"Invalid split: {split!r}, must be 'train' or 'test'")
@@ -19,4 +20,4 @@ class FashionMnistDataset(SpikeEncodingDataset):
         inputs = dataset.data.float() / 255.0
         outputs = dataset.targets
 
-        super().__init__(inputs, outputs, image_shape)
+        super().__init__(inputs, outputs, image_shape, **kwargs)

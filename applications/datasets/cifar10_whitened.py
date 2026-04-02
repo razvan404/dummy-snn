@@ -23,7 +23,7 @@ class Cifar10WhitenedDataset(Dataset):
         split: str,
         patch_size: int = 9,
         epsilon: float = 1e-2,
-        rho: float = 1.0,
+        rho: float = 0.15,
         n_patches: int = 1_000_000,
         num_bins: int = 16,
         kernels: torch.Tensor | None = None,
@@ -91,7 +91,7 @@ class Cifar10WhitenedDataset(Dataset):
 def create_cifar10_whitened(
     patch_size: int = 9,
     epsilon: float = 1e-2,
-    rho: float = 1.0,
+    rho: float = 0.15,
     num_bins: int = 16,
     kernels_path: str | None = None,
 ) -> tuple[DataLoader, DataLoader]:

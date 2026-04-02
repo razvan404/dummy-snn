@@ -175,16 +175,20 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
 
     @torch.no_grad()
     def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
-        """Compute first spike times analytically by unfolding patches.
+        """Compute first spike times analytically.
 
-        Delegates to the base class batch inference on unfolded patches.
+        Handles both spatial (C, H, W) and flat (num_inputs,) inputs.
+        Flat inputs delegate to the base class FC inference (useful for
+        patch-based training where patches are flattened).
 
         Args:
-            input_times: (C, H, W) tensor of spike times (inf = no spike).
+            input_times: (C, H, W) or (num_inputs,) tensor of spike times.
 
         Returns:
-            (F, oH, oW) tensor of output spike times.
+            (F, oH, oW) for spatial input, (num_outputs,) for flat input.
         """
+        if input_times.dim() == 1:
+            return super().infer_spike_times(input_times)
         C, H, W = input_times.shape
         oH, oW = self._compute_output_size(H, W)
 

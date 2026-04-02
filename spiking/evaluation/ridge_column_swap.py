@@ -1,6 +1,3 @@
-# ABOUTME: Ridge classifier with efficient column-swap evaluation via Woodbury identity.
-# ABOUTME: Precomputes (X^T X + αI)^{-1} once, then O(d²k) per column-swap prediction.
-
 import numpy as np
 from sklearn.preprocessing import LabelBinarizer
 
@@ -123,9 +120,7 @@ class RidgeColumnSwap:
         DtD = D_c.T @ D_c  # (k, k)
 
         U = np.column_stack([E, S])  # (d, 2k)
-        C_inv = np.block(
-            [[np.zeros((k, k)), np.eye(k)], [np.eye(k), -DtD]]
-        )  # (2k, 2k)
+        C_inv = np.block([[np.zeros((k, k)), np.eye(k)], [np.eye(k), -DtD]])  # (2k, 2k)
 
         A_inv_U = self._A_inv @ U  # (d, 2k)
         inner = C_inv + U.T @ A_inv_U  # (2k, 2k)
@@ -186,9 +181,7 @@ class RidgeColumnSwap:
 
         # Woodbury update of A_inv
         U = np.column_stack([E, S])
-        C_inv = np.block(
-            [[np.zeros((k, k)), np.eye(k)], [np.eye(k), -DtD]]
-        )
+        C_inv = np.block([[np.zeros((k, k)), np.eye(k)], [np.eye(k), -DtD]])
         A_inv_U = self._A_inv @ U
         inner = C_inv + U.T @ A_inv_U
         inner_inv = np.linalg.inv(inner)

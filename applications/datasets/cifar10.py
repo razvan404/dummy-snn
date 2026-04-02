@@ -10,6 +10,7 @@ class Cifar10Dataset(SpikeEncodingDataset):
         root: str,
         split: str,
         image_shape: tuple[int, int] | None = None,
+        **kwargs,
     ):
         if split not in ("train", "test"):
             raise ValueError(f"Invalid split: {split!r}, must be 'train' or 'test'")
@@ -24,4 +25,4 @@ class Cifar10Dataset(SpikeEncodingDataset):
 
         outputs = torch.tensor(dataset.targets)
 
-        super().__init__(inputs, outputs, image_shape)
+        super().__init__(inputs, outputs, image_shape, **kwargs)

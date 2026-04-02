@@ -74,6 +74,108 @@ class TestSpikeEncodingDataset:
         assert ds.image_shape == (14, 14)
 
 
+class TestPatchExtraction:
+    def test_patch_output_shape(self):
+        from applications.datasets.base import SpikeEncodingDataset
+
+        inputs = torch.rand(5, 8, 8)
+        outputs = torch.arange(5)
+        ds = SpikeEncodingDataset(inputs, outputs, patch_size=3, num_patches=4)
+
+        patches, label = ds[0]
+        # 2 DoG channels, 3x3 patches, 4 patches
+        assert patches.shape == (4, 2, 3, 3)
+        assert label.dtype == torch.long
+
+    def test_positions_within_bounds(self):
+        from applications.datasets.base import SpikeEncodingDataset
+
+        inputs = torch.rand(10, 8, 8)
+        outputs = torch.arange(10)
+        ds = SpikeEncodingDataset(inputs, outputs, patch_size=3, num_patches=5)
+
+        positions = ds.patch_positions
+        assert positions.shape == (10, 5, 2)
+        # all_times has shape (N, 2, 8, 8), max valid row/col = 8 - 3 = 5
+        assert (positions[:, :, 0] >= 0).all()
+        assert (positions[:, :, 0] <= 5).all()
+        assert (positions[:, :, 1] >= 0).all()
+        assert (positions[:, :, 1] <= 5).all()
+
+    def test_positions_distinct_per_image(self):
+        from applications.datasets.base import SpikeEncodingDataset
+
+        inputs = torch.rand(5, 10, 10)
+        outputs = torch.arange(5)
+        ds = SpikeEncodingDataset(inputs, outputs, patch_size=3, num_patches=8)
+
+        positions = ds.patch_positions  # (5, 8, 2)
+        for i in range(5):
+            pos_tuples = set()
+            for j in range(8):
+                r, c = positions[i, j, 0].item(), positions[i, j, 1].item()
+                pos_tuples.add((r, c))
+            assert len(pos_tuples) == 8, f"Duplicate positions in image {i}"
+
+    def test_no_patches_returns_full_image(self):
+        from applications.datasets.base import SpikeEncodingDataset
+
+        inputs = torch.rand(3, 8, 8)
+        outputs = torch.tensor([0, 1, 2])
+        ds = SpikeEncodingDataset(inputs, outputs)
+
+        times, _ = ds[0]
+        assert times.shape == (2, 8, 8)
+        assert ds.patch_positions is None
+
+    def test_cache_roundtrip(self, tmp_path):
+        from applications.datasets.base import SpikeEncodingDataset
+
+        inputs = torch.rand(5, 8, 8)
+        outputs = torch.arange(5)
+        cache = str(tmp_path / "times.pt")
+
+        torch.manual_seed(42)
+        ds1 = SpikeEncodingDataset(
+            inputs, outputs, cache_path=cache, patch_size=3, num_patches=4
+        )
+        pos1 = ds1.patch_positions.clone()
+
+        # Second load should read from cache regardless of seed
+        torch.manual_seed(999)
+        ds2 = SpikeEncodingDataset(
+            inputs, outputs, cache_path=cache, patch_size=3, num_patches=4
+        )
+        torch.testing.assert_close(ds2.patch_positions, pos1)
+
+    def test_different_num_patches_different_cache(self, tmp_path):
+        from applications.datasets.base import SpikeEncodingDataset
+
+        inputs = torch.rand(5, 8, 8)
+        outputs = torch.arange(5)
+        cache = str(tmp_path / "times.pt")
+
+        ds_a = SpikeEncodingDataset(
+            inputs, outputs, cache_path=cache, patch_size=3, num_patches=2
+        )
+        ds_b = SpikeEncodingDataset(
+            inputs, outputs, cache_path=cache, patch_size=3, num_patches=4
+        )
+        # Different shapes — they use separate cache files
+        assert ds_a.patch_positions.shape[1] == 2
+        assert ds_b.patch_positions.shape[1] == 4
+
+    def test_patch_size_5(self):
+        from applications.datasets.base import SpikeEncodingDataset
+
+        inputs = torch.rand(3, 12, 12)
+        outputs = torch.tensor([0, 1, 2])
+        ds = SpikeEncodingDataset(inputs, outputs, patch_size=5, num_patches=3)
+
+        patches, _ = ds[0]
+        assert patches.shape == (3, 2, 5, 5)
+
+
 class TestMnistDataset:
     def _make_fake_mnist_data(self):
         """Return fake (data, targets) tensors matching torchvision MNIST format."""

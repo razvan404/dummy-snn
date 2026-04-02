@@ -50,10 +50,12 @@ class BaseUnsupervisedTrainer(ABC):
 
         Handles lazy spatial buffer initialization for conv layers whose
         _spike_times buffer doesn't exist until the first forward() call.
+        Flat (1D) spike times from patch-based training skip spatial init.
         """
         if hasattr(layer, "_spatial_initialized") and not layer._spatial_initialized:
-            oH, oW = spike_times.shape[1], spike_times.shape[2]
-            layer._ensure_spatial_buffers(oH, oW)
+            if spike_times.dim() >= 3:
+                oH, oW = spike_times.shape[1], spike_times.shape[2]
+                layer._ensure_spatial_buffers(oH, oW)
         layer._spike_times.copy_(spike_times)
 
     def _forward_analytical(self, prepared: torch.Tensor) -> None:
