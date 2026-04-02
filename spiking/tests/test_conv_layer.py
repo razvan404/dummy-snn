@@ -29,9 +29,15 @@ def make_layer(
 
 
 class TestConvLayerConstruction:
-    def test_weight_shape(self):
+    def test_weight_shape_2d(self):
         layer = make_layer(in_channels=6, num_filters=4, kernel_size=5)
-        assert layer.weights.shape == (4, 6, 5, 5)
+        assert layer.weights.shape == (4, 6 * 5 * 5)
+
+    def test_weights_4d_property(self):
+        layer = make_layer(in_channels=6, num_filters=4, kernel_size=5)
+        assert layer.weights_4d.shape == (4, 6, 5, 5)
+        # Should be a view (same data)
+        assert layer.weights_4d.data_ptr() == layer.weights.data_ptr()
 
     def test_threshold_shape(self):
         layer = make_layer(num_filters=8)
@@ -53,6 +59,10 @@ class TestConvLayerConstruction:
         )
         assert layer.thresholds.shape == (16,)
         assert (layer.thresholds >= 1.0).all()
+
+    def test_inherits_from_integrate_and_fire(self):
+        layer = make_layer()
+        assert isinstance(layer, IntegrateAndFireLayer)
 
 
 class TestConvLayerForward:
@@ -209,7 +219,12 @@ class TestConvLayerAnalyticalInference:
 
 class TestConvFCEquivalence:
     """Verify ConvIntegrateAndFireLayer matches IntegrateAndFireLayer
-    when applied to the same input with the same weights."""
+    when applied to the same input with the same weights.
+
+    Since ConvIntegrateAndFireLayer now inherits from IntegrateAndFireLayer
+    and delegates to super().infer_spike_times_batch(), equivalence is
+    structural — but we still verify it end-to-end.
+    """
 
     def test_5x5_kernel_on_5x5_image(self):
         """Single 5x5 patch: conv output is 1x1, must match FC layer exactly."""
@@ -223,13 +238,13 @@ class TestConvFCEquivalence:
             threshold_initialization=conv_init, refractory_period=float("inf"),
         )
 
-        # Create FC layer with same weights (flattened)
+        # Create FC layer sharing the same weights (already 2D)
         fc_init = ConstantInitialization(10.0)
         fc_layer = IntegrateAndFireLayer(
             num_inputs=C * K * K, num_outputs=F,
             threshold_initialization=fc_init, refractory_period=float("inf"),
         )
-        fc_layer.weights.data.copy_(conv_layer.weights.data.reshape(F, C * K * K))
+        fc_layer.weights.data.copy_(conv_layer.weights.data)
         fc_layer.thresholds.data.copy_(conv_layer.thresholds.data)
 
         # Input: (C, 5, 5) → conv output is (F, 1, 1)
@@ -267,7 +282,7 @@ class TestConvFCEquivalence:
             num_inputs=C * K * K, num_outputs=F,
             threshold_initialization=fc_init, refractory_period=float("inf"),
         )
-        fc_layer.weights.data.copy_(conv_layer.weights.data.reshape(F, C * K * K))
+        fc_layer.weights.data.copy_(conv_layer.weights.data)
         fc_layer.thresholds.data.copy_(conv_layer.thresholds.data)
 
         # Input: (C, 7, 7)
@@ -308,7 +323,7 @@ class TestConvFCEquivalence:
             num_inputs=C * K * K, num_outputs=F,
             threshold_initialization=fc_init, refractory_period=float("inf"),
         )
-        fc_layer.weights.data.copy_(conv_layer.weights.data.reshape(F, C * K * K))
+        fc_layer.weights.data.copy_(conv_layer.weights.data)
         fc_layer.thresholds.data.copy_(conv_layer.thresholds.data)
 
         input_times = torch.rand(B, C, H, W)
@@ -327,3 +342,109 @@ class TestConvFCEquivalence:
                     assert torch.allclose(conv_result[b, :, r, c], fc_result), (
                         f"Mismatch at batch={b}, pos=({r},{c})"
                     )
+
+
+class TestConv2dVsUnfoldEquivalence:
+    """Verify conv2d-based and unfold-based batch inference produce identical results."""
+
+    def _make_input(self, B, C, H, W, seed=42):
+        torch.manual_seed(seed)
+        t = torch.rand(B, C, H, W)
+        t = (t * 16).floor() / 16
+        t[t >= 0.9] = float("inf")
+        return t
+
+    def test_small_no_padding(self):
+        layer = make_layer(in_channels=2, num_filters=4, kernel_size=3, padding=0)
+        inp = self._make_input(4, 2, 8, 8)
+        conv2d_result = layer.infer_spike_times_batch(inp)
+        unfold_result = layer.infer_spike_times_batch_unfold(inp)
+        torch.testing.assert_close(conv2d_result, unfold_result)
+
+    def test_with_padding(self):
+        layer = make_layer(
+            in_channels=6, num_filters=8, kernel_size=5, padding=2, threshold=5.0
+        )
+        inp = self._make_input(8, 6, 10, 10, seed=7)
+        conv2d_result = layer.infer_spike_times_batch(inp)
+        unfold_result = layer.infer_spike_times_batch_unfold(inp)
+        torch.testing.assert_close(conv2d_result, unfold_result)
+
+    def test_large_batch(self):
+        layer = make_layer(in_channels=6, num_filters=16, kernel_size=5, padding=0)
+        inp = self._make_input(32, 6, 32, 32, seed=99)
+        conv2d_result = layer.infer_spike_times_batch(inp)
+        unfold_result = layer.infer_spike_times_batch_unfold(inp)
+        torch.testing.assert_close(conv2d_result, unfold_result)
+
+    def test_all_inf(self):
+        layer = make_layer(in_channels=6, num_filters=4, kernel_size=5)
+        inp = torch.full((4, 6, 10, 10), float("inf"))
+        conv2d_result = layer.infer_spike_times_batch(inp)
+        unfold_result = layer.infer_spike_times_batch_unfold(inp)
+        assert torch.isinf(conv2d_result).all()
+        assert torch.isinf(unfold_result).all()
+
+    def test_single_image_matches(self):
+        """infer_spike_times (single, unfold) must match infer_spike_times_batch (conv2d)."""
+        layer = make_layer(in_channels=6, num_filters=8, kernel_size=5, padding=0)
+        inp = self._make_input(1, 6, 12, 12, seed=3)
+        batch_result = layer.infer_spike_times_batch(inp)  # (1, F, oH, oW)
+        single_result = layer.infer_spike_times(inp.squeeze(0))  # (F, oH, oW)
+        torch.testing.assert_close(batch_result.squeeze(0), single_result)
+
+
+class TestConvInferenceBenchmark:
+    """Benchmark conv2d vs unfold approaches on 64x64 images with 5x5 kernel."""
+
+    def test_benchmark_64x64(self):
+        import time
+
+        C, F_n, K = 6, 64, 5
+        H, W, B = 64, 64, 16
+        torch.manual_seed(42)
+
+        layer = make_layer(
+            in_channels=C, num_filters=F_n, kernel_size=K, threshold=10.0
+        )
+        inp = torch.rand(B, C, H, W)
+        inp = (inp * 16).floor() / 16
+        inp[inp >= 0.9] = float("inf")
+
+        warmup = 3
+        runs = 10
+
+        # Warmup
+        with torch.no_grad():
+            for _ in range(warmup):
+                layer.infer_spike_times_batch(inp)
+                layer.infer_spike_times_batch_unfold(inp)
+
+        # Benchmark conv2d
+        with torch.no_grad():
+            t0 = time.perf_counter()
+            for _ in range(runs):
+                layer.infer_spike_times_batch(inp)
+            t_conv2d = (time.perf_counter() - t0) / runs
+
+        # Benchmark unfold
+        with torch.no_grad():
+            t0 = time.perf_counter()
+            for _ in range(runs):
+                layer.infer_spike_times_batch_unfold(inp)
+            t_unfold = (time.perf_counter() - t0) / runs
+
+        # Verify they match
+        with torch.no_grad():
+            r1 = layer.infer_spike_times_batch(inp)
+            r2 = layer.infer_spike_times_batch_unfold(inp)
+        torch.testing.assert_close(r1, r2)
+
+        oH, oW = layer._compute_output_size(H, W)
+        print(f"\n{'='*60}")
+        print(f"Benchmark: {B}x{C}x{H}x{W} input, {F_n} filters, {K}x{K} kernel")
+        print(f"Output spatial: {oH}x{oW} = {oH*oW} positions")
+        print(f"  conv2d:  {t_conv2d*1000:.2f} ms")
+        print(f"  unfold:  {t_unfold*1000:.2f} ms")
+        print(f"  speedup: {t_unfold/t_conv2d:.2f}x")
+        print(f"{'='*60}")

@@ -16,7 +16,6 @@ from applications.default_hyperparams import get_common_hyperparams
 from spiking import (
     BiologicalSTDP,
     ConvIntegrateAndFireLayer,
-    IntegrateAndFireLayer,
     UnsupervisedTrainer,
     Learner,
     MultiplicativeSTDP,
@@ -164,7 +163,7 @@ def _extract_random_patches(
 
 @torch.no_grad()
 def _evaluate_split(
-    conv_layer: ConvIntegrateAndFireLayer,
+    layer: ConvIntegrateAndFireLayer,
     images: torch.Tensor,
     labels: torch.Tensor,
     pool_size: int = 2,
@@ -172,13 +171,13 @@ def _evaluate_split(
     chunk_size: int = 100,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract conv features from pre-encoded spike time images in chunks."""
-    conv_layer.eval()
-    flat_dim = conv_layer.num_filters * pool_size * pool_size
+    layer.eval()
+    flat_dim = layer.num_filters * pool_size * pool_size
     X = np.empty((len(images), flat_dim), dtype=np.float32)
 
     for start in range(0, len(images), chunk_size):
         end = min(start + chunk_size, len(images))
-        spike_times = conv_layer.infer_spike_times_batch(images[start:end])
+        spike_times = layer.infer_spike_times_batch(images[start:end])
         features = spike_times_to_features(spike_times, t_target=t_target)
         del spike_times
         pooled = sum_pool_features(features, pool_size)
@@ -229,22 +228,26 @@ def train_model(
     num_inputs = in_channels * ksize * ksize
     logger.info("  %d images, %d channels, kernel=%d", N, in_channels, ksize)
 
-    # FC layer for patch training
+    # Conv layer — inherits from IntegrateAndFireLayer, so patch training works
+    # directly. Same layer is used for both training and conv evaluation.
     init = NormalInitialization(
         avg_threshold=p["threshold_avg"],
         min_threshold=p["threshold_min"],
         std_dev=p["threshold_std"],
     )
-    layer = IntegrateAndFireLayer(
-        num_inputs=num_inputs,
-        num_outputs=num_filters,
+    layer = ConvIntegrateAndFireLayer(
+        in_channels=in_channels,
+        num_filters=num_filters,
+        kernel_size=ksize,
+        stride=p["stride"],
+        padding=p["padding"],
         threshold_initialization=init,
         refractory_period=float("inf"),
     )
     # Paper weight init: U(0, 1) per Falez 2019 Table I / Falez 2020 Table I
     torch.nn.init.uniform_(layer.weights, a=p["w_min"], b=p["w_max"])
 
-    # Learner (FC)
+    # Learner (FC-compatible since conv layer IS-A FC layer)
     stdp = create_stdp(stdp_variant, params)
     adaptation = create_threshold_adaptation(params)
     learner = Learner(
@@ -270,29 +273,14 @@ def train_model(
             trainer.step_batch(i, patches[perm[i]])
         trainer.step_epoch()
 
-    # Build conv layer from learned FC weights for evaluation
+    # Same layer used directly for conv evaluation — no weight copying needed
     logger.info("Evaluating (conv mode)...")
-    conv_layer = ConvIntegrateAndFireLayer(
-        in_channels=in_channels,
-        num_filters=num_filters,
-        kernel_size=ksize,
-        stride=p["stride"],
-        padding=p["padding"],
-        threshold_initialization=init,
-        refractory_period=float("inf"),
-    )
-    conv_layer.weights.data.copy_(
-        layer.weights.data.reshape(num_filters, in_channels, ksize, ksize)
-    )
-    conv_layer.thresholds.data.copy_(layer.thresholds.data)
-
-    # Free training objects
-    del layer, learner, trainer, patches
+    del learner, trainer, patches
     gc.collect()
 
     # Evaluate on train and test sets
     X_train, y_train = _evaluate_split(
-        conv_layer,
+        layer,
         all_images,
         all_labels,
         pool_size=p["pool_size"],
@@ -301,7 +289,7 @@ def train_model(
 
     test_data = torch.load(f"{processed_dir}/test.pt", weights_only=True)
     X_test, y_test = _evaluate_split(
-        conv_layer,
+        layer,
         test_data["images"],
         test_data["labels"],
         pool_size=p["pool_size"],
@@ -316,8 +304,8 @@ def train_model(
 
     # Save
     os.makedirs(output_dir, exist_ok=True)
-    save_model(conv_layer, f"{output_dir}/model.pth")
-    save_weight_figures(conv_layer.weights, f"{output_dir}/weights.png")
+    save_model(layer, f"{output_dir}/model.pth")
+    save_weight_figures(layer.weights_4d, f"{output_dir}/weights.png")
 
     metrics = {"train": train_m, "validation": val_m}
     with open(f"{output_dir}/metrics.json", "w") as f:

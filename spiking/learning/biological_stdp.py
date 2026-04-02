@@ -5,8 +5,8 @@ from spiking.learning.mechanism import LearningMechanism
 class BiologicalSTDP(LearningMechanism):
     def __init__(
         self,
-        tau_pre: float = 20,
-        tau_post: float = 20,
+        tau_pre: float = 0.1,
+        tau_post: float = 0.1,
         learning_rate: float = 0.01,
         decay_factor: float = 1.0,
         max_pre_spike_time: float = None,

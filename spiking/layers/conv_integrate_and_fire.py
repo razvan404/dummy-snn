@@ -2,11 +2,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from spiking.spiking_module import SpikingModule
+from spiking.layers.integrate_and_fire import IntegrateAndFireLayer
 from spiking.threshold import ThresholdInitialization
 
 
-class ConvIntegrateAndFireLayer(SpikingModule):
+class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
+    """Convolutional integrate-and-fire layer.
+
+    Inherits from IntegrateAndFireLayer and reuses its inference logic by
+    unfolding spatial inputs into patches. Weights are stored as 2D
+    (num_filters, C*kH*kW) and viewed as 4D for conv2d in forward().
+    """
+
     def __init__(
         self,
         in_channels: int,
@@ -18,29 +25,35 @@ class ConvIntegrateAndFireLayer(SpikingModule):
         refractory_period: float = 1.0,
         dtype: torch.dtype = torch.float32,
     ):
-        super().__init__(
-            num_inputs=in_channels * kernel_size * kernel_size,
-            num_outputs=num_filters,
-        )
         self.in_channels = in_channels
         self.num_filters = num_filters
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
-        self.refractory_period = refractory_period
 
-        self.weights = nn.Parameter(
-            torch.rand(
-                (num_filters, in_channels, kernel_size, kernel_size), dtype=dtype
-            )
-        )
-        self.thresholds = nn.Parameter(
-            threshold_initialization.initialize((num_filters,))
+        super().__init__(
+            num_inputs=in_channels * kernel_size * kernel_size,
+            num_outputs=num_filters,
+            threshold_initialization=threshold_initialization,
+            refractory_period=refractory_period,
+            dtype=dtype,
         )
 
         # Spatial buffers are lazily initialized on first forward
         self._spatial_initialized = False
         self._dtype = dtype
+
+    @property
+    def weights_4d(self) -> torch.Tensor:
+        """View weights as (num_filters, C, kH, kW) for conv2d operations."""
+        return self.weights.view(
+            self.num_filters, self.in_channels, self.kernel_size, self.kernel_size
+        )
+
+    def _compute_output_size(self, H: int, W: int) -> tuple[int, int]:
+        oH = (H + 2 * self.padding - self.kernel_size) // self.stride + 1
+        oW = (W + 2 * self.padding - self.kernel_size) // self.stride + 1
+        return oH, oW
 
     def _ensure_spatial_buffers(self, oH: int, oW: int):
         """Create spatial buffers on first forward pass when output size is known."""
@@ -66,15 +79,39 @@ class ConvIntegrateAndFireLayer(SpikingModule):
         self._oW = oW
         self._spatial_initialized = True
 
-    def _compute_output_size(self, H: int, W: int) -> tuple[int, int]:
-        oH = (H + 2 * self.padding - self.kernel_size) // self.stride + 1
-        oW = (W + 2 * self.padding - self.kernel_size) // self.stride + 1
-        return oH, oW
+    def _unfold_patches(self, input_times: torch.Tensor) -> torch.Tensor:
+        """Extract patches from spatial input.
 
-    def _update_refractory(self, dt: float) -> torch.Tensor:
-        active = self.refractory_times == 0
-        self.refractory_times.sub_(dt).clamp_(min=0.0)
-        return active
+        Args:
+            input_times: (C, H, W) or (B, C, H, W) tensor of spike times.
+
+        Returns:
+            (L, dim) or (B, L, dim) tensor of unfolded patches,
+            where L = oH * oW and dim = C * kH * kW.
+        """
+        has_batch = input_times.dim() == 4
+        if not has_batch:
+            input_times = input_times.unsqueeze(0)
+
+        # Pad with inf (no-spike) before unfolding, since F.unfold pads with 0
+        if self.padding > 0:
+            input_times = F.pad(input_times, [self.padding] * 4, value=float("inf"))
+            pad_for_unfold = 0
+        else:
+            pad_for_unfold = 0
+
+        # F.unfold: (B, C, H, W) -> (B, C*kH*kW, L)
+        patches = F.unfold(
+            input_times,
+            kernel_size=self.kernel_size,
+            padding=pad_for_unfold,
+            stride=self.stride,
+        )  # (B, dim, L)
+        patches = patches.permute(0, 2, 1)  # (B, L, dim)
+
+        if not has_batch:
+            patches = patches.squeeze(0)  # (L, dim)
+        return patches
 
     def forward(
         self, incoming_spikes: torch.Tensor, current_time: float, dt: float
@@ -83,20 +120,20 @@ class ConvIntegrateAndFireLayer(SpikingModule):
         oH, oW = self._compute_output_size(H, W)
         self._ensure_spatial_buffers(oH, oW)
 
-        active = self._update_refractory(dt)
+        active = self.refractory_times == 0
+        self.refractory_times.sub_(dt).clamp_(min=0.0)
         self._output_spikes.zero_()
 
         if not active.any():
             return self._output_spikes
 
-        # Check if any input spikes
         if not incoming_spikes.any():
             return self._output_spikes
 
-        # Convolve input with filters
+        # Convolve input with filters using 4D weight view
         contrib = F.conv2d(
             incoming_spikes.unsqueeze(0),
-            self.weights,
+            self.weights_4d,
             stride=self.stride,
             padding=self.padding,
         ).squeeze(
@@ -121,11 +158,16 @@ class ConvIntegrateAndFireLayer(SpikingModule):
 
     def reset(self):
         if not self._spatial_initialized:
+            super().reset()
             return
         self.membrane_potentials.zero_()
         self.refractory_times.zero_()
         self._spike_times.fill_(float("inf"))
         self._output_spikes.zero_()
+
+    def reset_spatial(self):
+        """Reset spatial buffers so they are re-created for a new input size."""
+        self._spatial_initialized = False
 
     @property
     def spike_times(self) -> torch.Tensor:
@@ -133,10 +175,9 @@ class ConvIntegrateAndFireLayer(SpikingModule):
 
     @torch.no_grad()
     def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
-        """Compute first spike times analytically without mutating model state.
+        """Compute first spike times analytically by unfolding patches.
 
-        Vectorized: builds all time-step masks at once, runs a single batched
-        conv2d, then uses cumsum to find the first threshold crossing.
+        Delegates to the base class batch inference on unfolded patches.
 
         Args:
             input_times: (C, H, W) tensor of spike times (inf = no spike).
@@ -147,49 +188,23 @@ class ConvIntegrateAndFireLayer(SpikingModule):
         C, H, W = input_times.shape
         oH, oW = self._compute_output_size(H, W)
 
-        result = torch.full(
-            (self.num_filters, oH, oW), float("inf"), dtype=input_times.dtype
-        )
-
-        finite_mask = torch.isfinite(input_times)
-        if not finite_mask.any():
-            return result
-
-        unique_times = input_times[finite_mask].unique().sort()[0]
-        K = len(unique_times)
-
-        # Build all K binary masks at once: (K, C, H, W)
-        masks = (input_times.unsqueeze(0) == unique_times.view(K, 1, 1, 1)).float()
-
-        # Single batched conv2d: (K, F, oH, oW)
-        contribs = F.conv2d(
-            masks, self.weights, stride=self.stride, padding=self.padding
-        )
-
-        # Cumulative potential over time steps
-        cum_potential = contribs.cumsum(dim=0)  # (K, F, oH, oW)
-
-        # Find first threshold crossing per (F, oH, oW)
-        crossed = cum_potential >= self.thresholds.view(1, -1, 1, 1)  # (K, F, oH, oW)
-        # argmax on bool returns index of first True; returns 0 if all False
-        first_idx = crossed.to(torch.uint8).argmax(dim=0)  # (F, oH, oW)
-        any_crossed = crossed.any(dim=0)
-
-        result[any_crossed] = unique_times[first_idx[any_crossed]]
-        return result
+        patches = self._unfold_patches(input_times)  # (L, dim)
+        # Delegate to base class batch inference: (L, dim) -> (L, F)
+        result = super().infer_spike_times_batch(patches)  # (L, F)
+        # Reshape to spatial: (L, F) -> (oH, oW, F) -> (F, oH, oW)
+        return result.view(oH, oW, self.num_filters).permute(2, 0, 1)
 
     @torch.no_grad()
-    def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
-        """Batched analytical spike time inference.
-
-        Iterates over unique input time steps (typically 16 bins), running one
-        conv2d per step across the full batch. Memory-efficient for large batches.
+    def _conv2d_accumulate(
+        self, input_times: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Core conv2d accumulation loop shared by batch inference methods.
 
         Args:
             input_times: (B, C, H, W) tensor of spike times.
 
         Returns:
-            (B, F, oH, oW) tensor of output spike times.
+            (spike_times, cum_potential) both (B, F, oH, oW).
         """
         B, C, H, W = input_times.shape
         oH, oW = self._compute_output_size(H, W)
@@ -197,22 +212,25 @@ class ConvIntegrateAndFireLayer(SpikingModule):
         result = torch.full(
             (B, self.num_filters, oH, oW), float("inf"), dtype=input_times.dtype
         )
-
-        finite_mask = torch.isfinite(input_times)
-        if not finite_mask.any():
-            return result
-
-        unique_times = input_times[finite_mask].unique().sort()[0]
-
         cum_potential = torch.zeros(
             (B, self.num_filters, oH, oW), dtype=input_times.dtype
         )
+
+        finite_mask = torch.isfinite(input_times)
+        if not finite_mask.any():
+            return result, cum_potential
+
+        unique_times = input_times[finite_mask].unique().sort()[0]
+
         not_yet_spiked = torch.ones((B, self.num_filters, oH, oW), dtype=torch.bool)
 
         for t in unique_times:
-            active = (input_times == t).float()  # (B, C, H, W)
+            active = (input_times == t).float()
             contrib = F.conv2d(
-                active, self.weights, stride=self.stride, padding=self.padding
+                active,
+                self.weights_4d,
+                stride=self.stride,
+                padding=self.padding,
             )
             cum_potential += contrib
 
@@ -225,4 +243,59 @@ class ConvIntegrateAndFireLayer(SpikingModule):
             if not not_yet_spiked.any():
                 break
 
+        return result, cum_potential
+
+    @torch.no_grad()
+    def infer_spike_times_and_potentials_batch(
+        self, input_times: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Batched analytical spike time inference using conv2d, also returning potentials.
+
+        Args:
+            input_times: (B, C, H, W) tensor of spike times.
+
+        Returns:
+            (spike_times, cum_potential) both (B, F, oH, oW).
+        """
+        if input_times.dim() == 2:
+            # Called from base class delegation (e.g. infer_spike_times on patches)
+            return super().infer_spike_times_and_potentials_batch(input_times)
+        return self._conv2d_accumulate(input_times)
+
+    @torch.no_grad()
+    def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
+        """Batched analytical spike time inference using conv2d.
+
+        Args:
+            input_times: (B, C, H, W) tensor of spike times.
+
+        Returns:
+            (B, F, oH, oW) tensor of output spike times.
+        """
+        if input_times.dim() == 2:
+            # Called from base class delegation (e.g. infer_spike_times on patches)
+            return super().infer_spike_times_batch(input_times)
+        result, _ = self._conv2d_accumulate(input_times)
         return result
+
+    @torch.no_grad()
+    def infer_spike_times_batch_unfold(self, input_times: torch.Tensor) -> torch.Tensor:
+        """Batched inference via patch unfolding (delegates to base class matmul).
+
+        Slower than conv2d-based infer_spike_times_batch but useful as a
+        reference implementation that directly reuses the base class logic.
+
+        Args:
+            input_times: (B, C, H, W) tensor of spike times.
+
+        Returns:
+            (B, F, oH, oW) tensor of output spike times.
+        """
+        B, C, H, W = input_times.shape
+        oH, oW = self._compute_output_size(H, W)
+        L = oH * oW
+
+        patches = self._unfold_patches(input_times)  # (B, L, dim)
+        flat_patches = patches.reshape(B * L, -1)
+        flat_result = super().infer_spike_times_batch(flat_patches)  # (B*L, F)
+        return flat_result.view(B, oH, oW, self.num_filters).permute(0, 3, 1, 2)

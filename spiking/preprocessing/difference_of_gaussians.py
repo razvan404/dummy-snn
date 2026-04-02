@@ -22,7 +22,7 @@ def _apply_blur(img: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
 
 
 def apply_difference_of_gaussians_filter_batch(
-    images: torch.Tensor, sigma_center: float = 1.0, sigma_surround: float = 2.0
+    images: torch.Tensor, sigma_center: float = 1.0, sigma_surround: float = 4.0
 ) -> torch.Tensor:
     """Apply DoG filter to a batch of images.
 
@@ -52,7 +52,7 @@ def apply_difference_of_gaussians_filter_batch(
 
 
 def apply_difference_of_gaussians_filter(
-    image: torch.Tensor, sigma_center: float = 1.0, sigma_surround: float = 2.0
+    image: torch.Tensor, sigma_center: float = 1.0, sigma_surround: float = 4.0
 ) -> torch.Tensor:
     """
     Apply the Difference-of-Gaussians (DoG) filter to an image.
