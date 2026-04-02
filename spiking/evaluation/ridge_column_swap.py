@@ -145,6 +145,67 @@ class RidgeColumnSwap:
         scores = X_val_mod @ w_new + intercept_new  # (m, K)
         return self._decode(scores)
 
+    def apply_swap(
+        self,
+        col_indices: list[int] | np.ndarray,
+        new_train_cols: np.ndarray,
+    ) -> None:
+        """Permanently apply a column swap, updating all internal state.
+
+        After this call, the classifier behaves as if it was fitted on training
+        data with the specified columns replaced. Subsequent predict_swapped calls
+        will use this updated state as the new baseline.
+
+        This enables sequential/greedy optimization: optimize neuron 0, apply it,
+        then optimize neuron 1 with neuron 0's improvement already baked in.
+
+        Cost: O(d²k) — same as predict_swapped, no O(d³) refit needed.
+
+        Args:
+            col_indices: Indices of columns to replace permanently.
+            new_train_cols: (n, k) new column values for training data.
+        """
+        col_indices = np.asarray(col_indices)
+        k = len(col_indices)
+        d = self._X_c.shape[1]
+
+        # Center new columns
+        new_mean = new_train_cols.mean(axis=0).astype(np.float64)
+        new_cols_c = new_train_cols.astype(np.float64) - new_mean
+
+        # Column differences in centered space
+        old_cols_c = self._X_c[:, col_indices]
+        D_c = new_cols_c - old_cols_c
+
+        # Indicator matrix E
+        E = np.zeros((d, k), dtype=np.float64)
+        E[col_indices, np.arange(k)] = 1.0
+
+        S = self._X_c.T @ D_c
+        DtD = D_c.T @ D_c
+
+        # Woodbury update of A_inv
+        U = np.column_stack([E, S])
+        C_inv = np.block(
+            [[np.zeros((k, k)), np.eye(k)], [np.eye(k), -DtD]]
+        )
+        A_inv_U = self._A_inv @ U
+        inner = C_inv + U.T @ A_inv_U
+        inner_inv = np.linalg.inv(inner)
+        self._A_inv = self._A_inv - A_inv_U @ inner_inv @ A_inv_U.T
+
+        # Update centered training data and mean
+        self._X[:, col_indices] = new_train_cols.astype(np.float64)
+        self._X_mean[col_indices] = new_mean
+        self._X_c[:, col_indices] = new_cols_c
+
+        # Update X_c^T Y_c
+        self._XtY_c[col_indices] = new_cols_c.T @ self._Y_c
+
+        # Recompute weights and intercept
+        self._w = self._A_inv @ self._XtY_c
+        self._intercept = self._Y_mean - self._X_mean @ self._w
+
     def _decode(self, scores: np.ndarray) -> np.ndarray:
         """Convert score matrix to class labels."""
         if scores.shape[1] == 1:

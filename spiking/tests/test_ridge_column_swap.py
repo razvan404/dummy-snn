@@ -199,6 +199,108 @@ class TestColumnSwapCorrectness:
         np.testing.assert_array_equal(pred_woodbury, pred_refit)
 
 
+class TestApplySwap:
+    """Test that apply_swap permanently updates classifier state."""
+
+    def test_apply_then_predict_matches_refit(self):
+        """After apply_swap, predict should match a fresh fit on modified data."""
+        X_train, X_val, y_train, _ = _make_data(d=10)
+        rng = np.random.RandomState(88)
+
+        col = 3
+        new_col = rng.randn(X_train.shape[0], 1).astype(np.float32)
+
+        # Woodbury apply_swap then predict
+        clf = RidgeColumnSwap(alpha=1.0)
+        clf.fit(X_train, y_train)
+        clf.apply_swap([col], new_col)
+        pred_applied = clf.predict(X_val)
+
+        # Full refit
+        X_train_mod = X_train.copy()
+        X_train_mod[:, col : col + 1] = new_col
+        refit_clf = RidgeClassifier(alpha=1.0)
+        refit_clf.fit(X_train_mod, y_train)
+        pred_refit = refit_clf.predict(X_val)
+
+        np.testing.assert_array_equal(pred_applied, pred_refit)
+
+    def test_chained_apply_swap(self):
+        """Two sequential apply_swaps should match a fresh fit on both columns modified."""
+        X_train, X_val, y_train, _ = _make_data(d=8)
+        rng = np.random.RandomState(66)
+
+        col_a, col_b = 2, 5
+        new_a = rng.randn(X_train.shape[0], 1).astype(np.float32)
+        new_b = rng.randn(X_train.shape[0], 1).astype(np.float32)
+
+        # Chained Woodbury
+        clf = RidgeColumnSwap(alpha=1.0)
+        clf.fit(X_train, y_train)
+        clf.apply_swap([col_a], new_a)
+        clf.apply_swap([col_b], new_b)
+        pred_chained = clf.predict(X_val)
+
+        # Full refit with both columns modified
+        X_train_mod = X_train.copy()
+        X_train_mod[:, col_a : col_a + 1] = new_a
+        X_train_mod[:, col_b : col_b + 1] = new_b
+        refit_clf = RidgeClassifier(alpha=1.0)
+        refit_clf.fit(X_train_mod, y_train)
+        pred_refit = refit_clf.predict(X_val)
+
+        np.testing.assert_array_equal(pred_chained, pred_refit)
+
+    def test_apply_swap_then_predict_swapped(self):
+        """After apply_swap on col A, predict_swapped on col B should match
+        a fresh fit with both A and B modified."""
+        X_train, X_val, y_train, _ = _make_data(d=10)
+        rng = np.random.RandomState(77)
+
+        col_a, col_b = 1, 6
+        new_a = rng.randn(X_train.shape[0], 1).astype(np.float32)
+        new_b = rng.randn(X_train.shape[0], 1).astype(np.float32)
+
+        # Apply A, then predict_swapped B
+        clf = RidgeColumnSwap(alpha=1.0)
+        clf.fit(X_train, y_train)
+        clf.apply_swap([col_a], new_a)
+        X_val_mod = X_val.copy()
+        X_val_mod[:, col_b] = rng.randn(X_val.shape[0])
+        pred = clf.predict_swapped([col_b], new_b, X_val_mod)
+
+        # Full refit with both
+        X_train_mod = X_train.copy()
+        X_train_mod[:, col_a : col_a + 1] = new_a
+        X_train_mod[:, col_b : col_b + 1] = new_b
+        refit_clf = RidgeClassifier(alpha=1.0)
+        refit_clf.fit(X_train_mod, y_train)
+        pred_refit = refit_clf.predict(X_val_mod)
+
+        np.testing.assert_array_equal(pred, pred_refit)
+
+    def test_multi_column_apply_swap(self):
+        """apply_swap with multiple columns at once should match refit."""
+        X_train, X_val, y_train, _ = _make_data(d=12)
+        rng = np.random.RandomState(99)
+
+        cols = [3, 4, 5, 6]
+        new_cols = rng.randn(X_train.shape[0], 4).astype(np.float32)
+
+        clf = RidgeColumnSwap(alpha=1.0)
+        clf.fit(X_train, y_train)
+        clf.apply_swap(cols, new_cols)
+        pred_applied = clf.predict(X_val)
+
+        X_train_mod = X_train.copy()
+        X_train_mod[:, cols] = new_cols
+        refit_clf = RidgeClassifier(alpha=1.0)
+        refit_clf.fit(X_train_mod, y_train)
+        pred_refit = refit_clf.predict(X_val)
+
+        np.testing.assert_array_equal(pred_applied, pred_refit)
+
+
 class TestLargerDimensions:
     """Test with dimensions closer to real conv scenarios."""
 

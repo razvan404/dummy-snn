@@ -360,6 +360,115 @@ def evaluate_perturbations(
     }
 
 
+# --- Sequential greedy optimization ---
+
+
+def sequential_optimize(
+    *,
+    features: dict,
+    cols_per_unit: int = 1,
+    alpha: float = 1.0,
+) -> dict:
+    """Sequentially optimize each unit's threshold, updating the classifier after each.
+
+    Instead of optimizing all units independently from the same baseline (s0),
+    this optimizes unit 0 from s0, applies it to get s1, then optimizes unit 1
+    from s1, and so on. Each step uses apply_swap to permanently update the
+    Ridge classifier state via Woodbury, so no full refit is ever needed.
+
+    Args:
+        features: Dict with baseline_train/val, perturbed_train/val, etc.
+        cols_per_unit: Number of feature columns per unit (1 for FC, pool_size² for conv).
+        alpha: Ridge regularization strength.
+
+    Returns:
+        Dict with per-unit results including the sequential optimization path,
+        cumulative accuracy at each step, and final optimized thresholds.
+    """
+    X_train = features["baseline_train"].copy()
+    X_val = features["baseline_val"].copy()
+    y_train = features["labels_train"]
+    y_val = features["labels_val"]
+    perturbed_train = features["perturbed_train"]
+    perturbed_val = features["perturbed_val"]
+    original_thresholds = features["original_thresholds"]
+    perturbation_fractions = features["perturbation_fractions"]
+
+    num_fracs = len(perturbation_fractions)
+    total_cols = X_train.shape[1]
+    num_units = total_cols // cols_per_unit
+
+    # Fit baseline classifier (will be mutated in-place via apply_swap)
+    clf = RidgeColumnSwap(alpha=alpha)
+    clf.fit(X_train, y_train)
+    baseline_metrics = compute_metrics(y_val, clf.predict(X_val))
+
+    # Track the optimization path
+    steps = []
+    cumulative_accuracy = [baseline_metrics["accuracy"]]
+
+    for unit_idx in range(num_units):
+        col_start = unit_idx * cols_per_unit
+        col_end = col_start + cols_per_unit
+        col_indices = list(range(col_start, col_end))
+
+        # Evaluate all fractions for this unit from current state
+        best_acc = -1.0
+        best_frac_idx = -1
+        best_metrics = None
+
+        for frac_idx in range(num_fracs):
+            new_train_cols = perturbed_train[frac_idx, :, col_start:col_end]
+            X_val_mod = X_val.copy()
+            X_val_mod[:, col_start:col_end] = perturbed_val[
+                frac_idx, :, col_start:col_end
+            ]
+
+            y_pred = clf.predict_swapped(col_indices, new_train_cols, X_val_mod)
+            metrics = compute_metrics(y_val, y_pred)
+
+            if metrics["accuracy"] > best_acc:
+                best_acc = metrics["accuracy"]
+                best_frac_idx = frac_idx
+                best_metrics = metrics
+
+        best_frac = perturbation_fractions[best_frac_idx]
+
+        # Apply the best swap permanently — classifier state advances to s_{i+1}
+        best_train_cols = perturbed_train[best_frac_idx, :, col_start:col_end]
+        best_val_cols = perturbed_val[best_frac_idx, :, col_start:col_end]
+        clf.apply_swap(col_indices, best_train_cols)
+        X_val[:, col_start:col_end] = best_val_cols
+
+        optimal_threshold = original_thresholds[unit_idx] * (1.0 + best_frac)
+        steps.append(
+            {
+                "unit_idx": unit_idx,
+                "best_frac": best_frac,
+                "best_frac_idx": best_frac_idx,
+                "optimal_threshold": optimal_threshold,
+                "delta": optimal_threshold - original_thresholds[unit_idx],
+                "accuracy": best_metrics["accuracy"],
+                "f1": best_metrics["f1"],
+            }
+        )
+        cumulative_accuracy.append(best_acc)
+
+    # Final evaluation with all units optimized
+    final_metrics = compute_metrics(y_val, clf.predict(X_val))
+
+    return {
+        "baseline": baseline_metrics,
+        "final": final_metrics,
+        "original_thresholds": original_thresholds,
+        "perturbation_fractions": perturbation_fractions,
+        "steps": steps,
+        "cumulative_accuracy": cumulative_accuracy,
+        "optimal_thresholds": [s["optimal_threshold"] for s in steps],
+        "optimal_deltas": [s["delta"] for s in steps],
+    }
+
+
 # --- Top-level entry point ---
 
 

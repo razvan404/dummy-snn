@@ -1720,3 +1720,125 @@ class TestEvaluatePerturbationsWoodbury:
         assert "optimal_deltas" in result
         acc = np.array(result["accuracy_matrix"])
         assert acc.shape == (num_neurons, num_fracs)
+
+
+class TestSequentialOptimize:
+    def test_returns_expected_keys(self):
+        from applications.threshold_research.neuron_perturbation import (
+            sequential_optimize,
+        )
+
+        num_neurons = 4
+        num_fracs = 3
+        num_samples_train = 30
+        num_samples_val = 10
+        rng = np.random.RandomState(42)
+
+        features = {
+            "baseline_train": rng.randn(num_samples_train, num_neurons).astype(
+                np.float32
+            ),
+            "baseline_val": rng.randn(num_samples_val, num_neurons).astype(np.float32),
+            "labels_train": rng.randint(0, 3, num_samples_train),
+            "labels_val": rng.randint(0, 3, num_samples_val),
+            "perturbed_train": rng.randn(
+                num_fracs, num_samples_train, num_neurons
+            ).astype(np.float32),
+            "perturbed_val": rng.randn(num_fracs, num_samples_val, num_neurons).astype(
+                np.float32
+            ),
+            "original_thresholds": [5.0] * num_neurons,
+            "perturbation_fractions": [-0.1, 0.0, 0.1],
+        }
+
+        result = sequential_optimize(features=features)
+
+        assert "baseline" in result
+        assert "final" in result
+        assert "steps" in result
+        assert len(result["steps"]) == num_neurons
+        assert len(result["cumulative_accuracy"]) == num_neurons + 1
+        assert len(result["optimal_thresholds"]) == num_neurons
+        assert len(result["optimal_deltas"]) == num_neurons
+
+        # Each step should have expected fields
+        for step in result["steps"]:
+            assert "unit_idx" in step
+            assert "best_frac" in step
+            assert "accuracy" in step
+
+    def test_identity_fraction_preserves_accuracy(self):
+        """When perturbed[frac=0.0] == baseline, that step should not decrease accuracy.
+
+        This mirrors the real scenario where frac=0.0 means no threshold change,
+        so the sequential optimizer always has a no-op option available.
+        """
+        from applications.threshold_research.neuron_perturbation import (
+            sequential_optimize,
+        )
+
+        num_neurons = 3
+        rng = np.random.RandomState(123)
+        n_train, n_val = 50, 20
+
+        baseline_train = rng.randn(n_train, num_neurons).astype(np.float32)
+        baseline_val = rng.randn(n_val, num_neurons).astype(np.float32)
+
+        # Include frac=0.0 where perturbed == baseline (the real invariant)
+        perturbed_train = np.stack(
+            [baseline_train * 0.5, baseline_train, baseline_train * 1.5]
+        )
+        perturbed_val = np.stack(
+            [baseline_val * 0.5, baseline_val, baseline_val * 1.5]
+        )
+
+        features = {
+            "baseline_train": baseline_train,
+            "baseline_val": baseline_val,
+            "labels_train": rng.randint(0, 3, n_train),
+            "labels_val": rng.randint(0, 3, n_val),
+            "perturbed_train": perturbed_train,
+            "perturbed_val": perturbed_val,
+            "original_thresholds": [5.0] * num_neurons,
+            "perturbation_fractions": [-0.5, 0.0, 0.5],
+        }
+
+        result = sequential_optimize(features=features)
+        acc = result["cumulative_accuracy"]
+
+        # Since frac=0.0 (identity) is always available, accuracy cannot decrease
+        for i in range(1, len(acc)):
+            assert acc[i] >= acc[i - 1] - 1e-10, (
+                f"Accuracy decreased at step {i}: {acc[i-1]:.4f} -> {acc[i]:.4f}"
+            )
+
+    def test_cols_per_unit_for_conv(self):
+        """Sequential optimize with cols_per_unit > 1 should work for conv."""
+        from applications.threshold_research.neuron_perturbation import (
+            sequential_optimize,
+        )
+
+        num_filters = 3
+        pool_size = 2
+        cols_per_filter = pool_size * pool_size
+        total_cols = num_filters * cols_per_filter
+        num_fracs = 3
+        rng = np.random.RandomState(77)
+
+        features = {
+            "baseline_train": rng.randn(40, total_cols).astype(np.float32),
+            "baseline_val": rng.randn(15, total_cols).astype(np.float32),
+            "labels_train": rng.randint(0, 3, 40),
+            "labels_val": rng.randint(0, 3, 15),
+            "perturbed_train": rng.randn(num_fracs, 40, total_cols).astype(np.float32),
+            "perturbed_val": rng.randn(num_fracs, 15, total_cols).astype(np.float32),
+            "original_thresholds": [5.0] * num_filters,
+            "perturbation_fractions": [-0.1, 0.0, 0.1],
+        }
+
+        result = sequential_optimize(
+            features=features, cols_per_unit=cols_per_filter
+        )
+
+        assert len(result["steps"]) == num_filters
+        assert len(result["optimal_thresholds"]) == num_filters
