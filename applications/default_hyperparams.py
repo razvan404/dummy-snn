@@ -64,7 +64,7 @@ _DATASET_HYPERPARAMS = {
         "whitening_rho": 0.15,
         "in_channels": 6,
         "image_size": 32,
-        "num_bins": 16,
+        "num_bins": 64,
     },
     # CIFAR-10 grayscale DoG: 2 input channels
     "cifar10": {

@@ -128,7 +128,7 @@ def _evaluate_split(
     labels: torch.Tensor,
     pool_size: int = 2,
     t_target: float | None = None,
-    chunk_size: int = 100,
+    chunk_size: int = 512,
     device: str = "cpu",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract conv features from full images with pooling.
@@ -271,12 +271,13 @@ def train_conv(
     learner = Learner(
         layer, stdp, competition=WinnerTakesAll(), threshold_adaptation=adaptation
     )
+    # Training is always on CPU (per-patch STDP is serial, GPU adds overhead)
     trainer = UnsupervisedTrainer(
         layer,
         learner,
         image_shape=(num_inputs,),
         early_stopping=True,
-        device=device,
+        device="cpu",
     )
 
     # --- Train on patches ---
@@ -300,7 +301,12 @@ def train_conv(
         trainer.step_epoch()
 
     # --- Evaluate on full images ---
-    logger.info("Evaluating (conv mode with %dx%d pooling)...", pool_size, pool_size)
+    # Use GPU for evaluation if available (batched conv2d benefits from GPU)
+    eval_device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(
+        "Evaluating (conv mode with %dx%d pooling, device=%s)...",
+        pool_size, pool_size, eval_device,
+    )
     del learner, trainer
     gc.collect()
 
@@ -310,7 +316,7 @@ def train_conv(
         all_train_labels,
         pool_size=pool_size,
         t_target=t_target,
-        device=device,
+        device=eval_device,
     )
     X_val, y_val = _evaluate_split(
         layer,
@@ -318,7 +324,7 @@ def train_conv(
         all_val_labels,
         pool_size=pool_size,
         t_target=t_target,
-        device=device,
+        device=eval_device,
     )
 
     train_m, val_m = evaluate_classifier(X_train, y_train, X_val, y_val)

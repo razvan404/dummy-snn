@@ -127,7 +127,10 @@ class IntegrateAndFireLayer(SpikingModule):
     ) -> torch.Tensor:
         """Resolve first spike times from precomputed cumulative potentials."""
         num_outputs = cum_at_boundaries.shape[0]
-        result = torch.full((num_outputs,), float("inf"), dtype=unique_times.dtype)
+        result = torch.full(
+            (num_outputs,), float("inf"), dtype=unique_times.dtype,
+            device=unique_times.device,
+        )
 
         crossed = cum_at_boundaries >= thresholds.unsqueeze(1)
         any_crossed = crossed.any(dim=1)
@@ -142,7 +145,8 @@ class IntegrateAndFireLayer(SpikingModule):
         precomputed = self.precompute_cumulative_potentials(input_times)
         if precomputed is None:
             return torch.full(
-                (self.num_outputs,), float("inf"), dtype=input_times.dtype
+                (self.num_outputs,), float("inf"), dtype=input_times.dtype,
+                device=input_times.device,
             )
         return self.spike_times_from_cumulative_potentials(
             *precomputed, self.thresholds
@@ -160,10 +164,13 @@ class IntegrateAndFireLayer(SpikingModule):
             end of the input window (or at the moment it spiked).
         """
         B = input_times.shape[0]
+        dev = input_times.device
         result = torch.full(
-            (B, self.num_outputs), float("inf"), dtype=input_times.dtype
+            (B, self.num_outputs), float("inf"), dtype=input_times.dtype, device=dev,
         )
-        cum_potential = torch.zeros((B, self.num_outputs), dtype=input_times.dtype)
+        cum_potential = torch.zeros(
+            (B, self.num_outputs), dtype=input_times.dtype, device=dev,
+        )
 
         finite_mask = torch.isfinite(input_times)
         if not finite_mask.any():
@@ -171,7 +178,9 @@ class IntegrateAndFireLayer(SpikingModule):
 
         unique_times = input_times[finite_mask].unique().sort()[0]
 
-        not_yet_spiked = torch.ones((B, self.num_outputs), dtype=torch.bool)
+        not_yet_spiked = torch.ones(
+            (B, self.num_outputs), dtype=torch.bool, device=dev,
+        )
 
         for t in unique_times:
             active = (input_times == t).float()

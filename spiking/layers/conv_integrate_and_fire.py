@@ -203,12 +203,14 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         """
         B, C, H, W = input_times.shape
         oH, oW = self._compute_output_size(H, W)
+        dev = input_times.device
 
         result = torch.full(
-            (B, self.num_filters, oH, oW), float("inf"), dtype=input_times.dtype
+            (B, self.num_filters, oH, oW), float("inf"),
+            dtype=input_times.dtype, device=dev,
         )
         cum_potential = torch.zeros(
-            (B, self.num_filters, oH, oW), dtype=input_times.dtype
+            (B, self.num_filters, oH, oW), dtype=input_times.dtype, device=dev,
         )
 
         finite_mask = torch.isfinite(input_times)
@@ -217,7 +219,9 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
 
         unique_times = input_times[finite_mask].unique().sort()[0]
 
-        not_yet_spiked = torch.ones((B, self.num_filters, oH, oW), dtype=torch.bool)
+        not_yet_spiked = torch.ones(
+            (B, self.num_filters, oH, oW), dtype=torch.bool, device=dev,
+        )
 
         for t in unique_times:
             active = (input_times == t).float()
