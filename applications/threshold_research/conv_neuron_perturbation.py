@@ -198,20 +198,32 @@ def compute_conv_perturbed_features(
         pool_w = min(pool_size, oW)
         flat_dim = num_filters * pool_h * pool_w
 
-        # Compute baseline features in chunks
+        # Compute baseline features in chunks (use GPU if available)
+        layer.to(device)
+        layer.eval()
+        n_chunks = (N + chunk_size - 1) // chunk_size
         baseline_parts = []
-        for start in range(0, N, chunk_size):
+        for start in tqdm(
+            range(0, N, chunk_size),
+            desc=f"  Baseline {split_name}",
+            total=n_chunks,
+        ):
             end = min(start + chunk_size, N)
-            st = layer.infer_spike_times_batch(all_times[start:end])
-            feat = spike_times_to_features(st, t_target)
+            st = layer.infer_spike_times_batch(all_times[start:end].to(device))
+            feat = spike_times_to_features(st.cpu(), t_target)
             pooled = sum_pool_features(feat, pool_size)
             baseline_parts.append(pooled.flatten(1).numpy())
             del st, feat, pooled
+        layer.cpu()
         baseline_features = np.concatenate(baseline_parts, axis=0)
 
         # Compute perturbed features in chunks using multi-threshold approach
         perturbed_features = np.zeros((num_fracs, N, flat_dim), dtype=np.float32)
-        for start in range(0, N, chunk_size):
+        for start in tqdm(
+            range(0, N, chunk_size),
+            desc=f"  Perturbed {split_name} ({num_fracs} fracs)",
+            total=n_chunks,
+        ):
             end = min(start + chunk_size, N)
             chunk_times = all_times[start:end]
 

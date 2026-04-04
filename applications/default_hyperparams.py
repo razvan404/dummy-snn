@@ -61,7 +61,7 @@ _DATASET_HYPERPARAMS = {
         "annealing": 0.95,
         "whitening_patch_size": 9,
         "whitening_epsilon": 1e-2,
-        "whitening_rho": 0.15,
+        "whitening_rho": 1.0,
         "in_channels": 6,
         "image_size": 32,
         "num_bins": 64,

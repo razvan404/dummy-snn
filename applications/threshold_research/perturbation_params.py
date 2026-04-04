@@ -1,7 +1,11 @@
 from applications.default_hyperparams import get_common_hyperparams
 
-# Shared perturbation fractions: -0.5 to +0.25 in steps of 0.025
-PERTURBATION_FRACTIONS = [round(-0.5 + i * 0.025, 3) for i in range(31)]
+# Shared perturbation fractions: -0.5 to +0.25 in 25 steps, excluding 0.0
+PERTURBATION_FRACTIONS = [
+    round(-0.5 + i * (0.75 / 24), 4)
+    for i in range(25)
+    if round(-0.5 + i * (0.75 / 24), 4) != 0.0
+]
 
 
 # Dataset-specific perturbation parameters
