@@ -46,7 +46,7 @@ _DATASET_HYPERPARAMS = {
     # CIFAR-10 whitened: RGB whitened, 32x32, 6 input channels (Falez 2020 Table I)
     "cifar10_whitened": {
         "avg_threshold": 10.0,
-        "min_threshold": 2.0,
+        "min_threshold": 1.0,
         "std_dev": 0.1,
         "target_timestamp": 0.97,
         "threshold_lr": 1.0,

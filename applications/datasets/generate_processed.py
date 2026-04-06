@@ -39,10 +39,10 @@ def generate(
     output_dir: str = "data/processed-cifar10",
     root: str = "data",
     patch_size: int = 5,
-    patches_per_image: int = 100,
+    patches_per_image: int = 50,
     whitening_patch_size: int = 9,
     epsilon: float = 1e-2,
-    rho: float = 0.15,
+    rho: float = 1.0,
     n_whitening_patches: int = 1_000_000,
     seed: int = 42,
 ):
@@ -150,10 +150,10 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", default="data/processed-cifar10")
     parser.add_argument("--root", default="data")
     parser.add_argument("--patch-size", type=int, default=5)
-    parser.add_argument("--patches-per-image", type=int, default=100)
+    parser.add_argument("--patches-per-image", type=int, default=50)
     parser.add_argument("--whitening-patch-size", type=int, default=9)
     parser.add_argument("--epsilon", type=float, default=1e-2)
-    parser.add_argument("--rho", type=float, default=0.15)
+    parser.add_argument("--rho", type=float, default=1.0)
     parser.add_argument("--n-whitening-patches", type=int, default=1_000_000)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
