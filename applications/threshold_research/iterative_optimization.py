@@ -23,6 +23,7 @@ from applications.threshold_research.conv_neuron_perturbation import (
     multi_threshold_conv_accumulate,
     _spike_times_to_pooled_features,
 )
+from applications.threshold_research.filter_ordering import ORDERINGS, get_filter_order
 from spiking import load_model
 from spiking.evaluation.eval_utils import compute_metrics
 from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
@@ -134,6 +135,8 @@ def iterative_descent_round(
     num_filters: int,
     pool_size: int,
     alpha: float = 1.0,
+    ordering: str = "descending_importance",
+    training_spike_times: np.ndarray | None = None,
 ) -> tuple[list[float], dict, np.ndarray, np.ndarray]:
     """Run one round of coordinate descent over all filters.
 
@@ -149,7 +152,7 @@ def iterative_descent_round(
     baseline_train_acc = compute_metrics(y_train, clf.predict(X_train))["accuracy"]
     baseline_val_acc = compute_metrics(y_val, clf.predict(X_val))["accuracy"]
 
-    # Rank filters by importance
+    # Rank filters by importance and mean spike time
     importance = np.mean(np.abs(clf._w), axis=1)
     filter_importance = np.array(
         [
@@ -157,7 +160,21 @@ def iterative_descent_round(
             for f in range(num_filters)
         ]
     )
-    filter_order = np.argsort(-filter_importance)
+    mean_spike_times = np.array(
+        [
+            X_train[:, f * cols_per_filter : (f + 1) * cols_per_filter].mean()
+            for f in range(num_filters)
+        ]
+    )
+    thresholds_arr = np.array(current_thresholds)
+    threshold_deviation = np.abs(thresholds_arr - thresholds_arr.mean())
+    filter_order = get_filter_order(
+        ordering,
+        filter_importance,
+        mean_spike_times,
+        threshold_drift=threshold_deviation,
+        training_spike_times=training_spike_times,
+    )
 
     updated_thresholds = list(current_thresholds)
     current_train_acc = baseline_train_acc
@@ -233,8 +250,9 @@ def iterative_coordinate_descent(
     device: str = "cpu",
     chunk_size: int = 128,
     num_rounds: int = 25,
-    step_size: float = 0.5,
+    step_size: float = 0.2,
     alpha: float = 1.0,
+    ordering: str = "descending_importance",
 ) -> dict:
     """Run iterative coordinate descent threshold optimization."""
     model = load_model(model_path)
@@ -261,6 +279,20 @@ def iterative_coordinate_descent(
     current_thresholds = original_thresholds.clone()
     rounds_history = []
     cumulative_abs_change = 0.0
+
+    # Load training spike times from log if available (for training_*_spike orderings)
+    training_spike_times: np.ndarray | None = None
+    training_metrics_path = os.path.join(
+        os.path.dirname(model_path), "training_metrics.json"
+    )
+    if os.path.exists(training_metrics_path):
+        with open(training_metrics_path) as f:
+            _tm = json.load(f)
+        raw = _tm.get("mean_spike_time_per_neuron")
+        if raw is not None:
+            training_spike_times = np.array(
+                [float("nan") if v is None else v for v in raw]
+            )
 
     # Shared kwargs for GPU feature extraction
     gpu_kwargs = dict(
@@ -328,6 +360,8 @@ def iterative_coordinate_descent(
             num_filters=num_filters,
             pool_size=pool_size,
             alpha=alpha,
+            ordering=ordering,
+            training_spike_times=training_spike_times,
         )
 
         cumulative_abs_change += round_info["total_abs_change"]
@@ -355,7 +389,12 @@ def iterative_coordinate_descent(
             break
 
     return {
-        "config": {"num_rounds": num_rounds, "step_size": step_size, "alpha": alpha},
+        "config": {
+            "num_rounds": num_rounds,
+            "step_size": step_size,
+            "alpha": alpha,
+            "ordering": ordering,
+        },
         "baseline_train_accuracy": rounds_history[0]["baseline_train_accuracy"],
         "baseline_val_accuracy": rounds_history[0]["baseline_val_accuracy"],
         "final_train_accuracy": rounds_history[-1]["final_train_accuracy"],
@@ -412,17 +451,19 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--chunk-size", type=int, default=128)
     parser.add_argument("--num-rounds", type=int, default=25)
-    parser.add_argument("--step-size", type=float, default=0.5)
+    parser.add_argument("--step-size", type=float, default=0.2)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--orderings",
+        nargs="+",
+        choices=ORDERINGS,
+        default=None,
+        help="Orderings to run (default: all). Choices: %(choices)s",
+    )
     args = parser.parse_args()
 
     model_dir = args.model_dir
-    output_path = f"{model_dir}/iterative_optimization.json"
-    plot_path = f"{model_dir}/iterative_optimization_convergence.png"
-
-    if not args.force and os.path.exists(output_path):
-        logger.info("Already exists: %s (use --force to re-run)", output_path)
-        raise SystemExit(0)
+    active_orderings = args.orderings or ORDERINGS
 
     with open(f"{model_dir}/setup.json") as f:
         setup = json.load(f)
@@ -451,31 +492,41 @@ if __name__ == "__main__":
 
         train_loader, val_loader = create_dataset(dataset)
 
-    results = iterative_coordinate_descent(
-        model_path=f"{model_dir}/model.pth",
-        dataset_loaders=(train_loader, val_loader),
-        t_target=t_target,
-        pool_size=pool_size,
-        min_threshold=min_threshold,
-        device=args.device,
-        chunk_size=args.chunk_size,
-        num_rounds=args.num_rounds,
-        step_size=args.step_size,
-    )
+    for ordering in active_orderings:
+        output_path = f"{model_dir}/iterative_optimization_{ordering}.json"
+        plot_path = f"{model_dir}/iterative_optimization_{ordering}_convergence.png"
 
-    with open(output_path, "w") as f:
-        json.dump(results, f, indent=4)
-    logger.info("Saved results to %s", output_path)
+        if not args.force and os.path.exists(output_path):
+            logger.info("Already exists: %s (use --force to re-run)", output_path)
+            continue
 
-    plot_convergence(results, plot_path)
+        results = iterative_coordinate_descent(
+            model_path=f"{model_dir}/model.pth",
+            dataset_loaders=(train_loader, val_loader),
+            t_target=t_target,
+            pool_size=pool_size,
+            min_threshold=min_threshold,
+            device=args.device,
+            chunk_size=args.chunk_size,
+            num_rounds=args.num_rounds,
+            step_size=args.step_size,
+            ordering=ordering,
+        )
 
-    logger.info(
-        "Summary: train %.4f -> %.4f (%+.4f), val %.4f -> %.4f (%+.4f), %d rounds",
-        results["baseline_train_accuracy"],
-        results["final_train_accuracy"],
-        results["final_train_accuracy"] - results["baseline_train_accuracy"],
-        results["baseline_val_accuracy"],
-        results["final_val_accuracy"],
-        results["final_val_accuracy"] - results["baseline_val_accuracy"],
-        len(results["rounds"]),
-    )
+        with open(output_path, "w") as f:
+            json.dump(results, f, indent=4)
+        logger.info("Saved results to %s", output_path)
+
+        plot_convergence(results, plot_path)
+
+        logger.info(
+            "Summary [%s]: train %.4f -> %.4f (%+.4f), val %.4f -> %.4f (%+.4f), %d rounds",
+            ordering,
+            results["baseline_train_accuracy"],
+            results["final_train_accuracy"],
+            results["final_train_accuracy"] - results["baseline_train_accuracy"],
+            results["baseline_val_accuracy"],
+            results["final_val_accuracy"],
+            results["final_val_accuracy"] - results["baseline_val_accuracy"],
+            len(results["rounds"]),
+        )

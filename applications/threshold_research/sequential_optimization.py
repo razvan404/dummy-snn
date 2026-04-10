@@ -25,6 +25,7 @@ from applications.threshold_research.conv_neuron_perturbation import (
 )
 from spiking.evaluation.eval_utils import compute_metrics
 from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
+from applications.threshold_research.filter_ordering import ORDERINGS, get_filter_order
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ def sequential_greedy_from_features(
     num_filters: int,
     pool_size: int,
     alpha: float = 1.0,
+    ordering: str = "descending_importance",
 ) -> dict:
     """Sequential greedy optimization using precomputed perturbed features.
 
@@ -46,6 +48,7 @@ def sequential_greedy_from_features(
     :param num_filters: Number of conv filters.
     :param pool_size: Spatial pool size.
     :param alpha: Ridge regularization strength.
+    :param ordering: One of ORDERINGS — controls which filters are optimized first.
     :returns: Dict with optimization history and final thresholds.
     """
     X_train = features["baseline_train"].copy()
@@ -71,13 +74,30 @@ def sequential_greedy_from_features(
         baseline_val_metrics["accuracy"],
     )
 
-    # Determine filter order by classifier importance (most important first)
+    # Compute per-filter importance (Ridge coefficient magnitude) and mean spike time
     importance = np.mean(np.abs(clf._w), axis=1)  # (d,)
-    filter_importance = np.array([
-        importance[f * cols_per_filter : (f + 1) * cols_per_filter].sum()
-        for f in range(num_filters)
-    ])
-    filter_order = np.argsort(-filter_importance)  # descending importance
+    filter_importance = np.array(
+        [
+            importance[f * cols_per_filter : (f + 1) * cols_per_filter].sum()
+            for f in range(num_filters)
+        ]
+    )
+    mean_spike_times = np.array(
+        [
+            X_train[:, f * cols_per_filter : (f + 1) * cols_per_filter].mean()
+            for f in range(num_filters)
+        ]
+    )
+    thresholds_arr = np.array(original_thresholds)
+    threshold_deviation = np.abs(thresholds_arr - thresholds_arr.mean())
+    filter_order = get_filter_order(
+        ordering,
+        filter_importance,
+        mean_spike_times,
+        threshold_drift=threshold_deviation,
+        training_spike_times=features.get("training_spike_times"),
+    )
+    logger.info("Filter ordering: %s", ordering)
 
     # Sequential greedy optimization — select fractions based on TRAIN accuracy
     # to avoid leaking val information into threshold selection.
@@ -118,31 +138,37 @@ def sequential_greedy_from_features(
             clf.apply_swap(col_indices, best_train_cols)
 
             # Update validation features (for final reporting, not selection)
-            X_val[:, col_start:col_end] = perturbed_val[best_frac_idx, :, col_start:col_end]
+            X_val[:, col_start:col_end] = perturbed_val[
+                best_frac_idx, :, col_start:col_end
+            ]
             # Update train features working copy
             X_train[:, col_start:col_end] = best_train_cols
 
             current_thresholds[filter_idx] = new_threshold
             current_train_accuracy = best_train_accuracy
 
-            history.append({
-                "step": len(history),
-                "filter": filter_idx,
-                "fraction": best_frac,
-                "new_threshold": new_threshold,
-                "train_accuracy": best_train_accuracy,
-            })
+            history.append(
+                {
+                    "step": len(history),
+                    "filter": filter_idx,
+                    "fraction": best_frac,
+                    "new_threshold": new_threshold,
+                    "train_accuracy": best_train_accuracy,
+                }
+            )
             pbar.set_postfix_str(
                 f"f={filter_idx}, frac={best_frac:+.4f}, train={best_train_accuracy:.4f}"
             )
         else:
-            history.append({
-                "step": len(history),
-                "filter": filter_idx,
-                "fraction": 0.0,
-                "new_threshold": current_thresholds[filter_idx],
-                "train_accuracy": current_train_accuracy,
-            })
+            history.append(
+                {
+                    "step": len(history),
+                    "filter": filter_idx,
+                    "fraction": 0.0,
+                    "new_threshold": current_thresholds[filter_idx],
+                    "train_accuracy": current_train_accuracy,
+                }
+            )
             pbar.set_postfix_str(
                 f"f={filter_idx}, skip, train={current_train_accuracy:.4f}"
             )
@@ -163,10 +189,13 @@ def sequential_greedy_from_features(
         "baseline_val": baseline_val_metrics,
         "final_train": final_train_metrics,
         "final_val": final_val_metrics,
-        "train_improvement": final_train_metrics["accuracy"] - baseline_train_metrics["accuracy"],
-        "val_improvement": final_val_metrics["accuracy"] - baseline_val_metrics["accuracy"],
+        "train_improvement": final_train_metrics["accuracy"]
+        - baseline_train_metrics["accuracy"],
+        "val_improvement": final_val_metrics["accuracy"]
+        - baseline_val_metrics["accuracy"],
         "original_thresholds": original_thresholds,
         "optimized_thresholds": current_thresholds,
+        "ordering": ordering,
         "filter_order": filter_order.tolist(),
         "perturbation_fractions": perturbation_fractions,
         "history": history,
@@ -186,6 +215,7 @@ def run_sequential_optimization(
     device: str = "cpu",
     chunk_size: int = 128,
     alpha: float = 1.0,
+    ordering: str = "descending_importance",
 ) -> dict:
     """Precompute features on GPU, then run sequential Woodbury optimization.
 
@@ -206,14 +236,32 @@ def run_sequential_optimization(
         chunk_size=chunk_size,
     )
 
+    # Attach training spike times if available (needed for training_*_spike orderings)
+    training_metrics_path = os.path.join(
+        os.path.dirname(model_path), "training_metrics.json"
+    )
+    if os.path.exists(training_metrics_path):
+        with open(training_metrics_path) as f:
+            training_metrics = json.load(f)
+        raw = training_metrics.get("mean_spike_time_per_neuron")
+        if raw is not None:
+            features["training_spike_times"] = np.array(
+                [float("nan") if v is None else v for v in raw]
+            )
+
     # Phase 2: sequential greedy optimization (CPU, fast)
     num_filters = len(features["original_thresholds"])
-    logger.info("Phase 2: Sequential greedy optimization (%d filters)...", num_filters)
+    logger.info(
+        "Phase 2: Sequential greedy optimization (%d filters, ordering=%s)...",
+        num_filters,
+        ordering,
+    )
     return sequential_greedy_from_features(
         features=features,
         num_filters=num_filters,
         pool_size=pool_size,
         alpha=alpha,
+        ordering=ordering,
     )
 
 
@@ -250,8 +298,10 @@ def run(
     seeds: list[int] | None = None,
     device: str = "cpu",
     chunk_size: int = 128,
+    orderings: list[str] | None = None,
 ):
-    """Run sequential optimization for all models of a dataset."""
+    """Run sequential optimization for all models and orderings of a dataset."""
+    active_orderings = orderings or ORDERINGS
     train_loader, val_loader = create_dataset(dataset)
     params = get_perturbation_params(dataset)
 
@@ -264,36 +314,43 @@ def run(
         return
 
     for model_path, t_obj, seed in models:
-        output_path = os.path.join(
-            os.path.dirname(model_path), "sequential_optimization.json"
-        )
-        if not force and os.path.exists(output_path):
-            print(f"  skip t_obj={t_obj} seed={seed} (already complete)")
-            continue
-
-        print(f"  running sequential optimization t_obj={t_obj} seed={seed}")
         cache_dir = os.path.join(os.path.dirname(model_path), "perturbation_cache")
+        features_computed = False
 
-        result = run_sequential_optimization(
-            model_path=model_path,
-            dataset_loaders=(train_loader, val_loader),
-            t_target=t_obj,
-            pool_size=params["pool_size"],
-            seed=seed,
-            cache_dir=cache_dir,
-            force=force,
-            device=device,
-            chunk_size=chunk_size,
-        )
+        for ordering in active_orderings:
+            output_path = os.path.join(
+                os.path.dirname(model_path),
+                f"sequential_optimization_{ordering}.json",
+            )
+            if not force and os.path.exists(output_path):
+                print(
+                    f"  skip t_obj={t_obj} seed={seed} ordering={ordering} (already complete)"
+                )
+                continue
 
-        with open(output_path, "w") as f:
-            json.dump(result, f, indent=4)
+            print(f"  running t_obj={t_obj} seed={seed} ordering={ordering}")
+            result = run_sequential_optimization(
+                model_path=model_path,
+                dataset_loaders=(train_loader, val_loader),
+                t_target=t_obj,
+                pool_size=params["pool_size"],
+                seed=seed,
+                cache_dir=cache_dir,
+                force=force and not features_computed,
+                device=device,
+                chunk_size=chunk_size,
+                ordering=ordering,
+            )
+            features_computed = True
 
-        print(
-            f"    train: {result['baseline_train']['accuracy']:.4f} -> {result['final_train']['accuracy']:.4f} ({result['train_improvement']:+.4f})  "
-            f"val: {result['baseline_val']['accuracy']:.4f} -> {result['final_val']['accuracy']:.4f} ({result['val_improvement']:+.4f})  "
-            f"({result['num_improved']}/{len(result['filter_order'])} filters improved)"
-        )
+            with open(output_path, "w") as f:
+                json.dump(result, f, indent=4)
+
+            print(
+                f"    train: {result['baseline_train']['accuracy']:.4f} -> {result['final_train']['accuracy']:.4f} ({result['train_improvement']:+.4f})  "
+                f"val: {result['baseline_val']['accuracy']:.4f} -> {result['final_val']['accuracy']:.4f} ({result['val_improvement']:+.4f})  "
+                f"({result['num_improved']}/{len(result['filter_order'])} filters improved)"
+            )
 
 
 if __name__ == "__main__":
@@ -306,6 +363,13 @@ if __name__ == "__main__":
     parser.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--chunk-size", type=int, default=128)
+    parser.add_argument(
+        "--orderings",
+        nargs="+",
+        choices=ORDERINGS,
+        default=None,
+        help="Orderings to run (default: all). Choices: %(choices)s",
+    )
     args = parser.parse_args()
     run(
         args.dataset,
@@ -313,4 +377,5 @@ if __name__ == "__main__":
         seeds=args.seeds,
         device=args.device,
         chunk_size=args.chunk_size,
+        orderings=args.orderings,
     )

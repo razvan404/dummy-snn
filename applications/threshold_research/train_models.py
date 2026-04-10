@@ -91,6 +91,8 @@ def train_with_metrics(
     win_counts = torch.zeros(num_outputs)
     spike_counts = torch.zeros(num_outputs)
     update_counts = torch.zeros(num_outputs)
+    spike_time_sum = torch.zeros(num_outputs)
+    spike_time_count = torch.zeros(num_outputs)
     threshold_initial = layer.thresholds.detach().clone().tolist()
 
     def _tracking_callback(idx, dw, split):
@@ -102,6 +104,8 @@ def train_with_metrics(
             # Track all neurons that spiked (finite spike time)
             fired = torch.isfinite(layer.spike_times)
             spike_counts[fired] += 1
+            spike_time_sum[fired] += layer.spike_times[fired]
+            spike_time_count[fired] += 1
         if on_batch_end is not None:
             on_batch_end(idx, dw, split)
 
@@ -120,6 +124,11 @@ def train_with_metrics(
 
     threshold_final = layer.thresholds.detach().clone().tolist()
     threshold_drift = [f - i for f, i in zip(threshold_final, threshold_initial)]
+    mean_spike_time = torch.where(
+        spike_time_count > 0,
+        spike_time_sum / spike_time_count.clamp(min=1),
+        torch.full_like(spike_time_sum, float("nan")),
+    ).tolist()
 
     train_m, val_m = evaluate_model(
         sub_model,
@@ -152,6 +161,9 @@ def train_with_metrics(
         "threshold_initial": threshold_initial,
         "threshold_final": threshold_final,
         "threshold_drift": threshold_drift,
+        "mean_spike_time_per_neuron": [
+            None if math.isnan(v) else v for v in mean_spike_time
+        ],
     }
     with open(f"{output_dir}/training_metrics.json", "w") as f:
         json.dump(training_metrics, f, indent=4)

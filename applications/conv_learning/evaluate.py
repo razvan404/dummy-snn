@@ -6,6 +6,7 @@ import os
 
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from spiking.evaluation import evaluate_classifier
 from spiking.evaluation.conv_feature_extraction import sum_pool_features
@@ -41,7 +42,12 @@ def _evaluate_split(
     flat_dim = layer.num_filters * pool_size * pool_size
     X = np.empty((len(images), flat_dim), dtype=np.float32)
 
-    for start in range(0, len(images), chunk_size):
+    for start in tqdm(
+        range(0, len(images), chunk_size),
+        desc="Extracting features",
+        unit="batch",
+        leave=False,
+    ):
         end = min(start + chunk_size, len(images))
         chunk = images[start:end].to(device)
         spike_times = layer.infer_spike_times_batch(chunk)
@@ -61,7 +67,10 @@ def _load_data(dataset: str, processed_dir: str | None) -> tuple[dict, dict]:
         logger.info("Loading CIFAR-10 via Cifar10WhitenedDataset (rho=1.0)...")
         train_ds = Cifar10WhitenedDataset("data", "train")
         test_ds = Cifar10WhitenedDataset(
-            "data", "test", kernels=train_ds.kernels, mean=train_ds.mean,
+            "data",
+            "test",
+            kernels=train_ds.kernels,
+            mean=train_ds.mean,
         )
         train_data = {"images": train_ds.all_times, "labels": train_ds.outputs}
         test_data = {"images": test_ds.all_times, "labels": test_ds.outputs}
@@ -98,9 +107,7 @@ def evaluate_model_dir(
     pool_size = setup.get("pool_size", 2)
     t_target = setup.get("target_timestamp")
 
-    logger.info(
-        "Evaluating %s model from %s (device=%s)", dataset, model_dir, device
-    )
+    logger.info("Evaluating %s model from %s (device=%s)", dataset, model_dir, device)
 
     # Load model
     layer = load_model(f"{model_dir}/model.pth")
@@ -151,21 +158,24 @@ def evaluate_model_dir(
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    parser = argparse.ArgumentParser(
-        description="Evaluate trained conv SNN models"
-    )
+    parser = argparse.ArgumentParser(description="Evaluate trained conv SNN models")
     parser.add_argument(
-        "model_dirs", type=str, nargs="+",
+        "model_dirs",
+        type=str,
+        nargs="+",
         help="Directories containing model.pth and setup.json "
-             "(supports globs, e.g. data/cifar10_whitened_patches/tobj_0.97/seed_*)",
+        "(supports globs, e.g. data/cifar10_whitened_patches/tobj_0.97/seed_*)",
     )
     parser.add_argument(
-        "--device", type=str, default="cpu",
+        "--device",
+        type=str,
+        default="cpu",
         help="Device for inference (cpu or cuda)",
     )
     parser.add_argument("--chunk-size", type=int, default=512)
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Re-evaluate even if metrics.json already exists",
     )
     args = parser.parse_args()
@@ -175,7 +185,9 @@ if __name__ == "__main__":
             logger.warning("No model.pth in %s, skipping", model_dir)
             continue
         if not args.force and os.path.exists(f"{model_dir}/metrics.json"):
-            logger.info("Skipping %s (already evaluated, use --force to re-evaluate)", model_dir)
+            logger.info(
+                "Skipping %s (already evaluated, use --force to re-evaluate)", model_dir
+            )
             continue
         evaluate_model_dir(
             model_dir=model_dir,

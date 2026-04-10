@@ -2,6 +2,8 @@ import argparse
 import logging
 import os
 
+from tqdm import tqdm
+
 from applications.common import merge_seed_results
 from applications.conv_learning.train import train_model
 from applications.conv_learning.evaluate import evaluate_model_dir
@@ -48,16 +50,16 @@ def run_sweep(
     do_eval = mode in ("evaluate", "both")
 
     total = len(datasets) * len(t_objs) * len(seeds)
-    done = 0
 
+    pbar = tqdm(total=total, desc="Sweep", unit="run")
     for dataset in datasets:
         for t_obj in t_objs:
             tobj_dir = f"{base_dir}/{dataset}/tobj_{t_obj:.2f}"
 
             for seed in seeds:
                 output_dir = f"{tobj_dir}/seed_{seed}"
-                done += 1
-                tag = f"[{done}/{total}] {dataset} t_obj={t_obj:.2f} seed={seed}"
+                tag = f"{dataset} t_obj={t_obj:.2f} seed={seed}"
+                pbar.set_postfix_str(tag)
 
                 if do_train:
                     if os.path.exists(f"{output_dir}/model.pth"):
@@ -86,16 +88,17 @@ def run_sweep(
                             chunk_size=chunk_size,
                         )
 
+                pbar.update(1)
+
             # Aggregate seeds for this t_obj after evaluation
             if do_eval and os.path.isdir(tobj_dir):
                 try:
                     merge_seed_results(tobj_dir)
-                    logger.info(
-                        "Aggregated results for %s t_obj=%.2f", dataset, t_obj
-                    )
+                    logger.info("Aggregated results for %s t_obj=%.2f", dataset, t_obj)
                 except Exception as e:
                     logger.warning("Could not aggregate %s: %s", tobj_dir, e)
 
+    pbar.close()
     logger.info("Sweep complete.")
 
 
@@ -113,20 +116,28 @@ if __name__ == "__main__":
         description="Sweep t_obj × seed for conv SNN experiments"
     )
     parser.add_argument(
-        "--mode", type=str, default="train",
+        "--mode",
+        type=str,
+        default="train",
         choices=["train", "evaluate", "both"],
         help="'train' (CPU), 'evaluate' (GPU), or 'both'",
     )
     parser.add_argument(
-        "--datasets", type=str, default=None,
+        "--datasets",
+        type=str,
+        default=None,
         help="Comma-separated dataset names (default: mnist,cifar10)",
     )
     parser.add_argument(
-        "--t-objs", type=str, default=None,
+        "--t-objs",
+        type=str,
+        default=None,
         help="Comma-separated t_obj values (default: 0.60,0.65,...,0.95)",
     )
     parser.add_argument(
-        "--seeds", type=str, default=None,
+        "--seeds",
+        type=str,
+        default=None,
         help="Comma-separated seeds (default: 1,2,3,4,5)",
     )
     parser.add_argument("--num-filters", type=int, default=None)
