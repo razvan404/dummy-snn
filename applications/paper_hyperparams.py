@@ -52,7 +52,9 @@ class Cifar10Hyperparams:
     kernel_size: int = 5
     stride: int = 1
     padding: int = 0
-    num_filters: int = 64
+    # Paper (Falez 2020) uses 64 filters; threshold research requires more neurons
+    # to make single-neuron perturbations statistically meaningful.
+    num_filters: int = 256
     pool_size: int = 2
 
     # STDP

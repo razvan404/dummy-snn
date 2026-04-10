@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 from spiking.layers.integrate_and_fire import IntegrateAndFireLayer
@@ -38,27 +37,14 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
             refractory_period=refractory_period,
             dtype=dtype,
         )
-
-        # Spatial buffers are lazily initialized on first forward
-        self._spatial_initialized = False
+        self._oH: int | None = None
+        self._oW: int | None = None
         self._dtype = dtype
 
-    @property
-    def weights_4d(self) -> torch.Tensor:
-        """View weights as (num_filters, C, kH, kW) for conv2d operations."""
-        return self.weights.view(
-            self.num_filters, self.in_channels, self.kernel_size, self.kernel_size
-        )
-
-    def _compute_output_size(self, H: int, W: int) -> tuple[int, int]:
-        oH = (H + 2 * self.padding - self.kernel_size) // self.stride + 1
-        oW = (W + 2 * self.padding - self.kernel_size) // self.stride + 1
-        return oH, oW
-
-    def _ensure_spatial_buffers(self, oH: int, oW: int):
-        """Create spatial buffers on first forward pass when output size is known."""
-        if self._spatial_initialized:
-            return
+    def _init_spatial_buffers(self, oH: int, oW: int) -> None:
+        """Allocate (or reallocate) spatial state buffers for a given output size."""
+        self._oH = oH
+        self._oW = oW
         self.register_buffer(
             "membrane_potentials",
             torch.zeros((self.num_filters, oH, oW), dtype=self._dtype),
@@ -75,9 +61,18 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
             "_output_spikes",
             torch.zeros((self.num_filters, oH, oW), dtype=self._dtype),
         )
-        self._oH = oH
-        self._oW = oW
-        self._spatial_initialized = True
+
+    @property
+    def weights_4d(self) -> torch.Tensor:
+        """View weights as (num_filters, C, kH, kW) for conv2d operations."""
+        return self.weights.view(
+            self.num_filters, self.in_channels, self.kernel_size, self.kernel_size
+        )
+
+    def _compute_output_size(self, H: int, W: int) -> tuple[int, int]:
+        oH = (H + 2 * self.padding - self.kernel_size) // self.stride + 1
+        oW = (W + 2 * self.padding - self.kernel_size) // self.stride + 1
+        return oH, oW
 
     def _unfold_patches(self, input_times: torch.Tensor) -> torch.Tensor:
         """Extract patches from spatial input.
@@ -113,9 +108,10 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
     def forward(
         self, incoming_spikes: torch.Tensor, current_time: float, dt: float
     ) -> torch.Tensor:
-        C, H, W = incoming_spikes.shape
-        oH, oW = self._compute_output_size(H, W)
-        self._ensure_spatial_buffers(oH, oW)
+        if self._oH is None:
+            H, W = incoming_spikes.shape[-2], incoming_spikes.shape[-1]
+            oH, oW = self._compute_output_size(H, W)
+            self._init_spatial_buffers(oH, oW)
 
         active = self.refractory_times == 0
         self.refractory_times.sub_(dt).clamp_(min=0.0)
@@ -133,9 +129,7 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
             self.weights_4d,
             stride=self.stride,
             padding=self.padding,
-        ).squeeze(
-            0
-        )  # (F, oH, oW)
+        ).squeeze(0)  # (F, oH, oW)
 
         # Accumulate only for active, not-yet-spiked neurons
         update_mask = active & torch.isinf(self._spike_times)
@@ -154,17 +148,14 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         return self._output_spikes
 
     def reset(self):
-        if not self._spatial_initialized:
-            super().reset()
+        if self._oH is None:
             return
         self.membrane_potentials.zero_()
         self.refractory_times.zero_()
         self._spike_times.fill_(float("inf"))
         self._output_spikes.zero_()
-
-    def reset_spatial(self):
-        """Reset spatial buffers so they are re-created for a new input size."""
-        self._spatial_initialized = False
+        self._oH = None
+        self._oW = None
 
     @property
     def spike_times(self) -> torch.Tensor:
@@ -206,11 +197,15 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         dev = input_times.device
 
         result = torch.full(
-            (B, self.num_filters, oH, oW), float("inf"),
-            dtype=input_times.dtype, device=dev,
+            (B, self.num_filters, oH, oW),
+            float("inf"),
+            dtype=input_times.dtype,
+            device=dev,
         )
         cum_potential = torch.zeros(
-            (B, self.num_filters, oH, oW), dtype=input_times.dtype, device=dev,
+            (B, self.num_filters, oH, oW),
+            dtype=input_times.dtype,
+            device=dev,
         )
 
         finite_mask = torch.isfinite(input_times)
@@ -220,7 +215,9 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         unique_times = input_times[finite_mask].unique().sort()[0]
 
         not_yet_spiked = torch.ones(
-            (B, self.num_filters, oH, oW), dtype=torch.bool, device=dev,
+            (B, self.num_filters, oH, oW),
+            dtype=torch.bool,
+            device=dev,
         )
 
         for t in unique_times:

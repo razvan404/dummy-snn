@@ -13,11 +13,11 @@ from applications.paper_hyperparams import get_paper_hyperparams
 from spiking import (
     BiologicalSTDP,
     ConvIntegrateAndFireLayer,
-    Learner,
+    ConvLearner,
+    ConvUnsupervisedTrainer,
     MultiplicativeSTDP,
     NormalInitialization,
     SequentialThresholdAdaptation,
-    UnsupervisedTrainer,
     WinnerTakesAll,
     CompetitiveThresholdAdaptation,
     TargetTimestampAdaptation,
@@ -27,9 +27,7 @@ from spiking import (
 logger = logging.getLogger(__name__)
 
 
-def _create_stdp(
-    variant: str, params: dict
-) -> MultiplicativeSTDP | BiologicalSTDP:
+def _create_stdp(variant: str, params: dict) -> MultiplicativeSTDP | BiologicalSTDP:
     """Create STDP learning mechanism from paper hyperparams."""
     lr = params["stdp_lr"]
     annealing = params["annealing"]
@@ -137,14 +135,12 @@ def _save_training_summary(
     plt.close(fig)
 
 
-def _extract_random_patches(
-    images: torch.Tensor, kernel_size: int
-) -> torch.Tensor:
-    """Extract one random patch per image as flattened spike times.
+def _extract_random_patches(images: torch.Tensor, kernel_size: int) -> torch.Tensor:
+    """Extract one random patch per image as spatial spike times.
 
     :param images: (N, C, H, W) encoded spike times.
     :param kernel_size: Patch side length.
-    :returns: (N, C*kH*kW) flattened patches.
+    :returns: (N, C, kH, kW) spatial patches.
     """
     N, C, H, W = images.shape
     max_row = H - kernel_size
@@ -152,12 +148,11 @@ def _extract_random_patches(
     rows = torch.randint(0, max_row + 1, (N,))
     cols = torch.randint(0, max_col + 1, (N,))
 
-    patches = torch.empty(N, C * kernel_size * kernel_size)
+    patches = torch.empty(N, C, kernel_size, kernel_size)
     for i in range(N):
-        patch = images[
+        patches[i] = images[
             i, :, rows[i] : rows[i] + kernel_size, cols[i] : cols[i] + kernel_size
         ]
-        patches[i] = patch.flatten()
     return patches
 
 
@@ -222,7 +217,12 @@ def train_model(
 
     logger.info(
         "Training: %s, %s STDP, %d filters, t_obj=%.2f, %d epochs, seed=%d",
-        dataset, stdp_variant, nf, tt, ne, seed,
+        dataset,
+        stdp_variant,
+        nf,
+        tt,
+        ne,
+        seed,
     )
 
     # Load data
@@ -231,7 +231,6 @@ def train_model(
     N = len(all_images)
     in_channels = all_images.shape[1]
     ksize = params["kernel_size"]
-    num_inputs = in_channels * ksize * ksize
     logger.info("  %d images, %d channels, kernel=%d", N, in_channels, ksize)
 
     # Create model
@@ -254,11 +253,11 @@ def train_model(
     # Create learner
     stdp = _create_stdp(stdp_variant, params)
     adaptation = _create_threshold_adaptation(params)
-    learner = Learner(
+    learner = ConvLearner(
         layer, stdp, competition=WinnerTakesAll(), threshold_adaptation=adaptation
     )
-    trainer = UnsupervisedTrainer(
-        layer, learner, image_shape=(num_inputs,), early_stopping=True
+    trainer = ConvUnsupervisedTrainer(
+        layer, learner, image_shape=(in_channels, ksize, ksize), early_stopping=True
     )
 
     # Training with per-epoch log collection
@@ -271,15 +270,13 @@ def train_model(
         "epoch_thresholds": [],  # full threshold vector per epoch
     }
 
-    # Track neuron win counts via callback
+    # Track neuron win counts and last-10k spike activity
     neuron_wins = torch.zeros(nf, dtype=torch.long)
-
-    def _on_batch_end(batch_idx: int, dw: float, split: str):
-        if split == "train" and learner.neurons_to_learn is not None:
-            for idx in learner.neurons_to_learn:
-                neuron_wins[idx.item()] += 1
-
-    trainer.on_batch_end = _on_batch_end
+    total_steps = N * ne
+    log_last_n = 10_000
+    last10k_winners = torch.full((log_last_n,), -1, dtype=torch.long)
+    last10k_spike_times = torch.full((log_last_n,), float("inf"))
+    global_step = 0
 
     for epoch in tqdm(range(ne), desc="Training", unit="epoch"):
         patches = _extract_random_patches(all_images, ksize)
@@ -290,6 +287,27 @@ def train_model(
         for i in it:
             dw = trainer.step_batch(i, patches[perm[i]])
             epoch_dws.append(dw)
+
+            if learner.neurons_to_learn is not None:
+                for idx in learner.neurons_to_learn:
+                    neuron_wins[idx.item()] += 1
+
+            # Record winner and spike time for the last log_last_n steps
+            steps_remaining = total_steps - global_step
+            if steps_remaining <= log_last_n:
+                slot = log_last_n - steps_remaining
+                if (
+                    learner.neurons_to_learn is not None
+                    and len(learner.neurons_to_learn) > 0
+                ):
+                    winner = learner.neurons_to_learn[0].item()
+                else:
+                    winner = -1
+                last10k_winners[slot] = winner
+                last10k_spike_times[slot] = learner.winner_spike_time
+
+            global_step += 1
+
         trainer.step_epoch()
 
         # Record epoch stats
@@ -306,6 +324,12 @@ def train_model(
         training_logs["epoch_thresholds"]
     )  # (num_epochs, num_filters)
     training_logs["neuron_wins"] = neuron_wins  # (num_filters,)
+    training_logs["last10k_winners"] = (
+        last10k_winners  # (10000,) winner neuron index, -1 = no spike
+    )
+    training_logs["last10k_spike_times"] = (
+        last10k_spike_times  # (10000,) spike time of winner
+    )
 
     # Save model, setup, and logs
     os.makedirs(output_dir, exist_ok=True)
@@ -314,9 +338,7 @@ def train_model(
 
     # End-of-training plots: neuron win distribution + learned weights
     _save_training_summary(layer, neuron_wins, output_dir, nf)
-    _save_filter_grid(
-        layer.weights_4d, f"{output_dir}/weights.png", ncols=min(16, nf)
-    )
+    _save_filter_grid(layer.weights_4d, f"{output_dir}/weights.png", ncols=min(16, nf))
 
     setup_info = {
         "dataset": dataset,
@@ -337,7 +359,9 @@ if __name__ == "__main__":
         description="Train conv SNN on preprocessed dataset (training only)"
     )
     parser.add_argument(
-        "dataset", type=str, choices=["mnist", "cifar10"],
+        "dataset",
+        type=str,
+        choices=["mnist", "cifar10"],
         help="Dataset name",
     )
     parser.add_argument("--num-filters", type=int, default=None)
@@ -345,12 +369,16 @@ if __name__ == "__main__":
     parser.add_argument("--t-obj", type=float, default=None)
     parser.add_argument("--processed-dir", type=str, default=None)
     parser.add_argument(
-        "--seeds", type=int, nargs="+", default=[1],
+        "--seeds",
+        type=int,
+        nargs="+",
+        default=[1],
         help="Random seeds to train (e.g. --seeds 1 2 3 4 5 6 7 8 9 10)",
     )
     parser.add_argument("--base-dir", type=str, default=None)
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Retrain even if model already exists",
     )
     args = parser.parse_args()
@@ -368,7 +396,9 @@ if __name__ == "__main__":
     for seed in args.seeds:
         output_dir = f"{args.base_dir}/nf_{nf}/tobj_{t:.2f}/seed_{seed}"
         if not args.force and os.path.exists(f"{output_dir}/model.pth"):
-            logger.info("Skipping seed %d (already trained, use --force to retrain)", seed)
+            logger.info(
+                "Skipping seed %d (already trained, use --force to retrain)", seed
+            )
             continue
         train_model(
             dataset=args.dataset,

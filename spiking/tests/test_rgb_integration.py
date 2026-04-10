@@ -46,6 +46,7 @@ def run_full_pipeline(
 
     # Step 4: Conv inference
     in_channels = spike_times.shape[1]  # 2*C = 6
+    iH, iW = spike_times.shape[2], spike_times.shape[3]
     init = ConstantInitialization(10.0)
     layer = ConvIntegrateAndFireLayer(
         in_channels=in_channels,
@@ -145,6 +146,7 @@ class TestConv2dVsUnfoldOnRealData:
         encoded = torch.stack([encode_whitened_image(img) for img in whitened])
         spike_times = discretize_times(encoded, num_bins=16)
 
+        iH, iW = spike_times.shape[2], spike_times.shape[3]
         init = ConstantInitialization(10.0)
         layer = ConvIntegrateAndFireLayer(
             in_channels=6,
@@ -167,6 +169,7 @@ class TestConv2dVsUnfoldOnRealData:
         encoded = torch.stack([encode_whitened_image(img) for img in whitened])
         spike_times = discretize_times(encoded, num_bins=16)
 
+        iH, iW = spike_times.shape[2], spike_times.shape[3]
         init = ConstantInitialization(10.0)
         layer = ConvIntegrateAndFireLayer(
             in_channels=6,

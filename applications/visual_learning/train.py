@@ -16,8 +16,6 @@ from applications.default_hyperparams import get_common_hyperparams
 from spiking import (
     BiologicalSTDP,
     ConvIntegrateAndFireLayer,
-    UnsupervisedTrainer,
-    Learner,
     MultiplicativeSTDP,
     WinnerTakesAll,
     CompetitiveThresholdAdaptation,
@@ -26,6 +24,8 @@ from spiking import (
     NormalInitialization,
     save_model,
 )
+from spiking.learning.conv_learner import ConvLearner
+from spiking.training.conv_trainer import ConvUnsupervisedTrainer
 from spiking.evaluation import evaluate_classifier
 from spiking.evaluation.conv_feature_extraction import sum_pool_features
 from spiking.evaluation.feature_extraction import spike_times_to_features
@@ -134,11 +134,11 @@ def _extract_random_patches(
     images: torch.Tensor,
     kernel_size: int,
 ) -> torch.Tensor:
-    """Extract one random patch per image as flattened spike times.
+    """Extract one random patch per image as spatial spike times.
 
     :param images: (N, C, H, W) whitened+encoded spike times.
     :param kernel_size: Patch side length.
-    :returns: patches: (N, C*kH*kW) flattened spike times.
+    :returns: patches: (N, C, kH, kW) spike times.
     """
     N, C, H, W = images.shape
     max_row = H - kernel_size
@@ -146,12 +146,11 @@ def _extract_random_patches(
     rows = torch.randint(0, max_row + 1, (N,))
     cols = torch.randint(0, max_col + 1, (N,))
 
-    patches = torch.empty(N, C * kernel_size * kernel_size)
+    patches = torch.empty(N, C, kernel_size, kernel_size)
     for i in range(N):
-        patch = images[
+        patches[i] = images[
             i, :, rows[i] : rows[i] + kernel_size, cols[i] : cols[i] + kernel_size
         ]
-        patches[i] = patch.flatten()
 
     return patches
 
@@ -220,7 +219,6 @@ def train_model(
     N = len(all_images)
     in_channels = all_images.shape[1]  # 6
     ksize = p["kernel_size"]
-    num_inputs = in_channels * ksize * ksize
     logger.info("  %d images, %d channels, kernel=%d", N, in_channels, ksize)
 
     # Conv layer — inherits from IntegrateAndFireLayer, so patch training works
@@ -236,25 +234,25 @@ def train_model(
         kernel_size=ksize,
         stride=p["stride"],
         padding=p["padding"],
+
         threshold_initialization=init,
         refractory_period=float("inf"),
     )
     # Paper weight init: U(0, 1) per Falez 2019 Table I / Falez 2020 Table I
     torch.nn.init.uniform_(layer.weights, a=p["w_min"], b=p["w_max"])
 
-    # Learner (FC-compatible since conv layer IS-A FC layer)
     stdp = create_stdp(stdp_variant, params)
     adaptation = create_threshold_adaptation(params)
-    learner = Learner(
+    learner = ConvLearner(
         layer,
         stdp,
         competition=WinnerTakesAll(),
         threshold_adaptation=adaptation,
     )
-    trainer = UnsupervisedTrainer(
+    trainer = ConvUnsupervisedTrainer(
         layer,
         learner,
-        image_shape=(num_inputs,),
+        image_shape=(in_channels, ksize, ksize),
         early_stopping=True,
     )
 

@@ -92,6 +92,7 @@ class TestExtractFeatures:
     def test_matches_iterative_forward_pass(self):
         """extract_features results must match the iterative forward-pass loop."""
         from spiking import iterate_spikes
+        from spiking.evaluation.decoding import ScaledInversion
         from spiking.evaluation.feature_extraction import extract_features
 
         torch.manual_seed(42)
@@ -100,7 +101,8 @@ class TestExtractFeatures:
         layer = make_layer(num_inputs=num_inputs, num_outputs=5)
         dataset = FakeDataset(num_samples=5, shape=shape)
 
-        # Compute expected features using iterative forward pass
+        # Compute expected features using iterative forward pass + ScaledInversion
+        decoder = ScaledInversion()
         expected_X = []
         layer.eval()
         with torch.no_grad():
@@ -111,9 +113,7 @@ class TestExtractFeatures:
                     layer.forward(incoming_spikes, current_time=current_time, dt=dt)
                     if torch.all(torch.isfinite(layer.spike_times)):
                         break
-                expected_X.append(
-                    torch.clamp(1.0 - layer.spike_times, min=0, max=1.0).numpy()
-                )
+                expected_X.append(decoder.decode(layer.spike_times).numpy())
                 layer.reset()
         expected_X = np.array(expected_X)
 
@@ -122,8 +122,8 @@ class TestExtractFeatures:
 
         np.testing.assert_allclose(actual_X, expected_X, atol=1e-6)
 
-    def test_without_t_target_uses_linear_inversion(self):
-        """Without t_target, features = clamp(1 - spike_times, 0, 1)."""
+    def test_without_t_target_uses_scaled_inversion(self):
+        """Without t_target, default and t_target=None produce identical features."""
         from spiking.evaluation.feature_extraction import extract_features
 
         torch.manual_seed(42)
@@ -533,6 +533,7 @@ class TestInferSpikeTimesBatch:
 
     def test_extract_features_batched_matches_original(self):
         """Batched extract_features must match per-sample infer_spike_times loop."""
+        from spiking.evaluation.decoding import ScaledInversion
         from spiking.evaluation.feature_extraction import extract_features
 
         torch.manual_seed(42)
@@ -542,12 +543,13 @@ class TestInferSpikeTimesBatch:
         layer = make_layer(num_inputs=num_inputs, num_outputs=5, avg_threshold=5.0)
         dataset = FakeDataset(num_samples=num_samples, shape=shape)
 
-        # Ground truth: per-sample analytical inference
+        # Ground truth: per-sample analytical inference + ScaledInversion
+        decoder = ScaledInversion()
         expected_X = []
         for i in range(num_samples):
             times, label = dataset[i]
             spike_times = layer.infer_spike_times(times.flatten())
-            expected_X.append(torch.clamp(1.0 - spike_times, min=0, max=1.0).numpy())
+            expected_X.append(decoder.decode(spike_times).numpy())
         expected_X = np.array(expected_X)
 
         loader = DataLoader(dataset, batch_size=None, shuffle=False)
@@ -947,9 +949,9 @@ class TestExtractSpikeTimes:
         # Raw spike times can be any non-negative value (or inf)
         assert spike_times.dtype == torch.float32
 
-    def test_matches_extract_features_with_linear_decoder(self):
-        """extract_spike_times + LinearInversion should match extract_features."""
-        from spiking.evaluation.decoding import LinearInversion
+    def test_matches_extract_features_with_scaled_inversion(self):
+        """extract_spike_times + ScaledInversion should match extract_features."""
+        from spiking.evaluation.decoding import ScaledInversion
         from spiking.evaluation.feature_extraction import (
             extract_features,
             extract_spike_times,
@@ -962,13 +964,13 @@ class TestExtractSpikeTimes:
         loader = make_fake_dataloader(num_samples=5, shape=shape)
 
         spike_times, labels = extract_spike_times(layer, loader)
-        decoder = LinearInversion()
+        decoder = ScaledInversion()
         X_decoded = decoder.decode(spike_times).numpy()
 
-        X_legacy, y_legacy = extract_features(layer, loader, t_target=None)
+        X_default, y_default = extract_features(layer, loader, t_target=None)
 
-        np.testing.assert_allclose(X_decoded, X_legacy, atol=1e-6)
-        np.testing.assert_array_equal(labels.numpy(), y_legacy)
+        np.testing.assert_allclose(X_decoded, X_default, atol=1e-6)
+        np.testing.assert_array_equal(labels.numpy(), y_default)
 
     def test_matches_extract_features_with_target_relative(self):
         """extract_spike_times + TargetRelative should match extract_features with t_target."""

@@ -59,6 +59,12 @@ class BaseLearner(ABC):
         """
         neurons_to_learn = self._select_neurons().flatten()
         self.neurons_to_learn = neurons_to_learn
+        # Capture spike times before reset clears layer state
+        spike_times_now = self._get_spike_times()
+        if len(neurons_to_learn) > 0:
+            self.winner_spike_time = spike_times_now[neurons_to_learn[0]].min().item()
+        else:
+            self.winner_spike_time = float("inf")
 
         dw = 0.0
         if self.learning_mechanism and len(neurons_to_learn) > 0:

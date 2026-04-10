@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from spiking import SpikingModule
-from spiking.evaluation.decoding import LinearInversion, TargetRelative
+from spiking.evaluation.decoding import ScaledInversion, TargetRelative
 
 
 def spike_times_to_features(
@@ -12,10 +12,10 @@ def spike_times_to_features(
 ) -> torch.Tensor:
     """Convert spike times to feature values in [0, 1].
 
-    Without t_target: linear inversion, clamp(1 - t, 0, 1).
+    Without t_target: scaled inversion, clamp((1 - t) / (1 - min_t), 0, 1).
     With t_target: Falez Eq 10, clamp(1 - (t - t_target) / (1 - t_target), 0, 1).
     """
-    decoder = TargetRelative(t_target) if t_target is not None else LinearInversion()
+    decoder = TargetRelative(t_target) if t_target is not None else ScaledInversion()
     return decoder.decode(spike_times)
 
 

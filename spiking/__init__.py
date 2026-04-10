@@ -4,13 +4,11 @@ from .spiking_module import SpikingModule
 from .layers import (
     IntegrateAndFireLayer,
     ConvIntegrateAndFireLayer,
-    IntegrateAndFireMultilayer,
     SpikingSequential,
 )
 from .learning import (
     BiologicalSTDP,
     ConvLearner,
-    Learner,
     MultiplicativeSTDP,
     WinnerTakesAll,
 )
@@ -25,8 +23,6 @@ from .threshold import (
 from .training import (
     ConvUnsupervisedTrainer,
     TrainingMonitor,
-    UnsupervisedTrainer,
-    train,
 )
 from .evaluation import (
     BinaryFirstSpike,
@@ -49,11 +45,9 @@ __all__ = [
     "SpikingModule",
     "IntegrateAndFireLayer",
     "ConvIntegrateAndFireLayer",
-    "IntegrateAndFireMultilayer",
     "SpikingSequential",
     "BiologicalSTDP",
     "ConvLearner",
-    "Learner",
     "MultiplicativeSTDP",
     "WinnerTakesAll",
     "CompetitiveThresholdAdaptation",
@@ -64,8 +58,6 @@ __all__ = [
     "ConstantInitialization",
     "ConvUnsupervisedTrainer",
     "TrainingMonitor",
-    "UnsupervisedTrainer",
-    "train",
     "BinaryFirstSpike",
     "BinaryWindowFirstSpike",
     "Decoder",

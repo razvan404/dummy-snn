@@ -64,6 +64,51 @@ class TestConvLayerConstruction:
         layer = make_layer()
         assert isinstance(layer, IntegrateAndFireLayer)
 
+    def test_no_input_size_defers_buffers(self):
+        layer = ConvIntegrateAndFireLayer(
+            in_channels=2,
+            num_filters=4,
+            kernel_size=3,
+            threshold_initialization=ConstantInitialization(1.0),
+        )
+        assert layer._oH is None
+
+    def test_spatial_buffers_lazy(self):
+        layer = ConvIntegrateAndFireLayer(
+            in_channels=2,
+            num_filters=4,
+            kernel_size=3,
+            threshold_initialization=ConstantInitialization(1.0),
+        )
+        assert layer._oH is None
+        spikes = torch.zeros(2, 8, 8)
+        layer.train()
+        layer.forward(spikes, 0.0, 0.1)
+        # oH = oW = 8 - 3 + 1 = 6
+        assert layer._oH == 6
+        assert layer._spike_times.shape == (4, 6, 6)
+
+    def test_reset_clears_output_size_for_reinit(self):
+        """reset() should clear _oH/_oW so the next forward re-runs lazy init."""
+        layer = ConvIntegrateAndFireLayer(
+            in_channels=2,
+            num_filters=4,
+            kernel_size=3,
+            threshold_initialization=ConstantInitialization(1.0),
+        )
+        layer.train()
+        layer.forward(torch.zeros(2, 8, 8), 0.0, 0.1)
+        assert layer._oH == 6
+
+        layer.reset()
+        assert layer._oH is None
+
+        # Forward with a different input size should reinitialize correctly
+        layer.forward(torch.zeros(2, 12, 12), 0.0, 0.1)
+        # oH = oW = 12 - 3 + 1 = 10
+        assert layer._oH == 10
+        assert layer._spike_times.shape == (4, 10, 10)
+
 
 class TestConvLayerForward:
     def test_output_shape(self):
@@ -94,7 +139,8 @@ class TestConvLayerForward:
     def test_spike_times_recorded(self):
         """When input is strong enough, spike times should be recorded."""
         layer = make_layer(
-            in_channels=1, num_filters=1, kernel_size=3, padding=1, threshold=0.1
+            in_channels=1, num_filters=1, kernel_size=3, padding=1,
+            threshold=0.1,
         )
         # Set weights high to guarantee spiking
         layer.weights.data.fill_(1.0)
@@ -116,7 +162,8 @@ class TestConvLayerForward:
 class TestConvLayerReset:
     def test_reset_clears_spike_times(self):
         layer = make_layer(
-            in_channels=1, num_filters=1, kernel_size=3, padding=1, threshold=0.1
+            in_channels=1, num_filters=1, kernel_size=3, padding=1,
+            threshold=0.1,
         )
         layer.weights.data.fill_(1.0)
         incoming = torch.ones(1, 5, 5)
@@ -378,7 +425,7 @@ class TestConv2dVsUnfoldEquivalence:
 
     def test_with_padding(self):
         layer = make_layer(
-            in_channels=6, num_filters=8, kernel_size=5, padding=2, threshold=5.0
+            in_channels=6, num_filters=8, kernel_size=5, padding=2, threshold=5.0,
         )
         inp = self._make_input(8, 6, 10, 10, seed=7)
         conv2d_result = layer.infer_spike_times_batch(inp)
@@ -420,7 +467,7 @@ class TestConvInferenceBenchmark:
         torch.manual_seed(42)
 
         layer = make_layer(
-            in_channels=C, num_filters=F_n, kernel_size=K, threshold=10.0
+            in_channels=C, num_filters=F_n, kernel_size=K, threshold=10.0,
         )
         inp = torch.rand(B, C, H, W)
         inp = (inp * 16).floor() / 16
