@@ -8,8 +8,9 @@ import os
 
 import numpy as np
 import torch
-from sklearn.linear_model import RidgeClassifier
 from tqdm import tqdm
+
+from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
 
 from applications.common import load_split_data, resolve_params
 from spiking.evaluation import evaluate_classifier
@@ -58,13 +59,16 @@ def main() -> None:
         description="Evaluate conv SNN with LinearSVC and Ridge"
     )
     parser.add_argument(
-        "--dataset", type=str, default="cifar10", choices=["mnist", "cifar10"],
+        "--dataset",
+        type=str,
+        default="cifar10",
+        choices=["mnist", "cifar10"],
     )
     parser.add_argument("--num-filters", type=int, default=None)
     parser.add_argument("--t-obj", type=float, default=None)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--chunk-size", type=int, default=512)
+    parser.add_argument("--chunk-size", type=int, default=2048)
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
@@ -87,16 +91,26 @@ def main() -> None:
 
     logger.info("Extracting train features (%d images)...", len(train_data["images"]))
     X_train, y_train = _extract_features(
-        layer, train_data["images"], train_data["labels"],
-        pool_size, t_target, args.chunk_size, args.device,
+        layer,
+        train_data["images"],
+        train_data["labels"],
+        pool_size,
+        t_target,
+        args.chunk_size,
+        args.device,
     )
     del train_data
     gc.collect()
 
     logger.info("Extracting test features (%d images)...", len(test_data["images"]))
     X_test, y_test = _extract_features(
-        layer, test_data["images"], test_data["labels"],
-        pool_size, t_target, args.chunk_size, args.device,
+        layer,
+        test_data["images"],
+        test_data["labels"],
+        pool_size,
+        t_target,
+        args.chunk_size,
+        args.device,
     )
     del test_data
     gc.collect()
@@ -105,17 +119,19 @@ def main() -> None:
     svc_train, svc_val = evaluate_classifier(X_train, y_train, X_test, y_test)
     logger.info(
         "LinearSVC  — train: %.4f, val: %.4f",
-        svc_train["accuracy"], svc_val["accuracy"],
+        svc_train["accuracy"],
+        svc_val["accuracy"],
     )
 
     # Ridge
-    ridge = RidgeClassifier(alpha=1.0)
+    ridge = RidgeColumnSwap(alpha=1.0)
     ridge_train, ridge_val = evaluate_classifier(
         X_train, y_train, X_test, y_test, classifier=ridge
     )
     logger.info(
         "Ridge      — train: %.4f, val: %.4f",
-        ridge_train["accuracy"], ridge_val["accuracy"],
+        ridge_train["accuracy"],
+        ridge_val["accuracy"],
     )
 
     metrics = {

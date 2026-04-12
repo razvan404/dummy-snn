@@ -1,9 +1,23 @@
 import numpy as np
-from sklearn.base import TransformerMixin, ClassifierMixin
+from sklearn.base import TransformerMixin
 from sklearn.decomposition import PCA
 from sklearn.svm import LinearSVC
 
 from spiking.evaluation.eval_utils import compute_metrics
+
+try:
+    from cuml.svm import LinearSVC as CumlLinearSVC
+
+    _HAS_CUML = True
+except ImportError:
+    _HAS_CUML = False
+
+
+def _default_svc():
+    """Create a LinearSVC, using cuml on GPU if available."""
+    if _HAS_CUML:
+        return CumlLinearSVC(tol=1e-3, max_iter=10000)
+    return LinearSVC(dual=False, tol=1e-3, max_iter=10000)
 
 
 def evaluate_classifier(
@@ -11,19 +25,19 @@ def evaluate_classifier(
     y_train: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
-    classifier: ClassifierMixin | None = None,
+    classifier=None,
 ) -> tuple[dict, dict]:
     """Fit a classifier and return (train_metrics, val_metrics).
 
-    Defaults to LinearSVC if no classifier is provided.
+    Defaults to LinearSVC (cuml GPU if available, else sklearn CPU).
     """
     if classifier is None:
-        classifier = LinearSVC(dual=False, tol=1e-3, max_iter=10000)
+        classifier = _default_svc()
 
     classifier.fit(X_train, y_train)
 
-    train_metrics = compute_metrics(y_train, classifier.predict(X_train))
-    val_metrics = compute_metrics(y_test, classifier.predict(X_test))
+    train_metrics = compute_metrics(y_train, np.asarray(classifier.predict(X_train)))
+    val_metrics = compute_metrics(y_test, np.asarray(classifier.predict(X_test)))
 
     return train_metrics, val_metrics
 

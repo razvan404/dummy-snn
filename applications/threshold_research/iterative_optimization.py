@@ -25,12 +25,42 @@ from applications.threshold_research.conv_neuron_perturbation import (
 )
 from applications.threshold_research.filter_ordering import ORDERINGS, get_filter_order
 from spiking import load_model
+from spiking.evaluation.column_swap_classifier import ColumnSwapClassifier
 from spiking.evaluation.eval_utils import compute_metrics
 from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
+from spiking.evaluation.svc_column_swap import SVCColumnSwap
 from spiking.layers import SpikingSequential
 from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 
 logger = logging.getLogger(__name__)
+
+CLASSIFIERS = ["ridge", "svc"]
+
+
+def _gpu_available(backend: str) -> bool:
+    """Check if GPU backend is available (cupy for ridge, cuml for svc)."""
+    try:
+        if backend == "ridge":
+            import cupy  # noqa: F401
+
+            return True
+        if backend == "svc":
+            import cuml  # noqa: F401
+
+            return True
+    except ImportError:
+        pass
+    return False
+
+
+def _make_classifier(name: str, alpha: float = 1.0) -> ColumnSwapClassifier:
+    """Create a ColumnSwapClassifier, using GPU automatically if available."""
+    use_gpu = _gpu_available(name)
+    if name == "ridge":
+        return RidgeColumnSwap(alpha=alpha, use_gpu=use_gpu)
+    if name == "svc":
+        return SVCColumnSwap(use_gpu=use_gpu)
+    raise ValueError(f"Unknown classifier: {name!r}. Choose from {CLASSIFIERS}")
 
 
 def _extract_perturbations(
@@ -137,23 +167,25 @@ def iterative_descent_round(
     alpha: float = 1.0,
     ordering: str = "descending_importance",
     training_spike_times: np.ndarray | None = None,
+    classifier: str = "ridge",
 ) -> tuple[list[float], dict, np.ndarray, np.ndarray]:
     """Run one round of coordinate descent over all filters.
 
+    :param classifier: "ridge" (Woodbury) or "svc" (refit). GPU used automatically.
     :returns: (updated_thresholds, round_info, final_X_train, final_X_val).
     """
     cols_per_filter = pool_size * pool_size
     X_train = baseline_train.copy()
     X_val = baseline_val.copy()
 
-    clf = RidgeColumnSwap(alpha=alpha)
+    clf = _make_classifier(classifier, alpha=alpha)
     clf.fit(X_train, y_train)
 
     baseline_train_acc = compute_metrics(y_train, clf.predict(X_train))["accuracy"]
     baseline_val_acc = compute_metrics(y_val, clf.predict(X_val))["accuracy"]
 
     # Rank filters by importance and mean spike time
-    importance = np.mean(np.abs(clf._w), axis=1)
+    importance = np.mean(np.abs(clf.weights), axis=1)
     filter_importance = np.array(
         [
             importance[f * cols_per_filter : (f + 1) * cols_per_filter].sum()
@@ -253,6 +285,7 @@ def iterative_coordinate_descent(
     step_size: float = 0.2,
     alpha: float = 1.0,
     ordering: str = "descending_importance",
+    classifier: str = "ridge",
 ) -> dict:
     """Run iterative coordinate descent threshold optimization."""
     model = load_model(model_path)
@@ -362,6 +395,7 @@ def iterative_coordinate_descent(
             alpha=alpha,
             ordering=ordering,
             training_spike_times=training_spike_times,
+            classifier=classifier,
         )
 
         cumulative_abs_change += round_info["total_abs_change"]
@@ -394,6 +428,7 @@ def iterative_coordinate_descent(
             "step_size": step_size,
             "alpha": alpha,
             "ordering": ordering,
+            "classifier": classifier,
         },
         "baseline_train_accuracy": rounds_history[0]["baseline_train_accuracy"],
         "baseline_val_accuracy": rounds_history[0]["baseline_val_accuracy"],
@@ -454,6 +489,12 @@ if __name__ == "__main__":
     parser.add_argument("--step-size", type=float, default=0.2)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
+        "--classifier",
+        choices=CLASSIFIERS,
+        default="ridge",
+        help="Classifier for optimization (default: ridge). 'svc' uses LinearSVC.",
+    )
+    parser.add_argument(
         "--orderings",
         nargs="+",
         choices=ORDERINGS,
@@ -511,6 +552,7 @@ if __name__ == "__main__":
             num_rounds=args.num_rounds,
             step_size=args.step_size,
             ordering=ordering,
+            classifier=args.classifier,
         )
 
         with open(output_path, "w") as f:

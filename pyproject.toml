@@ -25,12 +25,14 @@ cpu = [
 cuda = [
     "torch>=2.5",
     "torchvision>=0.20",
+    "cuml-cu12>=26.4",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.0",
     "black>=24.0",
+    "ruff>=0.8",
 ]
 
 [tool.black]

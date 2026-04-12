@@ -8,6 +8,7 @@ import os
 from applications.common import create_dataloaders, resolve_params
 from applications.threshold_research.filter_ordering import ORDERINGS
 from applications.threshold_research.iterative_optimization import (
+    CLASSIFIERS,
     iterative_coordinate_descent,
     plot_convergence,
 )
@@ -20,18 +21,30 @@ def main() -> None:
         description="Optimize conv SNN thresholds with iterative coordinate descent"
     )
     parser.add_argument(
-        "--dataset", type=str, default="cifar10", choices=["mnist", "cifar10"],
+        "--dataset",
+        type=str,
+        default="cifar10",
+        choices=["mnist", "cifar10"],
     )
     parser.add_argument("--num-filters", type=int, default=None)
     parser.add_argument("--t-obj", type=float, default=None)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--chunk-size", type=int, default=128)
+    parser.add_argument("--chunk-size", type=int, default=2048)
     parser.add_argument("--num-rounds", type=int, default=25)
     parser.add_argument("--step-size", type=float, default=0.2)
     parser.add_argument(
-        "--ordering", type=str, choices=ORDERINGS, default="descending_importance",
+        "--ordering",
+        type=str,
+        choices=ORDERINGS,
+        default="descending_importance",
         help="Filter ordering strategy",
+    )
+    parser.add_argument(
+        "--classifier",
+        choices=CLASSIFIERS,
+        default="ridge",
+        help="Classifier for optimization (default: ridge).",
     )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
@@ -65,6 +78,7 @@ def main() -> None:
         num_rounds=args.num_rounds,
         step_size=args.step_size,
         ordering=args.ordering,
+        classifier=args.classifier,
     )
 
     with open(output_path, "w") as f:
