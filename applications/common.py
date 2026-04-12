@@ -16,6 +16,63 @@ def set_seed(seed: int):
         torch.cuda.manual_seed(seed)
 
 
+def resolve_model_dir(
+    dataset: str, num_filters: int, t_obj: float, seed: int
+) -> str:
+    """Compute model directory from experiment parameters."""
+    base = "cifar10_whitened" if dataset == "cifar10" else dataset
+    return f"logs/{base}/sweep/nf_{num_filters}/tobj_{t_obj:.2f}/seed_{seed}"
+
+
+def resolve_params(args) -> tuple[int, float, str]:
+    """Return (num_filters, t_obj, model_dir) from CLI args + paper defaults."""
+    from applications.paper_hyperparams import get_paper_hyperparams
+
+    hp = get_paper_hyperparams(args.dataset)
+    nf = args.num_filters or hp["num_filters"]
+    t_obj = args.t_obj if args.t_obj is not None else hp["target_timestamp"]
+    return nf, t_obj, resolve_model_dir(args.dataset, nf, t_obj, args.seed)
+
+
+def load_split_data(dataset: str) -> tuple[dict, dict]:
+    """Load train and test image tensors + labels."""
+    if dataset == "cifar10":
+        from applications.datasets import Cifar10WhitenedDataset
+
+        train_ds = Cifar10WhitenedDataset("data", "train")
+        test_ds = Cifar10WhitenedDataset(
+            "data", "test", kernels=train_ds.kernels, mean=train_ds.mean
+        )
+        return (
+            {"images": train_ds.all_times, "labels": train_ds.outputs},
+            {"images": test_ds.all_times, "labels": test_ds.outputs},
+        )
+    processed_dir = f"data/processed-{dataset}"
+    return (
+        torch.load(f"{processed_dir}/train.pt", weights_only=True),
+        torch.load(f"{processed_dir}/test.pt", weights_only=True),
+    )
+
+
+def create_dataloaders(dataset: str):
+    """Create (train_loader, val_loader) for threshold optimization."""
+    if dataset == "cifar10":
+        from applications.datasets import Cifar10WhitenedDataset
+        from torch.utils.data import DataLoader
+
+        train_ds = Cifar10WhitenedDataset("data", "train")
+        val_ds = Cifar10WhitenedDataset(
+            "data", "test", kernels=train_ds.kernels, mean=train_ds.mean
+        )
+        return (
+            DataLoader(train_ds, batch_size=None, shuffle=False),
+            DataLoader(val_ds, batch_size=None, shuffle=False),
+        )
+    from applications.datasets import create_dataset
+
+    return create_dataset(dataset)
+
+
 def evaluate_model(model, train_loader, val_loader, t_target=None):
     """Extract features and evaluate classifier. Moves model to CPU.
 
