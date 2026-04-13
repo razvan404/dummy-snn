@@ -167,18 +167,19 @@ def iterative_descent_round(
     alpha: float = 1.0,
     ordering: str = "descending_importance",
     training_spike_times: np.ndarray | None = None,
-    classifier: str = "ridge",
+    last_win_index: np.ndarray | None = None,
 ) -> tuple[list[float], dict, np.ndarray, np.ndarray]:
     """Run one round of coordinate descent over all filters.
 
-    :param classifier: "ridge" (Woodbury) or "svc" (refit). GPU used automatically.
+    Uses Ridge with Woodbury updates for fast column-swap evaluation.
+
     :returns: (updated_thresholds, round_info, final_X_train, final_X_val).
     """
     cols_per_filter = pool_size * pool_size
     X_train = baseline_train.copy()
     X_val = baseline_val.copy()
 
-    clf = _make_classifier(classifier, alpha=alpha)
+    clf = RidgeColumnSwap(alpha=alpha)
     clf.fit(X_train, y_train)
 
     baseline_train_acc = compute_metrics(y_train, clf.predict(X_train))["accuracy"]
@@ -206,6 +207,7 @@ def iterative_descent_round(
         mean_spike_times,
         threshold_drift=threshold_deviation,
         training_spike_times=training_spike_times,
+        last_win_index=last_win_index,
     )
 
     updated_thresholds = list(current_thresholds)
@@ -285,7 +287,6 @@ def iterative_coordinate_descent(
     step_size: float = 0.2,
     alpha: float = 1.0,
     ordering: str = "descending_importance",
-    classifier: str = "ridge",
 ) -> dict:
     """Run iterative coordinate descent threshold optimization."""
     model = load_model(model_path)
@@ -313,19 +314,29 @@ def iterative_coordinate_descent(
     rounds_history = []
     cumulative_abs_change = 0.0
 
-    # Load training spike times from log if available (for training_*_spike orderings)
+    # Load training logs for ordering strategies that need training-time info
     training_spike_times: np.ndarray | None = None
-    training_metrics_path = os.path.join(
-        os.path.dirname(model_path), "training_metrics.json"
-    )
-    if os.path.exists(training_metrics_path):
-        with open(training_metrics_path) as f:
-            _tm = json.load(f)
-        raw = _tm.get("mean_spike_time_per_neuron")
-        if raw is not None:
-            training_spike_times = np.array(
-                [float("nan") if v is None else v for v in raw]
-            )
+    last_win_index: np.ndarray | None = None
+    training_logs_path = os.path.join(os.path.dirname(model_path), "training_logs.pt")
+    if os.path.exists(training_logs_path):
+        _logs = torch.load(training_logs_path, weights_only=True)
+        if "last10k_winners" in _logs:
+            winners = _logs["last10k_winners"].numpy()
+            # Last win index per neuron (-1 if never won)
+            last_win_index = np.full(num_filters, -1, dtype=np.int64)
+            for i, f in enumerate(winners):
+                last_win_index[int(f)] = i
+            # Last spike time per neuron (most recent win)
+            if "last10k_spike_times" in _logs:
+                spike_vals = _logs["last10k_spike_times"].numpy()
+                training_spike_times = np.full(num_filters, np.nan)
+                for i in range(len(winners) - 1, -1, -1):
+                    f = int(winners[i])
+                    if np.isnan(training_spike_times[f]):
+                        training_spike_times[f] = spike_vals[i]
+                    if not np.any(np.isnan(training_spike_times)):
+                        break
+        del _logs
 
     # Shared kwargs for GPU feature extraction
     gpu_kwargs = dict(
@@ -395,7 +406,7 @@ def iterative_coordinate_descent(
             alpha=alpha,
             ordering=ordering,
             training_spike_times=training_spike_times,
-            classifier=classifier,
+            last_win_index=last_win_index,
         )
 
         cumulative_abs_change += round_info["total_abs_change"]
@@ -422,18 +433,29 @@ def iterative_coordinate_descent(
             logger.info("  Converged at round %d (no changes).", round_idx + 1)
             break
 
+    # Final evaluation with both Ridge and SVC on the optimized features
+    logger.info("Evaluating optimized thresholds with Ridge and SVC...")
+    final_eval = {}
+    for clf_name in ["ridge", "svc"]:
+        clf = _make_classifier(clf_name, alpha=alpha)
+        clf.fit(base_train, y_train)
+        train_acc = compute_metrics(y_train, clf.predict(base_train))["accuracy"]
+        val_acc = compute_metrics(y_val, clf.predict(base_val))["accuracy"]
+        final_eval[clf_name] = {"train_accuracy": train_acc, "val_accuracy": val_acc}
+        logger.info("  %s — train: %.4f, val: %.4f", clf_name, train_acc, val_acc)
+
     return {
         "config": {
             "num_rounds": num_rounds,
             "step_size": step_size,
             "alpha": alpha,
             "ordering": ordering,
-            "classifier": classifier,
         },
         "baseline_train_accuracy": rounds_history[0]["baseline_train_accuracy"],
         "baseline_val_accuracy": rounds_history[0]["baseline_val_accuracy"],
         "final_train_accuracy": rounds_history[-1]["final_train_accuracy"],
         "final_val_accuracy": rounds_history[-1]["final_val_accuracy"],
+        "final_eval": final_eval,
         "original_thresholds": original_thresholds.tolist(),
         "optimized_thresholds": current_thresholds.tolist(),
         "rounds": rounds_history,
@@ -488,12 +510,6 @@ if __name__ == "__main__":
     parser.add_argument("--num-rounds", type=int, default=25)
     parser.add_argument("--step-size", type=float, default=0.2)
     parser.add_argument("--force", action="store_true")
-    parser.add_argument(
-        "--classifier",
-        choices=CLASSIFIERS,
-        default="ridge",
-        help="Classifier for optimization (default: ridge). 'svc' uses LinearSVC.",
-    )
     parser.add_argument(
         "--orderings",
         nargs="+",
@@ -552,7 +568,6 @@ if __name__ == "__main__":
             num_rounds=args.num_rounds,
             step_size=args.step_size,
             ordering=ordering,
-            classifier=args.classifier,
         )
 
         with open(output_path, "w") as f:

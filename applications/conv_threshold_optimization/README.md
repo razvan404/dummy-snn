@@ -47,11 +47,12 @@ Trains a single conv SNN layer with STDP on random patches.
 ```bash
 python -m applications.conv_threshold_optimization.evaluate \
     --dataset cifar10 --num-filters 256 --t-obj 0.97 --seed 1 \
-    --device cuda --chunk-size 512
+    --device cuda
 ```
 
 Extracts conv features with sum pooling, fits both LinearSVC and Ridge,
-saves `metrics.json`.
+saves `metrics.json`. Uses GPU-accelerated classifiers (cuml) automatically
+when the `cuda` extra is installed.
 
 ## 3. Optimize
 
@@ -59,29 +60,52 @@ saves `metrics.json`.
 python -m applications.conv_threshold_optimization.optimize \
     --dataset cifar10 --num-filters 256 --t-obj 0.97 --seed 1 \
     --device cuda --ordering descending_importance \
-    --num-rounds 25 --step-size 0.2
+    --classifier svc --num-rounds 25 --step-size 0.2
 ```
 
 Runs iterative coordinate descent for a single ordering strategy.
-Each round: extract features at current thresholds +/- step, fit Ridge,
-greedily optimize each filter via Woodbury column swaps. Repeat until convergence.
+Each round: extract features at current thresholds +/- step, fit the
+classifier, greedily optimize each filter via column swaps. Repeat until
+convergence.
 
 ### Ordering strategies
 
+12 strategies organized in four families. Hybrid variants interleave from
+both ends of the sorted order (most → least → 2nd most → 2nd least → ...).
+
+**Classifier-aware** — based on the fitted classifier's weight magnitudes:
+
 | Ordering                 | Description                                  |
 |--------------------------|----------------------------------------------|
-| `descending_importance`  | Highest Ridge coefficient magnitude first     |
+| `descending_importance`  | Highest classifier coefficient magnitude first |
 | `ascending_importance`   | Lowest importance first                       |
-| `hybrid_importance`      | Interleaved: most important / least important |
+| `hybrid_importance`      | Interleaved: most important ↔ least important |
+
+**Inference spike time** — based on mean spike time over the current features:
+
+| Ordering                 | Description                                  |
+|--------------------------|----------------------------------------------|
 | `early_spike`            | Earliest mean spike time first                |
 | `late_spike`             | Latest mean spike time first                  |
-| `hybrid_spike_time`      | Interleaved: earliest / latest                |
-| `high_abs_drift`         | Largest threshold deviation from mean first   |
-| `low_abs_drift`          | Smallest threshold deviation first            |
-| `hybrid_abs_drift`       | Interleaved: most deviated / least deviated   |
+| `hybrid_spike_time`      | Interleaved: earliest ↔ latest                |
+
+**Threshold deviation** — based on |threshold_i − mean(thresholds)|:
+
+| Ordering                 | Description                                  |
+|--------------------------|----------------------------------------------|
+| `high_abs_drift`         | Largest deviation from mean threshold first   |
+| `low_abs_drift`          | Smallest deviation first                      |
+| `hybrid_abs_drift`       | Interleaved: most deviated ↔ least deviated   |
+
+**Training spike time** — based on mean spike time recorded during STDP
+training (requires `mean_spike_time_per_neuron` in `training_metrics.json`;
+filters that never fired are placed last):
+
+| Ordering                 | Description                                  |
+|--------------------------|----------------------------------------------|
 | `training_early_spike`   | Earliest training-time spike first            |
 | `training_late_spike`    | Latest training-time spike first              |
-| `hybrid_training_spike`  | Interleaved: earliest / latest training spike |
+| `hybrid_training_spike`  | Interleaved: earliest ↔ latest training spike |
 
 ## Full pipeline example
 
