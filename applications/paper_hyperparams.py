@@ -78,12 +78,22 @@ class Cifar10Hyperparams:
     patch_size: int = 5
 
 
+@dataclass(frozen=True)
+class FashionMnistHyperparams(MnistHyperparams):
+    """Fashion MNIST — same architecture as MNIST with DoG preprocessing."""
+
+    num_filters: int = 256
+    target_timestamp: float = 0.9
+
+
 MNIST = MnistHyperparams()
 CIFAR10 = Cifar10Hyperparams()
+FASHION_MNIST = FashionMnistHyperparams()
 
 _CONFIGS = {
     "mnist": MNIST,
     "cifar10": CIFAR10,
+    "fashion_mnist": FASHION_MNIST,
 }
 
 

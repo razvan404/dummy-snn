@@ -167,6 +167,13 @@ def _load_training_images(dataset: str, processed_dir: str | None) -> torch.Tens
 
         ds = Cifar10WhitenedDataset("data", "train")
         return ds.all_times
+    if dataset == "fashion_mnist" and processed_dir is None:
+        from applications.datasets import FashionMnistDataset
+
+        ds = FashionMnistDataset(
+            "data", "train", cache_path="data/fashion_mnist_cache/train_dog.pt"
+        )
+        return ds.all_times
     if processed_dir is None:
         processed_dir = f"data/processed-{dataset}"
     train_data = torch.load(f"{processed_dir}/train.pt", weights_only=True)
@@ -361,7 +368,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "dataset",
         type=str,
-        choices=["mnist", "cifar10"],
+        choices=["mnist", "cifar10", "fashion_mnist"],
         help="Dataset name",
     )
     parser.add_argument("--num-filters", type=int, default=None)
@@ -388,10 +395,8 @@ if __name__ == "__main__":
     t = args.t_obj or hp["target_timestamp"]
 
     if args.base_dir is None:
-        if args.dataset == "cifar10":
-            args.base_dir = "logs/cifar10_whitened/sweep"
-        else:
-            args.base_dir = f"logs/{args.dataset}/sweep"
+        dir_name = "cifar10_whitened" if args.dataset == "cifar10" else args.dataset
+        args.base_dir = f"logs/{dir_name}/sweep"
 
     for seed in args.seeds:
         output_dir = f"{args.base_dir}/nf_{nf}/tobj_{t:.2f}/seed_{seed}"
