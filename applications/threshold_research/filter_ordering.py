@@ -7,6 +7,10 @@ ORDERINGS = [
     "late_spike",
     "hybrid_importance",
     "hybrid_spike_time",
+    # Simple orderings (no extra data needed)
+    "forward",  # neuron index 0, 1, 2, ...
+    "reverse",  # neuron index N-1, N-2, ...
+    "random",  # shuffled neuron indices (seeded)
     # Threshold-deviation orderings (|threshold_i - mean(thresholds)|, no log needed)
     "high_abs_drift",  # largest deviation from mean threshold first
     "low_abs_drift",  # smallest deviation from mean threshold first
@@ -46,6 +50,7 @@ def get_filter_order(
     threshold_drift: np.ndarray | None = None,
     training_spike_times: np.ndarray | None = None,
     last_win_index: np.ndarray | None = None,
+    seed: int = 1,
 ) -> np.ndarray:
     """Return filter indices in the specified processing order.
 
@@ -62,8 +67,10 @@ def get_filter_order(
         (from training_logs.pt). Higher = more recently changed threshold.
         Required for recent_winner / oldest_winner orderings.
         -1 for filters that never won.
+    :param seed: Random seed for the 'random' ordering.
     :returns: 1-D array of filter indices in the order they should be processed.
     """
+    num_filters = len(filter_importance)
     asc_imp = np.argsort(filter_importance)
     asc_spike = np.argsort(mean_spike_times)
     match ordering:
@@ -79,6 +86,15 @@ def get_filter_order(
             return _interleave(asc_imp[::-1])
         case "hybrid_spike_time":
             return _interleave(asc_spike)
+        case "forward":
+            return np.arange(num_filters)
+        case "reverse":
+            return np.arange(num_filters)[::-1].copy()
+        case "random":
+            rng = np.random.RandomState(seed)
+            order = np.arange(num_filters)
+            rng.shuffle(order)
+            return order
         case "high_abs_drift" | "low_abs_drift" | "hybrid_abs_drift":
             if threshold_drift is None:
                 raise ValueError(
