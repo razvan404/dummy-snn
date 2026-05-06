@@ -1,18 +1,18 @@
 """Multi-pass greedy threshold optimization from precomputed feature cache.
 
 Reads the per-neuron feature cache (compute_feature_cache.py) and runs
-Woodbury-accelerated coordinate descent. Each pass takes ~5 min since
-no SNN inference is needed — just column swaps on the cached features.
+coordinate descent to maximize **training accuracy**.
+
+Classifier backends:
+  - ``ridge``: Woodbury-accelerated Ridge (~1 ms/eval, ~5 min/pass)
+  - ``svc``: GPU Newton-IRLS LinearSVC with warm-start (~250 ms/eval, ~18 min/pass)
 
 Algorithm per pass:
   For each neuron (in specified order):
     1. Sweep all cached levels -> find globally best level
     2. Move ONE step (+-5%) toward that level (not jump)
     3. Verify the step improves train accuracy
-    4. If yes, apply via Woodbury update
-
-Supports all orderings from filter_ordering module (importance, spike time,
-threshold drift, recent/oldest winner, hybrids).
+    4. If yes, apply via column swap
 """
 
 import argparse
@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GreedyConfig:
     cache_path: str = ""
+    classifier: str = "ridge"
     num_passes: int = 5
     ordering: str = "descending_importance"
     alpha: float = 1.0
@@ -65,31 +66,25 @@ def build_features_from_levels(
     return features
 
 
-def _eval_level(
+# ======================================================================
+# Ridge evaluation (Woodbury-accelerated, evaluates on train)
+# ======================================================================
+
+
+def _eval_level_ridge(
     clf: RidgeColumnSwap,
     cache_data_train: np.ndarray,
-    cache_data_val: np.ndarray,
     neuron_idx: int,
     candidate_level: int,
-    col_start: int,
     col_indices: list[int],
-    pool_dim: int,
-    y_eval: np.ndarray,
-    _w_cache: dict | None = None,
+    y_train: np.ndarray,
 ) -> float:
-    """Evaluate accuracy for a single neuron at a candidate level.
-
-    Computes Woodbury-updated weights from train cols, then predicts on
-    val features without copying the full val matrix — patches the score
-    contribution from the 4 changed columns.
-    """
+    """Evaluate train accuracy for one neuron at one level via Woodbury."""
     xp = clf._xp
-    new_train_cols = cache_data_train[neuron_idx, candidate_level]
-    new_val_cols = cache_data_val[neuron_idx, candidate_level]
-
-    # Woodbury update to get new weights
     col_idx = np.asarray(col_indices)
     k = len(col_idx)
+    new_train_cols = cache_data_train[neuron_idx, candidate_level]
+
     new_dev = clf._to_xp(new_train_cols)
     new_mean = new_dev.mean(axis=0)
     new_cols_c = new_dev - new_mean
@@ -117,24 +112,82 @@ def _eval_level(
     X_mean_new[col_idx] = new_mean
     intercept_new = clf._Y_mean - X_mean_new @ w_new
 
-    # Predict on val: base_scores + delta from changed columns
-    # scores = X_val @ w_new + intercept_new
-    #        = X_val_base @ w_new + (new_val_cols - old_val_cols) @ w_new[cols] + intercept_new
-    # Precompute base_scores = X_val_base @ w_old + intercept_old (cached externally)
-    # Instead, just compute the full dot product on the small val set (10k x 1024 is cheap)
-    X_val_dev = clf._to_xp(clf._X_val_base)
-    # Patch the changed columns in-place temporarily
-    old_cols = X_val_dev[:, col_idx].copy()
-    X_val_dev[:, col_idx] = clf._to_xp(new_val_cols)
-    scores = X_val_dev @ w_new + intercept_new
-    X_val_dev[:, col_idx] = old_cols  # restore
+    # Predict on train features (patch changed columns temporarily)
+    X_train_dev = clf._to_xp(clf._X_train_base)
+    old_cols = X_train_dev[:, col_idx].copy()
+    X_train_dev[:, col_idx] = clf._to_xp(new_train_cols)
+    scores = X_train_dev @ w_new + intercept_new
+    X_train_dev[:, col_idx] = old_cols
 
     y_pred = clf._decode(clf._to_np(scores))
-    return float((y_pred == y_eval).mean())
+    return float((y_pred == y_train).mean())
+
+
+# ======================================================================
+# SVC evaluation (GPU warm-start Newton-IRLS, evaluates on train)
+# ======================================================================
+
+
+def build_canonical_map(train_cache: np.ndarray) -> np.ndarray:
+    """Map each (neuron, level) to the smallest level with identical features.
+
+    Spike-time features are step functions in threshold: many adjacent levels
+    have bit-identical features. Deduplicating these saves SVC evaluations
+    (~1.6x speedup on CIFAR-10).
+
+    :returns: int32 array of shape (num_filters, num_fracs) where
+        ``canonical[f, l]`` is the smallest level with features identical
+        to ``train_cache[f, l]``.
+    """
+    F, L, N, P = train_cache.shape
+    canonical = np.zeros((F, L), dtype=np.int32)
+    for f in range(F):
+        feats = np.asarray(train_cache[f]).reshape(L, -1)
+        seen: dict[bytes, int] = {}
+        for lv in range(L):
+            key = feats[lv].tobytes()
+            canonical[f, lv] = seen.setdefault(key, lv)
+    return canonical
+
+
+def _eval_level_svc(
+    clf,  # TorchLinearSVC
+    cache_data_train_gpu: torch.Tensor,
+    neuron_idx: int,
+    candidate_level: int,
+    col_indices: torch.Tensor,
+    y_train_gpu: torch.Tensor,
+    canonical_map: np.ndarray | None = None,
+    eval_cache: dict | None = None,
+) -> float:
+    """Evaluate train accuracy for one neuron at one level.
+
+    Uses full warm-start Newton-IRLS (~250ms). If ``canonical_map`` and
+    ``eval_cache`` are provided, deduplicates identical-feature levels:
+    first eval at a canonical level pays the SVC cost, later evals hit
+    the cache for free.
+    """
+    if canonical_map is not None and eval_cache is not None:
+        canonical_level = int(canonical_map[neuron_idx, candidate_level])
+        key = (neuron_idx, canonical_level)
+        if key in eval_cache:
+            return eval_cache[key]
+        new_train_cols = cache_data_train_gpu[neuron_idx, canonical_level]
+        acc = clf.eval_swapped_train_acc(col_indices, new_train_cols, y_train_gpu)
+        eval_cache[key] = acc
+        return acc
+
+    new_train_cols = cache_data_train_gpu[neuron_idx, candidate_level]
+    return clf.eval_swapped_train_acc(col_indices, new_train_cols, y_train_gpu)
+
+
+# ======================================================================
+# Greedy pass (dispatches to Ridge or SVC)
+# ======================================================================
 
 
 def greedy_pass(
-    clf: RidgeColumnSwap,
+    clf,
     cache_data_train: np.ndarray,
     cache_data_val: np.ndarray,
     y_train: np.ndarray,
@@ -146,33 +199,50 @@ def greedy_pass(
     min_threshold: float,
     original_thresholds: np.ndarray,
     coarse_stride: int = 4,
+    classifier_type: str = "ridge",
+    cache_data_train_gpu: torch.Tensor | None = None,
+    y_train_gpu: torch.Tensor | None = None,
+    canonical_map: np.ndarray | None = None,
 ) -> dict:
-    """One pass of greedy coordinate descent using cached features.
+    """One pass of greedy coordinate descent.
 
-    Coarse-to-fine sweep: first check every coarse_stride-th level to find
-    the best direction, then sweep the fine levels in that bin. Cuts
-    evaluations from num_fracs to ~(num_fracs/stride + stride) per neuron.
+    Both Ridge and SVC optimize **training accuracy**. When ``canonical_map``
+    is provided, SVC evaluations are deduplicated across levels with
+    identical features.
     """
     num_fracs = len(fractions)
     n_changes = 0
     improvements = np.zeros(len(neuron_order), dtype=np.float32)
-    val_curve = []
+    acc_curve = []
+    changes: list[dict] = []  # per-accepted-step: position, neuron_idx, old/new level, gain
+    use_svc = classifier_type == "svc"
 
-    # Cache current val accuracy — only recompute after a swap
-    y_pred_current = clf.predict(clf._X_val_base)
-    current_acc = float((y_pred_current == y_val).mean())
+    # Current train accuracy
+    if use_svc:
+        with torch.no_grad():
+            preds = (clf._Xa @ clf._Wa).argmax(dim=1)
+            current_acc = (preds == y_train_gpu).float().mean().item()
+    else:
+        y_pred_current = clf.predict(clf._X_train_base)
+        current_acc = float((y_pred_current == y_train).mean())
 
     for i, neuron_idx in enumerate(neuron_order):
         current_level = current_levels[neuron_idx]
         col_start = neuron_idx * pool_dim
-        col_indices = list(range(col_start, col_start + pool_dim))
+        col_indices_list = list(range(col_start, col_start + pool_dim))
+        if use_svc:
+            col_indices_t = torch.tensor(
+                col_indices_list, device=cache_data_train_gpu.device
+            )
+        # Per-neuron eval cache: maps canonical level -> SVC train accuracy.
+        # Reset each neuron because apply_swap changes the feature matrix.
+        eval_cache: dict = {}
 
         best_acc = current_acc
         best_level = current_level
 
-        # Phase 1: coarse sweep (every coarse_stride-th level)
+        # Phase 1: coarse sweep
         coarse_levels = list(range(0, num_fracs, coarse_stride))
-        # Always include the last level
         if coarse_levels[-1] != num_fracs - 1:
             coarse_levels.append(num_fracs - 1)
 
@@ -185,22 +255,31 @@ def greedy_pass(
             new_thresh = original_thresholds[neuron_idx] * (1.0 + frac)
             if new_thresh < min_threshold:
                 continue
-            acc = _eval_level(
-                clf,
-                cache_data_train,
-                cache_data_val,
-                neuron_idx,
-                candidate_level,
-                col_start,
-                col_indices,
-                pool_dim,
-                y_val,
-            )
+            if use_svc:
+                acc = _eval_level_svc(
+                    clf,
+                    cache_data_train_gpu,
+                    neuron_idx,
+                    candidate_level,
+                    col_indices_t,
+                    y_train_gpu,
+                    canonical_map=canonical_map,
+                    eval_cache=eval_cache,
+                )
+            else:
+                acc = _eval_level_ridge(
+                    clf,
+                    cache_data_train,
+                    neuron_idx,
+                    candidate_level,
+                    col_indices_list,
+                    y_train,
+                )
             if acc > coarse_best_acc:
                 coarse_best_acc = acc
                 coarse_best_level = candidate_level
 
-        # Phase 2: fine sweep around coarse winner's bin
+        # Phase 2: fine sweep around coarse winner
         if coarse_best_level != current_level:
             fine_lo = max(0, coarse_best_level - coarse_stride + 1)
             fine_hi = min(num_fracs - 1, coarse_best_level + coarse_stride - 1)
@@ -208,69 +287,90 @@ def greedy_pass(
                 if candidate_level == current_level:
                     continue
                 if candidate_level in coarse_levels:
-                    # Already evaluated in coarse pass — reuse result
                     continue
                 frac = fractions[candidate_level]
                 new_thresh = original_thresholds[neuron_idx] * (1.0 + frac)
                 if new_thresh < min_threshold:
                     continue
-                acc = _eval_level(
-                    clf,
-                    cache_data_train,
-                    cache_data_val,
-                    neuron_idx,
-                    candidate_level,
-                    col_start,
-                    col_indices,
-                    pool_dim,
-                    y_val,
-                )
+                if use_svc:
+                    acc = _eval_level_svc(
+                        clf,
+                        cache_data_train_gpu,
+                        neuron_idx,
+                        candidate_level,
+                        col_indices_t,
+                        y_train_gpu,
+                    )
+                else:
+                    acc = _eval_level_ridge(
+                        clf,
+                        cache_data_train,
+                        neuron_idx,
+                        candidate_level,
+                        col_indices_list,
+                        y_train,
+                    )
                 if acc > best_acc:
                     best_acc = acc
                     best_level = candidate_level
-            # Also consider the coarse winner itself
             if coarse_best_acc > best_acc:
                 best_acc = coarse_best_acc
                 best_level = coarse_best_level
-        # If coarse found nothing better, best_level stays at current_level
 
-        # Move one step TOWARD the global best
+        # Move one step toward the global best
         if best_level != current_level:
             direction = 1 if best_level > current_level else -1
             target_level = current_level + direction
 
-            step_acc = _eval_level(
-                clf,
-                cache_data_train,
-                cache_data_val,
-                neuron_idx,
-                target_level,
-                col_start,
-                col_indices,
-                pool_dim,
-                y_val,
-            )
+            if use_svc:
+                step_acc = _eval_level_svc(
+                    clf,
+                    cache_data_train_gpu,
+                    neuron_idx,
+                    target_level,
+                    col_indices_t,
+                    y_train_gpu,
+                    canonical_map=canonical_map,
+                    eval_cache=eval_cache,
+                )
+            else:
+                step_acc = _eval_level_ridge(
+                    clf,
+                    cache_data_train,
+                    neuron_idx,
+                    target_level,
+                    col_indices_list,
+                    y_train,
+                )
 
             if step_acc > current_acc:
                 new_train_cols_step = cache_data_train[neuron_idx, target_level]
-                clf.apply_swap(col_indices, new_train_cols_step)
-                clf._X_train_base[:, col_start : col_start + pool_dim] = (
-                    new_train_cols_step
-                )
-                clf._X_val_base[:, col_start : col_start + pool_dim] = cache_data_val[
-                    neuron_idx, target_level
-                ]
+                clf.apply_swap(col_indices_list, new_train_cols_step)
+                if not use_svc:
+                    clf._X_train_base[:, col_start : col_start + pool_dim] = (
+                        new_train_cols_step
+                    )
+                    clf._X_val_base[:, col_start : col_start + pool_dim] = (
+                        cache_data_val[neuron_idx, target_level]
+                    )
+                changes.append({
+                    "position": int(i),
+                    "neuron": int(neuron_idx),
+                    "old_level": int(current_levels[neuron_idx]),
+                    "new_level": int(target_level),
+                    "gain": float(step_acc - current_acc),
+                })
                 current_levels[neuron_idx] = target_level
                 n_changes += 1
                 improvements[i] = step_acc - current_acc
                 current_acc = step_acc
-                val_curve.append(step_acc)
+                acc_curve.append(step_acc)
             else:
-                val_curve.append(current_acc)
+                acc_curve.append(current_acc)
         else:
-            val_curve.append(current_acc)
+            acc_curve.append(current_acc)
 
-    # Evaluate final state
+    # Final evaluation on both splits
     val_features = build_features_from_levels(cache_data_val, current_levels, pool_dim)
     val_pred = clf.predict(val_features)
     val_acc = float((val_pred == y_val).mean())
@@ -286,7 +386,9 @@ def greedy_pass(
         "train_acc": train_acc,
         "val_acc": val_acc,
         "improvements": improvements,
-        "val_curve": val_curve,
+        "val_curve": acc_curve,  # kept as "val_curve" for plot compat
+        "neuron_order": [int(x) for x in neuron_order],
+        "changes": changes,
     }
 
 
@@ -326,7 +428,6 @@ def plot_passes(
     ax.set_title("Changes per Pass")
     ax.grid(True, alpha=0.3)
 
-    # Full val curve across all neurons
     ax = axes[1, 0]
     full_curve = []
     pass_boundaries = [0]
@@ -346,12 +447,11 @@ def plot_passes(
         mid = (pass_boundaries[i] + pass_boundaries[i + 1]) // 2
         ax.text(mid, min(full_curve), f"P{i + 1}", ha="center", fontsize=7, alpha=0.6)
     ax.set_xlabel("Neuron index (across all passes)")
-    ax.set_ylabel("Val accuracy")
-    ax.set_title("Val Accuracy per Neuron Evaluation")
+    ax.set_ylabel("Train accuracy")
+    ax.set_title("Train Accuracy per Neuron Evaluation")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # Per-neuron improvement distribution (pass 1)
     ax = axes[1, 1]
     if history:
         impr = history[0]["improvements"]
@@ -384,6 +484,12 @@ def main() -> None:
         description="Multi-pass greedy optimization from cached features"
     )
     parser.add_argument("--cache-path", required=True, help="Path to feature cache .pt")
+    parser.add_argument(
+        "--classifier",
+        choices=["ridge", "svc"],
+        default="ridge",
+        help="Classifier backend: ridge (Woodbury) or svc (GPU Newton-IRLS)",
+    )
     parser.add_argument("--num-passes", type=int, default=5)
     parser.add_argument(
         "--ordering",
@@ -452,7 +558,7 @@ def main() -> None:
     with open(f"{output_dir}/config.json", "w") as f:
         json.dump(asdict(config), f, indent=4)
 
-    # Baseline
+    # Baseline features
     X_train = build_features_from_levels(
         train_cache, np.full(num_filters, zero_idx, dtype=int), pool_dim
     )
@@ -460,13 +566,53 @@ def main() -> None:
         test_cache, np.full(num_filters, zero_idx, dtype=int), pool_dim
     )
 
-    clf = RidgeColumnSwap(alpha=config.alpha, use_gpu=config.gpu)
-    clf.fit(X_train, y_train)
+    # Initialize classifier
+    use_svc = config.classifier == "svc"
+    cache_data_train_gpu = None
+    y_train_gpu = None
+    canonical_map = None
+
+    if use_svc:
+        from spiking.evaluation.torch_svc import TorchLinearSVC
+
+        clf = TorchLinearSVC(C=1.0)
+        clf.fit(X_train, y_train)
+        # Move cache to GPU for zero-copy column swaps
+        cache_data_train_gpu = torch.from_numpy(np.asarray(train_cache)).to(clf._device)
+        y_train_gpu = clf._y_t
+        # Precompute canonical map for eval deduplication (spike-time features
+        # are step functions of threshold: many adjacent levels have identical
+        # features, ~1.6x SVC eval speedup)
+        logger.info("Precomputing canonical feature map for deduplication...")
+        t_cm = time.time()
+        canonical_map = build_canonical_map(train_cache)
+        n_unique = sum(
+            len(set(canonical_map[f].tolist())) for f in range(canonical_map.shape[0])
+        )
+        logger.info(
+            "Canonical map: %.1fs, %.1f unique configs/neuron (%.2fx dedup)",
+            time.time() - t_cm,
+            n_unique / canonical_map.shape[0],
+            canonical_map.size / n_unique,
+        )
+        logger.info("Using TorchLinearSVC (GPU) — optimizing train accuracy")
+    else:
+        clf = RidgeColumnSwap(alpha=config.alpha, use_gpu=config.gpu)
+        clf.fit(X_train, y_train)
+        clf._X_train_base = X_train.copy()
+        clf._X_val_base = X_test.copy()
+        logger.info("Using Ridge (Woodbury) — optimizing train accuracy")
+
     baseline_train = float((clf.predict(X_train) == y_train).mean())
     baseline_val = float((clf.predict(X_test) == y_test).mean())
-    logger.info("Baseline Ridge — train: %.4f, val: %.4f", baseline_train, baseline_val)
+    logger.info(
+        "Baseline %s — train: %.4f, val: %.4f",
+        config.classifier.upper(),
+        baseline_train,
+        baseline_val,
+    )
 
-    # Current state — resume from previous run if requested
+    # Resume
     current_levels = np.full(num_filters, zero_idx, dtype=int)
     history = []
     resume_path = f"{output_dir}/results.json"
@@ -478,26 +624,30 @@ def main() -> None:
             {**p, "improvements": np.zeros(num_filters), "val_curve": []}
             for p in prev["passes"]
         ]
-        # Rebuild features from restored levels
         X_train = build_features_from_levels(train_cache, current_levels, pool_dim)
         X_test = build_features_from_levels(test_cache, current_levels, pool_dim)
-        clf = RidgeColumnSwap(alpha=config.alpha, use_gpu=config.gpu)
-        clf.fit(X_train, y_train)
+        if use_svc:
+            clf = TorchLinearSVC(C=1.0)
+            clf.fit(X_train, y_train)
+            y_train_gpu = clf._y_t
+        else:
+            clf = RidgeColumnSwap(alpha=config.alpha, use_gpu=config.gpu)
+            clf.fit(X_train, y_train)
+            clf._X_train_base = X_train.copy()
+            clf._X_val_base = X_test.copy()
         logger.info(
             "Resumed from %d previous passes (last val: %.4f)",
             len(history),
             history[-1]["val_acc"],
         )
 
-    # Ordering data — static inputs computed once
+    # Ordering data
     mean_spike_times = np.zeros(num_filters, dtype=np.float32)
     for f in range(num_filters):
-        # Mean spike time at baseline level across training set
         mean_spike_times[f] = train_cache[f, zero_idx, :, 0].mean()
 
     threshold_drift = np.abs(original_thresholds - original_thresholds.mean())
 
-    # Load training logs for winner-based orderings
     training_spike_times: np.ndarray | None = None
     last_win_index: np.ndarray | None = None
     model_dir = config.model_dir or os.path.dirname(config.cache_path)
@@ -521,7 +671,6 @@ def main() -> None:
         del _logs
     logger.info("Ordering: %s", config.ordering)
 
-    # Orderings that depend on clf.weights must be recomputed each pass
     _dynamic_orderings = {
         "descending_importance",
         "ascending_importance",
@@ -549,21 +698,52 @@ def main() -> None:
 
     neuron_order = compute_neuron_order()
 
-    # Store feature bases
-    clf._X_train_base = X_train.copy()
-    clf._X_val_base = X_test.copy()
-
     # Multi-pass optimization
+    # Semantics: without --resume, --num-passes = number of passes to run (fresh).
+    # With --resume, --num-passes = TARGET total passes across the run's history;
+    # we only run (target - already_done) more. If already_done >= target, skip.
     start_pass = len(history)
-    total_passes = start_pass + config.num_passes
+    if args.resume:
+        total_passes = config.num_passes
+        if start_pass >= total_passes:
+            logger.info(
+                "Resume: already have %d passes >= target %d — nothing to do.",
+                start_pass,
+                total_passes,
+            )
+            return
+    else:
+        total_passes = start_pass + config.num_passes
     logger.info(
-        "Starting %d-pass greedy optimization (ordering=%s, starting at pass %d)...",
-        config.num_passes,
+        "Starting %d-pass greedy optimization (%s, ordering=%s, pass %d/%d)...",
+        total_passes - start_pass,
+        config.classifier,
         config.ordering,
         start_pass + 1,
+        total_passes,
     )
 
     for pass_idx in range(start_pass, total_passes):
+        # Fresh cold-fit at the start of every pass: rebuilding features from
+        # current_levels and refitting from scratch breaks out of the
+        # warm-start's local fixed point, letting the next pass find new
+        # moves. Skip on pass 0 of a non-resume run (we already cold-fit above).
+        if pass_idx > 0 or start_pass > 0:
+            X_train_cur = build_features_from_levels(
+                train_cache, current_levels, pool_dim
+            )
+            if use_svc:
+                clf = TorchLinearSVC(C=1.0)
+                clf.fit(X_train_cur, y_train)
+                y_train_gpu = clf._y_t
+            else:
+                clf = RidgeColumnSwap(alpha=config.alpha, use_gpu=config.gpu)
+                clf.fit(X_train_cur, y_train)
+                clf._X_train_base = X_train_cur.copy()
+                clf._X_val_base = build_features_from_levels(
+                    test_cache, current_levels, pool_dim
+                )
+
         if recompute_order and pass_idx > 0:
             neuron_order = compute_neuron_order()
         t0 = time.time()
@@ -581,6 +761,10 @@ def main() -> None:
             config.min_threshold,
             original_thresholds,
             coarse_stride=config.coarse_stride,
+            classifier_type=config.classifier,
+            cache_data_train_gpu=cache_data_train_gpu,
+            y_train_gpu=y_train_gpu,
+            canonical_map=canonical_map,
         )
 
         elapsed = time.time() - t0
@@ -610,6 +794,7 @@ def main() -> None:
 
     # Save
     results = {
+        "classifier": config.classifier,
         "baseline": {"train_acc": baseline_train, "val_acc": baseline_val},
         "final": {
             "train_acc": history[-1]["train_acc"],
@@ -620,6 +805,8 @@ def main() -> None:
                 "n_changes": h["n_changes"],
                 "train_acc": h["train_acc"],
                 "val_acc": h["val_acc"],
+                "neuron_order": h.get("neuron_order", []),
+                "changes": h.get("changes", []),
             }
             for h in history
         ],
@@ -632,14 +819,17 @@ def main() -> None:
         json.dump(results, f, indent=4)
     logger.info("Results saved to %s", output_dir)
 
-    plot_passes(history, baseline_val, config.ordering, f"{output_dir}/convergence.png")
+    plot_passes(
+        history, baseline_train, config.ordering, f"{output_dir}/convergence.png"
+    )
 
     logger.info("=== Summary ===")
     logger.info("Baseline: train %.4f, val %.4f", baseline_train, baseline_val)
     logger.info(
-        "Final:    train %.4f, val %.4f (%+.4f)",
+        "Final:    train %.4f, val %.4f (train %+.4f, val %+.4f)",
         history[-1]["train_acc"],
         history[-1]["val_acc"],
+        history[-1]["train_acc"] - baseline_train,
         history[-1]["val_acc"] - baseline_val,
     )
 

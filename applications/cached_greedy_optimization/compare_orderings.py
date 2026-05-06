@@ -24,6 +24,7 @@ def main() -> None:
         required=True,
         help="Directories containing results.json from each ordering run",
     )
+    parser.add_argument("--output-json", default="", help="Save results table as JSON")
     args = parser.parse_args()
 
     # Load cache
@@ -140,6 +141,15 @@ def main() -> None:
             row["svc_train"],
             row["svc_val"],
         )
+
+    # Save JSON
+    out_json = args.output_json
+    if not out_json and args.result_dirs:
+        out_json = os.path.join(os.path.dirname(args.result_dirs[0]), "comparison.json")
+    if out_json:
+        with open(out_json, "w") as f:
+            json.dump(results_table, f, indent=4)
+        logger.info("Saved comparison JSON to %s", out_json)
 
 
 if __name__ == "__main__":
