@@ -4,6 +4,7 @@ from sklearn.decomposition import PCA
 from sklearn.svm import LinearSVC
 
 from spiking.evaluation.eval_utils import compute_metrics
+from spiking.evaluation.torch_svc import TorchLinearSVC, _CUDA_AVAILABLE
 
 try:
     from cuml.svm import LinearSVC as CumlLinearSVC
@@ -14,7 +15,9 @@ except ImportError:
 
 
 def _default_svc():
-    """Create a LinearSVC, using cuml on GPU if available."""
+    """Create a LinearSVC, preferring TorchLinearSVC (GPU) > cuML > sklearn."""
+    if _CUDA_AVAILABLE:
+        return TorchLinearSVC(C=1.0)
     if _HAS_CUML:
         return CumlLinearSVC(tol=1e-3, max_iter=10000)
     return LinearSVC(dual=False, tol=1e-3, max_iter=10000)
@@ -29,7 +32,7 @@ def evaluate_classifier(
 ) -> tuple[dict, dict]:
     """Fit a classifier and return (train_metrics, val_metrics).
 
-    Defaults to LinearSVC (cuml GPU if available, else sklearn CPU).
+    Defaults to TorchLinearSVC (GPU) > cuML > sklearn CPU.
     """
     if classifier is None:
         classifier = _default_svc()

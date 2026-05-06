@@ -18,6 +18,7 @@ from .eval_classifier import evaluate_classifier, plot_reduced_features
 from .eval_utils import compute_metrics, plot_confusion_matrix
 from .ridge_column_swap import RidgeColumnSwap
 from .svc_column_swap import SVCColumnSwap
+from .torch_svc import TorchLinearSVC
 
 __all__ = [
     "BinaryFirstSpike",
@@ -39,4 +40,5 @@ __all__ = [
     "plot_reduced_features",
     "RidgeColumnSwap",
     "SVCColumnSwap",
+    "TorchLinearSVC",
 ]
