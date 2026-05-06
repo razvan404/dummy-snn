@@ -32,10 +32,10 @@ def load_backend() -> Any | None:
         extra_ldflags.append("-lgomp")
 
     use_cuda = torch.cuda.is_available()
-    if use_cuda:
-        cuda_src = _CSRC_DIR / "spike_driven_conv.cu"
-        if cuda_src.exists():
-            sources.append(str(cuda_src))
+    has_cuda_src = (_CSRC_DIR / "spike_driven_conv.cu").exists()
+    if use_cuda and has_cuda_src:
+        sources.append(str(_CSRC_DIR / "spike_driven_conv.cu"))
+        extra_cflags.append("-DWITH_CUDA")
 
     try:
         return load(
@@ -43,8 +43,8 @@ def load_backend() -> Any | None:
             sources=sources,
             extra_cflags=extra_cflags,
             extra_ldflags=extra_ldflags,
-            extra_cuda_cflags=["-O3"] if use_cuda else None,
-            with_cuda=use_cuda and (_CSRC_DIR / "spike_driven_conv.cu").exists(),
+            extra_cuda_cflags=["-O3", "--use_fast_math"] if use_cuda else None,
+            with_cuda=use_cuda and has_cuda_src,
             verbose=False,
         )
     except Exception as exc:  # pragma: no cover - build env issues

@@ -94,15 +94,25 @@ def _make_batch(p: Profile, batch: int, seed: int) -> torch.Tensor:
     return torch.where(mask, times, torch.full_like(times, float("inf")))
 
 
-def _time(fn: Callable[[], object], runs: int) -> float:
-    """Best-of-N wall-clock seconds (excludes warm-up)."""
-    fn()  # warm
+def _time(fn: Callable[[], object], runs: int, sync_cuda: bool = False) -> float:
+    """Best-of-N wall-clock seconds (excludes warm-up).
+
+    If ``sync_cuda`` is True, ``torch.cuda.synchronize()`` brackets each call
+    so the timing reflects actual GPU work rather than kernel-launch return.
+    """
+    fn()
+    if sync_cuda:
+        torch.cuda.synchronize()
     samples = []
     for _ in range(runs):
+        if sync_cuda:
+            torch.cuda.synchronize()
         t0 = time.perf_counter()
         fn()
+        if sync_cuda:
+            torch.cuda.synchronize()
         samples.append(time.perf_counter() - t0)
-    return min(samples)  # best-of-N to reduce noise
+    return min(samples)
 
 
 def _max_bin_diff(a: torch.Tensor, b: torch.Tensor, num_bins: int) -> float:
@@ -113,20 +123,22 @@ def _max_bin_diff(a: torch.Tensor, b: torch.Tensor, num_bins: int) -> float:
     return (a[finite] - b[finite]).abs().max().item() * num_bins
 
 
-def bench(profile_key: str, batch_sizes: list[int], runs: int) -> None:
+def bench(profile_key: str, batch_sizes: list[int], runs: int, device: str) -> None:
     p = PROFILES[profile_key]
     print(
-        f"\n=== {p.name} (C={p.in_channels} H={p.H} W={p.W} F={p.num_filters} "
-        f"k={p.kernel_size} bins={p.num_bins} sparsity={p.sparsity}) ==="
+        f"\n=== {p.name} on {device} (C={p.in_channels} H={p.H} W={p.W} "
+        f"F={p.num_filters} k={p.kernel_size} bins={p.num_bins} "
+        f"sparsity={p.sparsity}) ==="
     )
-    layer = _build_layer(p)
+    layer = _build_layer(p).to(device)
+    sync = device == "cuda"
 
     print(
         f"  {'batch':>6}  {'dense ms':>10}  {'sparse ms':>10}  {'speedup':>8}  "
         f"{'dense img/s':>12}  {'sparse img/s':>13}  {'max bins off':>13}"
     )
     for B in batch_sizes:
-        times = _make_batch(p, B, seed=B)
+        times = _make_batch(p, B, seed=B).to(device)
 
         def dense() -> tuple[torch.Tensor, torch.Tensor]:
             return layer._conv2d_accumulate(times)
@@ -140,8 +152,8 @@ def bench(profile_key: str, batch_sizes: list[int], runs: int) -> None:
                 padding=p.padding,
             )
 
-        t_dense = _time(dense, runs)
-        t_sparse = _time(sparse, runs)
+        t_dense = _time(dense, runs, sync_cuda=sync)
+        t_sparse = _time(sparse, runs, sync_cuda=sync)
         speedup = t_dense / t_sparse if t_sparse > 0 else float("inf")
         a_st, _ = dense()
         b_st, _ = sparse()
@@ -169,6 +181,12 @@ def main() -> None:
         default=[1, 8, 32, 128],
     )
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument(
+        "--devices",
+        nargs="+",
+        default=["cpu"] + (["cuda"] if torch.cuda.is_available() else []),
+        choices=["cpu", "cuda"],
+    )
     args = parser.parse_args()
 
     print(
@@ -178,8 +196,9 @@ def main() -> None:
     print(
         f"PyTorch threads: {torch.get_num_threads()}  CUDA: {torch.cuda.is_available()}"
     )
-    for prof in args.profiles:
-        bench(prof, args.batches, args.runs)
+    for dev in args.devices:
+        for prof in args.profiles:
+            bench(prof, args.batches, args.runs, device=dev)
 
 
 if __name__ == "__main__":

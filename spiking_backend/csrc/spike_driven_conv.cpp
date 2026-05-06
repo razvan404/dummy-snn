@@ -317,8 +317,26 @@ at::Tensor spike_driven_conv_accumulate_multi_threshold_cpu(
   return spike_times;
 }
 
+#ifdef WITH_CUDA
+// Forward declarations for the CUDA implementations (defined in
+// spike_driven_conv.cu). Linked together by torch.utils.cpp_extension.
+std::tuple<at::Tensor, at::Tensor> spike_driven_conv_accumulate_cuda(
+    at::Tensor input_times,
+    at::Tensor weights_4d,
+    at::Tensor thresholds,
+    int64_t stride,
+    int64_t padding);
+
+at::Tensor spike_driven_conv_accumulate_multi_threshold_cuda(
+    at::Tensor input_times,
+    at::Tensor weights_4d,
+    at::Tensor thresholds_2d,
+    int64_t stride,
+    int64_t padding);
+#endif
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.doc() = "spike-driven conv accumulator (CPU)";
+  m.doc() = "spike-driven conv accumulator";
   m.def(
       "spike_driven_conv_accumulate_cpu",
       &spike_driven_conv_accumulate_cpu,
@@ -331,10 +349,30 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def(
       "spike_driven_conv_accumulate_multi_threshold_cpu",
       &spike_driven_conv_accumulate_multi_threshold_cpu,
-      "Multi-threshold variant.",
+      "Multi-threshold variant (CPU).",
       py::arg("input_times"),
       py::arg("weights_4d"),
       py::arg("thresholds_2d"),
       py::arg("stride") = 1,
       py::arg("padding") = 0);
+#ifdef WITH_CUDA
+  m.def(
+      "spike_driven_conv_accumulate_cuda",
+      &spike_driven_conv_accumulate_cuda,
+      "Sparse-event spike-driven conv accumulate (CUDA).",
+      py::arg("input_times"),
+      py::arg("weights_4d"),
+      py::arg("thresholds"),
+      py::arg("stride") = 1,
+      py::arg("padding") = 0);
+  m.def(
+      "spike_driven_conv_accumulate_multi_threshold_cuda",
+      &spike_driven_conv_accumulate_multi_threshold_cuda,
+      "Multi-threshold variant (CUDA).",
+      py::arg("input_times"),
+      py::arg("weights_4d"),
+      py::arg("thresholds_2d"),
+      py::arg("stride") = 1,
+      py::arg("padding") = 0);
+#endif
 }

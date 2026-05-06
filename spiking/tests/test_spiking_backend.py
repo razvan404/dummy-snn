@@ -151,6 +151,50 @@ def test_no_finite_inputs_returns_inf() -> None:
     assert (pot == 0).all()
 
 
+@pytest.mark.parametrize("seed", [0, 1])
+@pytest.mark.parametrize("num_bins", [16, 64])
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_cuda_matches_dense(seed: int, num_bins: int) -> None:
+    """CUDA implementation matches the dense reference on GPU tensors."""
+    layer = _make_layer().cuda()
+    times = _make_inputs(seed=seed, num_bins=num_bins).cuda()
+    dense_st, _ = layer._conv2d_accumulate(times)
+    sparse_st, _ = spike_driven_conv_accumulate(
+        times, layer.weights_4d, layer.thresholds, stride=layer.stride, padding=layer.padding
+    )
+    assert dense_st.shape == sparse_st.shape
+    bin_size = 1.0 / num_bins
+    finite = torch.isfinite(dense_st) & torch.isfinite(sparse_st)
+    if finite.any():
+        assert (dense_st[finite] - sparse_st[finite]).abs().max() <= bin_size + 1e-6
+    only_dense = torch.isfinite(dense_st) & torch.isinf(sparse_st)
+    only_sparse = torch.isinf(dense_st) & torch.isfinite(sparse_st)
+    disagreement = (only_dense | only_sparse).float().mean().item()
+    assert disagreement < 0.01
+
+
+@pytest.mark.parametrize("seed", [0, 3])
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_cuda_multi_threshold(seed: int) -> None:
+    layer = _make_layer().cuda()
+    times = _make_inputs(seed=seed, num_bins=16).cuda()
+    fracs = torch.tensor([-0.5, -0.25, 0.0, 0.25], device="cuda")
+    thresholds_2d = layer.thresholds.unsqueeze(0) * (1 + fracs.unsqueeze(1))
+    dense = multi_threshold_conv_accumulate(
+        times, layer.weights_4d, thresholds_2d,
+        stride=layer.stride, padding=layer.padding, device="cuda"
+    )
+    sparse = spike_driven_conv_accumulate_multi_threshold(
+        times, layer.weights_4d, thresholds_2d, stride=layer.stride, padding=layer.padding
+    )
+    sparse = sparse.cpu()  # dense returns on CPU per existing implementation
+    assert dense.shape == sparse.shape
+    bin_size = 1.0 / 16
+    finite = torch.isfinite(dense) & torch.isfinite(sparse)
+    if finite.any():
+        assert (dense[finite] - sparse[finite]).abs().max() <= bin_size + 1e-6
+
+
 def test_dense_stride_handling() -> None:
     """Stride != 1 path still matches dense."""
     num_bins = 16
