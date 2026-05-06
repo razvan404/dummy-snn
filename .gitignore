@@ -14,6 +14,9 @@ archive/
 # Editor / agent state
 .claude/
 
+# torch.utils.cpp_extension JIT build cache
+torch_extensions/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

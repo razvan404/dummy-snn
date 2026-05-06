@@ -113,14 +113,15 @@ def spike_driven_conv_accumulate(
                     cum_potential[b, :, oh, ow] += weights_4d[:, c, ky, kx]
 
         # After all events for this time have been added, check crossings.
+        # No early-exit: we keep accumulating into ``cum_potential`` for
+        # already-spiked positions to match the dense ``F.conv2d`` reference,
+        # which adds contributions for every position regardless of state.
         not_yet = torch.isinf(spike_times)
         crossed = not_yet & (cum_potential >= thresholds_b)
         if crossed.any():
             spike_times = torch.where(
                 crossed, torch.full_like(spike_times, float(t.item())), spike_times
             )
-            if not torch.isinf(spike_times).any():
-                break
 
     return spike_times, cum_potential
 
@@ -185,14 +186,12 @@ def spike_driven_conv_accumulate_multi_threshold(
                     kx = x_p - ow * stride
                     cum_potential[b, :, oh, ow] += weights_4d[:, c, ky, kx]
 
-        # Broadcast threshold check across K variants.
+        # Broadcast threshold check across K variants. No early-exit.
         not_yet = torch.isinf(spike_times)  # (K, B, F, oH, oW)
         crossed = not_yet & (cum_potential.unsqueeze(0) >= thresholds_b)
         if crossed.any():
             spike_times = torch.where(
                 crossed, torch.full_like(spike_times, float(t.item())), spike_times
             )
-            if not torch.isinf(spike_times).any():
-                break
 
     return spike_times
