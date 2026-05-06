@@ -4,6 +4,16 @@ checkpoints/
 logs/
 archive/
 
+# Generated artefacts at repo root
+/*.png
+/*.pdf
+/report.md
+/report_svc.md
+/generate_report_pdf.py
+
+# Editor / agent state
+.claude/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
