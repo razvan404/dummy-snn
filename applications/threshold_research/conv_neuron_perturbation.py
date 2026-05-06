@@ -52,6 +52,7 @@ def multi_threshold_conv_accumulate(
     stride: int,
     padding: int,
     device: torch.device | str = "cpu",
+    use_backend: bool = False,
 ) -> torch.Tensor:
     """Single-pass conv2d accumulation checking multiple threshold sets.
 
@@ -68,6 +69,19 @@ def multi_threshold_conv_accumulate(
     input_times = input_times.to(device)
     weights_4d = weights_4d.to(device)
     thresholds_2d = thresholds_2d.to(device)
+
+    if use_backend:
+        from spiking_backend import (
+            spike_driven_conv_accumulate_multi_threshold,
+        )
+
+        return spike_driven_conv_accumulate_multi_threshold(
+            input_times,
+            weights_4d,
+            thresholds_2d,
+            stride=stride,
+            padding=padding,
+        ).cpu()
 
     B, C, H, W = input_times.shape
     num_fracs, num_filters = thresholds_2d.shape

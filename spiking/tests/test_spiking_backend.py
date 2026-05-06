@@ -195,6 +195,22 @@ def test_cuda_multi_threshold(seed: int) -> None:
         assert (dense[finite] - sparse[finite]).abs().max() <= bin_size + 1e-6
 
 
+def test_layer_use_backend_flag() -> None:
+    """Setting layer.use_backend dispatches _conv2d_accumulate to the kernel."""
+    layer = _make_layer()
+    times = _make_inputs(seed=0, num_bins=16)
+
+    layer.use_backend = False
+    dense_st, _ = layer._conv2d_accumulate(times)
+    layer.use_backend = True
+    backend_st, _ = layer._conv2d_accumulate(times)
+
+    assert dense_st.shape == backend_st.shape
+    finite = torch.isfinite(dense_st) & torch.isfinite(backend_st)
+    if finite.any():
+        assert (dense_st[finite] - backend_st[finite]).abs().max() <= 1.0 / 16 + 1e-6
+
+
 def test_dense_stride_handling() -> None:
     """Stride != 1 path still matches dense."""
     num_bins = 16

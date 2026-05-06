@@ -11,7 +11,14 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
     Inherits from IntegrateAndFireLayer and reuses its inference logic by
     unfolding spatial inputs into patches. Weights are stored as 2D
     (num_filters, C*kH*kW) and viewed as 4D for conv2d in forward().
+
+    Set ``layer.use_backend = True`` after construction (or load) to route
+    ``_conv2d_accumulate`` through the sparse-event ``spiking_backend``
+    kernels. Defaults to False to preserve byte-for-byte parity with saved
+    checkpoints.
     """
+
+    use_backend: bool = False
 
     def __init__(
         self,
@@ -192,6 +199,17 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         :param input_times: (B, C, H, W) tensor of spike times.
         :returns: (spike_times, cum_potential) both (B, F, oH, oW).
         """
+        if getattr(self, "use_backend", False):
+            from spiking_backend import spike_driven_conv_accumulate
+
+            return spike_driven_conv_accumulate(
+                input_times,
+                self.weights_4d,
+                self.thresholds,
+                stride=self.stride,
+                padding=self.padding,
+            )
+
         B, C, H, W = input_times.shape
         oH, oW = self._compute_output_size(H, W)
         dev = input_times.device
