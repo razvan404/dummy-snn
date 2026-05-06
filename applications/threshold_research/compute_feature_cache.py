@@ -134,17 +134,15 @@ def compute_feature_cache(
 
         del all_potentials, cum, not_yet
 
-        # Convert to features per neuron: (F, num_fracs, B, oH, oW) → cache
-        for f_idx in range(num_filters):
-            # (num_fracs, B, oH, oW) → (num_fracs*B, 1, oH, oW)
-            r = result[f_idx].unsqueeze(2)  # (num_fracs, B, 1, oH, oW)
-            flat_4d = r.reshape(num_fracs * B, 1, oH, oW).cpu()
-            feat = spike_times_to_features(flat_4d, t_target=t_target)
-            pooled = sum_pool_features(feat, pool_size)
-            cache[f_idx, :, start:end, :] = (
-                pooled.flatten(1).numpy().reshape(num_fracs, B, flat_dim)
-            )
-        del result
+        # GPU-resident feature reduction + pool, single host transfer per chunk.
+        # Treat (F, num_fracs, B) as an outer batch so TargetRelative/ScaledInversion
+        # see shape (N, 1, oH, oW) — matching the previous per-filter call semantics.
+        flat_gpu = result.reshape(num_filters * num_fracs * B, 1, oH, oW)
+        feat_gpu = spike_times_to_features(flat_gpu, t_target=t_target)
+        pooled_gpu = sum_pool_features(feat_gpu, pool_size)
+        pooled_gpu = pooled_gpu.reshape(num_filters, num_fracs, B, flat_dim)
+        cache[:, :, start:end, :] = pooled_gpu.cpu().numpy()
+        del result, flat_gpu, feat_gpu, pooled_gpu
 
         if (chunk_idx + 1) % 20 == 0 or chunk_idx == n_chunks - 1:
             elapsed = time.time() - t0
@@ -163,7 +161,9 @@ def compute_feature_cache(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Precompute per-neuron feature cache")
-    parser.add_argument("--dataset", default="cifar10", choices=["cifar10"])
+    parser.add_argument(
+        "--dataset", default="cifar10", choices=["cifar10", "fashion_mnist"]
+    )
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--num-filters", type=int, default=256)
     parser.add_argument("--t-obj", type=float, default=0.7)
