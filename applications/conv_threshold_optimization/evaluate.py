@@ -62,7 +62,7 @@ def main() -> None:
         "--dataset",
         type=str,
         default="cifar10",
-        choices=["mnist", "cifar10"],
+        choices=["mnist", "cifar10", "fashion_mnist"],
     )
     parser.add_argument("--num-filters", type=int, default=None)
     parser.add_argument("--t-obj", type=float, default=None)

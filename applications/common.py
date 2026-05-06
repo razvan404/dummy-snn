@@ -16,12 +16,12 @@ def set_seed(seed: int):
         torch.cuda.manual_seed(seed)
 
 
-def resolve_model_dir(
-    dataset: str, num_filters: int, t_obj: float, seed: int
-) -> str:
+def resolve_model_dir(dataset: str, num_filters: int, t_obj: float, seed: int) -> str:
     """Compute model directory from experiment parameters."""
-    base = "cifar10_whitened" if dataset == "cifar10" else dataset
-    return f"logs/{base}/sweep/nf_{num_filters}/tobj_{t_obj:.2f}/seed_{seed}"
+    if dataset == "cifar10":
+        base = "cifar10_whitened"
+        return f"logs/{base}/sweep/nf_{num_filters}/tobj_{t_obj:.2f}/seed_{seed}"
+    return f"logs/{dataset}/nf_{num_filters}/tobj_{t_obj:.2f}/seed_{seed}"
 
 
 def resolve_params(args) -> tuple[int, float, str]:
@@ -42,6 +42,19 @@ def load_split_data(dataset: str) -> tuple[dict, dict]:
         train_ds = Cifar10WhitenedDataset("data", "train")
         test_ds = Cifar10WhitenedDataset(
             "data", "test", kernels=train_ds.kernels, mean=train_ds.mean
+        )
+        return (
+            {"images": train_ds.all_times, "labels": train_ds.outputs},
+            {"images": test_ds.all_times, "labels": test_ds.outputs},
+        )
+    if dataset == "fashion_mnist":
+        from applications.datasets import FashionMnistDataset
+
+        train_ds = FashionMnistDataset(
+            "data", "train", cache_path="data/fashion_mnist_cache/train_dog.pt"
+        )
+        test_ds = FashionMnistDataset(
+            "data", "test", cache_path="data/fashion_mnist_cache/test_dog.pt"
         )
         return (
             {"images": train_ds.all_times, "labels": train_ds.outputs},
