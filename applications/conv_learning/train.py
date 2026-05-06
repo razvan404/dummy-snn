@@ -21,6 +21,7 @@ from spiking import (
     WinnerTakesAll,
     CompetitiveThresholdAdaptation,
     TargetTimestampAdaptation,
+    WeightMeanAdaptation,
     save_model,
 )
 
@@ -54,22 +55,46 @@ def _create_stdp(variant: str, params: dict) -> MultiplicativeSTDP | BiologicalS
 
 
 def _create_threshold_adaptation(params: dict) -> SequentialThresholdAdaptation:
-    """Create threshold adaptation (competitive + target timestamp)."""
-    return SequentialThresholdAdaptation(
-        [
-            CompetitiveThresholdAdaptation(
-                min_threshold=params["min_threshold"],
-                learning_rate=params["threshold_lr"],
-                decay_factor=params["annealing"],
-            ),
-            TargetTimestampAdaptation(
-                target_timestamp=params["target_timestamp"],
-                min_threshold=params["min_threshold"],
-                learning_rate=params["threshold_lr"],
-                decay_factor=params["annealing"],
-            ),
-        ]
+    """Create threshold adaptation.
+
+    Modes (selected via ``params['threshold_mode']``):
+      - ``"falez"`` (default): competitive + target-timestamp (Falez 2020).
+      - ``"weight_mean"``: competitive + per-filter weight-mean homeostasis
+        (target_mean defaults to 0.5; configurable via ``params['target_mean']``).
+    """
+    mode = params.get("threshold_mode", "falez")
+    competitive = CompetitiveThresholdAdaptation(
+        min_threshold=params["min_threshold"],
+        learning_rate=params["threshold_lr"],
+        decay_factor=params["annealing"],
     )
+    if mode == "falez":
+        return SequentialThresholdAdaptation(
+            [
+                competitive,
+                TargetTimestampAdaptation(
+                    target_timestamp=params["target_timestamp"],
+                    min_threshold=params["min_threshold"],
+                    learning_rate=params["threshold_lr"],
+                    decay_factor=params["annealing"],
+                ),
+            ]
+        )
+    if mode == "weight_mean":
+        return SequentialThresholdAdaptation(
+            [
+                competitive,
+                WeightMeanAdaptation(
+                    min_threshold=params["min_threshold"],
+                    learning_rate=params["threshold_lr"],
+                    target_mean=params.get("target_mean", 0.5),
+                    decay_factor=params["annealing"],
+                    max_threshold=params.get("max_threshold"),
+                    use_winner=params.get("use_winner_mean", False),
+                ),
+            ]
+        )
+    raise ValueError(f"Unknown threshold_mode: {mode!r}")
 
 
 def _save_filter_grid(weights_4d: torch.Tensor, path: str, ncols: int = 16):
@@ -384,6 +409,30 @@ if __name__ == "__main__":
     )
     parser.add_argument("--base-dir", type=str, default=None)
     parser.add_argument(
+        "--threshold-mode",
+        type=str,
+        default="falez",
+        choices=["falez", "weight_mean"],
+        help="Threshold-adaptation rule (default: 'falez' = competitive + target-timestamp).",
+    )
+    parser.add_argument(
+        "--target-mean",
+        type=float,
+        default=0.5,
+        help="Target per-filter mean weight when --threshold-mode=weight_mean.",
+    )
+    parser.add_argument(
+        "--max-threshold",
+        type=float,
+        default=None,
+        help="Upper clamp on thresholds (weight_mean mode). Default: no cap.",
+    )
+    parser.add_argument(
+        "--use-winner-mean",
+        action="store_true",
+        help="weight_mean: drive ALL thresholds by the winner's mean weight (Falez Eq 6 style).",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Retrain even if model already exists",
@@ -396,10 +445,24 @@ if __name__ == "__main__":
 
     if args.base_dir is None:
         dir_name = "cifar10_whitened" if args.dataset == "cifar10" else args.dataset
-        args.base_dir = f"logs/{dir_name}/sweep"
+        suffix = "_wmean" if args.threshold_mode == "weight_mean" else ""
+        args.base_dir = f"logs/{dir_name}/sweep{suffix}"
+
+    overrides = {"threshold_mode": args.threshold_mode}
+    if args.threshold_mode == "weight_mean":
+        overrides["target_mean"] = args.target_mean
+        if args.max_threshold is not None:
+            overrides["max_threshold"] = args.max_threshold
+        if args.use_winner_mean:
+            overrides["use_winner_mean"] = True
+
+    if args.threshold_mode == "weight_mean":
+        param_seg = f"wtarget_{args.target_mean:.2f}"
+    else:
+        param_seg = f"tobj_{t:.2f}"
 
     for seed in args.seeds:
-        output_dir = f"{args.base_dir}/nf_{nf}/tobj_{t:.2f}/seed_{seed}"
+        output_dir = f"{args.base_dir}/nf_{nf}/{param_seg}/seed_{seed}"
         if not args.force and os.path.exists(f"{output_dir}/model.pth"):
             logger.info(
                 "Skipping seed %d (already trained, use --force to retrain)", seed
@@ -413,4 +476,5 @@ if __name__ == "__main__":
             num_epochs=args.num_epochs,
             processed_dir=args.processed_dir,
             output_dir=output_dir,
+            params_override=overrides,
         )
