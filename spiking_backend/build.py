@@ -22,9 +22,9 @@ def load_backend() -> Any | None:
         extra_ldflags.append("-lgomp")
 
     use_cuda = torch.cuda.is_available()
-    has_cuda_src = (_CSRC_DIR / "spike_driven_conv.cu").exists()
+    has_cuda_src = (_CSRC_DIR / "spike_driven_conv_cuda.cu").exists()
     if use_cuda and has_cuda_src:
-        sources.append(str(_CSRC_DIR / "spike_driven_conv.cu"))
+        sources.append(str(_CSRC_DIR / "spike_driven_conv_cuda.cu"))
         extra_cflags.append("-DWITH_CUDA")
 
     try:

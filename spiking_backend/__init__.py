@@ -7,11 +7,14 @@ import torch
 from . import reference
 
 try:
-    from .build import load_backend
-
-    _ext = load_backend()
-except Exception:
-    _ext = None
+    from . import _ext as _ext_module
+    _ext = _ext_module
+except ImportError:
+    try:
+        from .build import load_backend
+        _ext = load_backend()
+    except Exception:
+        _ext = None
 
 
 def is_compiled_available() -> bool:

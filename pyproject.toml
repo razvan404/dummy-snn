@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=64", "wheel", "torch>=2.5", "ninja"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "dummy-snn"
 version = "0.1.0"
@@ -35,6 +39,13 @@ dev = [
     "black>=24.0",
     "ruff>=0.8",
 ]
+
+[tool.setuptools.packages.find]
+include = ["spiking*", "spiking_backend*", "applications*"]
+exclude = ["benchmarks*", "scripts*", "logs*", "data*", "checkpoints*"]
+
+[tool.setuptools.package-data]
+spiking_backend = ["csrc/*.cpp", "csrc/*.cu", "csrc/*.h"]
 
 [tool.black]
 target-version = ["py310"]
