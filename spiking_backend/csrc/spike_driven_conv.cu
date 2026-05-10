@@ -1,18 +1,3 @@
-// CUDA sparse-event spike-driven conv accumulator.
-//
-// Algorithm:
-//   For each unique input time t (ascending), one kernel launch processes
-//   *all* events firing at exactly t. Each event spawns a CUDA block; threads
-//   within a block fan out across (filter, ky, kx). Per-thread inner loop
-//   updates the cumulative potential at the affected output position via
-//   atomicAdd, and records the first-crossing spike time in the only
-//   ordering where atomicAdd makes the value cross the threshold.
-//
-// Why one launch per time: events at different times have different t values
-// for the spike-time write, and within a single launch the atomicAdd order is
-// non-deterministic. Sequencing by time guarantees that whatever ordering
-// CUDA picks within one t, the spike time recorded is t.
-
 #include <torch/extension.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -26,43 +11,36 @@
 namespace {
 
 constexpr float kInf = std::numeric_limits<float>::infinity();
+constexpr int kWarpSize = 32;
+constexpr int kGatherMaxBlock = 256;
+constexpr int kGatherSmemBudgetBytes = 32 * 1024;
 
-__device__ inline int ceil_div(int a, int b) { return (a + b - 1) / b; }
-
-__device__ inline int affected_lo(int pos_padded, int kernel, int stride) {
-  int n = pos_padded - kernel + 1;
-  if (n <= 0) return 0;
-  return (n + stride - 1) / stride;
+__device__ inline int affected_lo(int p, int kernel, int stride) {
+  int n = p - kernel + 1;
+  return n <= 0 ? 0 : (n + stride - 1) / stride;
 }
 
-__device__ inline int affected_hi(int pos_padded, int stride, int out_size) {
-  int hi = pos_padded / stride + 1;
+__device__ inline int affected_hi(int p, int stride, int out_size) {
+  int hi = p / stride + 1;
   return hi < out_size ? hi : out_size;
 }
 
-// One block per event at this time t. blockDim.x = F (one thread per filter).
-__global__ void event_scatter_single(
-    const int4* __restrict__ events,  // (N_events,) packed b,c,y,x
-    int N_events,
-    float t,
-    const float* __restrict__ W,       // (F, C, kH, kW) row-major
-    const float* __restrict__ th,      // (F,)
-    int B, int C, int H, int W_W,
-    int F, int kH, int kW,
-    int stride, int pad,
-    int oH, int oW,
-    float* __restrict__ spike_times,    // (B, F, oH, oW)
-    float* __restrict__ cum_potential   // (B, F, oH, oW)
+// USE_DONE: monotonic per-output skip flag; stale reads cost ≤1 extra add.
+template <bool USE_DONE>
+__global__ void event_scatter_single_t(
+    const int4* __restrict__ events, int N_events, float t,
+    const float* __restrict__ W, const float* __restrict__ th,
+    int B, int C, int H, int W_W, int F, int kH, int kW,
+    int stride, int pad, int oH, int oW,
+    float* __restrict__ spike_times,
+    float* __restrict__ cum_potential,
+    uint8_t* __restrict__ done
 ) {
   const int eid = blockIdx.x;
   if (eid >= N_events) return;
   const int4 e = events[eid];
-  const int b = e.x;
-  const int c = e.y;
-  const int y = e.z;
-  const int x = e.w;
-  const int yp = y + pad;
-  const int xp = x + pad;
+  const int b = e.x, c = e.y, y = e.z, x = e.w;
+  const int yp = y + pad, xp = x + pad;
   const int oh_lo = affected_lo(yp, kH, stride);
   const int oh_hi = affected_hi(yp, stride, oH);
   const int ow_lo = affected_lo(xp, kW, stride);
@@ -72,53 +50,40 @@ __global__ void event_scatter_single(
   const int f = threadIdx.x;
   if (f >= F) return;
   const float th_f = th[f];
-
   const int oHoW = oH * oW;
-  const int FoHoW = F * oHoW;
-  // weights row offset for this (filter, channel)
   const float* W_fc = W + ((f * C) + c) * kH * kW;
   float* pot_b_f = cum_potential + (b * F + f) * oHoW;
   float* st_b_f = spike_times + (b * F + f) * oHoW;
-  (void)FoHoW;
+  uint8_t* done_b_f = USE_DONE ? done + (b * F + f) * oHoW : nullptr;
 
   for (int oh = oh_lo; oh < oh_hi; ++oh) {
     const int ky = yp - oh * stride;
     for (int ow = ow_lo; ow < ow_hi; ++ow) {
-      const int kx = xp - ow * stride;
-      const float w = W_fc[ky * kW + kx];
       const int p_off = oh * oW + ow;
+      if constexpr (USE_DONE) if (done_b_f[p_off]) continue;
+      const float w = W_fc[ky * kW + (xp - ow * stride)];
       float old_pot = atomicAdd(pot_b_f + p_off, w);
-      float new_pot = old_pot + w;
-      if (old_pot < th_f && new_pot >= th_f) {
-        // Race-safe: only the atomicAdd that crossed wins this branch.
+      if (old_pot < th_f && old_pot + w >= th_f) {
         st_b_f[p_off] = t;
+        if constexpr (USE_DONE) done_b_f[p_off] = 1;
       }
     }
   }
 }
 
 __global__ void event_scatter_multi(
-    const int4* __restrict__ events,
-    int N_events,
-    float t,
-    const float* __restrict__ W,
-    const float* __restrict__ th_2d,   // (K, F)
-    int B, int C, int H, int W_W,
-    int F, int kH, int kW,
-    int stride, int pad,
-    int oH, int oW, int K,
-    float* __restrict__ spike_times_K,  // (K, B, F, oH, oW)
-    float* __restrict__ cum_potential   // (B, F, oH, oW)
+    const int4* __restrict__ events, int N_events, float t,
+    const float* __restrict__ W, const float* __restrict__ th_2d,
+    int B, int C, int H, int W_W, int F, int kH, int kW,
+    int stride, int pad, int oH, int oW, int K,
+    float* __restrict__ spike_times_K,
+    float* __restrict__ cum_potential
 ) {
   const int eid = blockIdx.x;
   if (eid >= N_events) return;
   const int4 e = events[eid];
-  const int b = e.x;
-  const int c = e.y;
-  const int y = e.z;
-  const int x = e.w;
-  const int yp = y + pad;
-  const int xp = x + pad;
+  const int b = e.x, c = e.y, y = e.z, x = e.w;
+  const int yp = y + pad, xp = x + pad;
   const int oh_lo = affected_lo(yp, kH, stride);
   const int oh_hi = affected_hi(yp, stride, oH);
   const int ow_lo = affected_lo(xp, kW, stride);
@@ -127,65 +92,184 @@ __global__ void event_scatter_multi(
 
   const int f = threadIdx.x;
   if (f >= F) return;
-
   const int oHoW = oH * oW;
-  const int FoHoW = F * oHoW;
   const float* W_fc = W + ((f * C) + c) * kH * kW;
   float* pot_b_f = cum_potential + (b * F + f) * oHoW;
 
   for (int oh = oh_lo; oh < oh_hi; ++oh) {
     const int ky = yp - oh * stride;
     for (int ow = ow_lo; ow < ow_hi; ++ow) {
-      const int kx = xp - ow * stride;
-      const float w = W_fc[ky * kW + kx];
       const int p_off = oh * oW + ow;
+      const float w = W_fc[ky * kW + (xp - ow * stride)];
       float old_pot = atomicAdd(pot_b_f + p_off, w);
       float new_pot = old_pot + w;
-      // Test all K threshold sets — only the crosser triggers the write.
       for (int k = 0; k < K; ++k) {
         float th_kf = th_2d[k * F + f];
         if (old_pot < th_kf && new_pot >= th_kf) {
-          float* st_kbf = spike_times_K + (((int64_t)k * B + b) * F + f) * oHoW;
-          st_kbf[p_off] = t;
+          spike_times_K[(((int64_t)k * B + b) * F + f) * oHoW + p_off] = t;
         }
       }
     }
   }
 }
 
+__device__ __forceinline__ void gather_bins(
+    const float* __restrict__ input_times,
+    const float* __restrict__ weights,
+    int b, int C, int H, int W, int f, int kH, int kW,
+    int oh, int ow, int stride, int pad, int num_bins,
+    float* __restrict__ my_bins
+) {
+  for (int i = 0; i < num_bins; ++i) my_bins[i] = 0.0f;
+  for (int c = 0; c < C; ++c) {
+    for (int ky = 0; ky < kH; ++ky) {
+      int y = oh * stride + ky - pad;
+      if (y < 0 || y >= H) continue;
+      for (int kx = 0; kx < kW; ++kx) {
+        int x = ow * stride + kx - pad;
+        if (x < 0 || x >= W) continue;
+        float t = input_times[(((size_t)b * C + c) * H + y) * W + x];
+        if (!isfinite(t)) continue;
+        int bin = (int)(t * num_bins);
+        bin = bin < 0 ? 0 : (bin >= num_bins ? num_bins - 1 : bin);
+        my_bins[bin] += weights[(((size_t)f * C + c) * kH + ky) * kW + kx];
+      }
+    }
+  }
+}
+
+template <bool WITH_TOTAL>
+__device__ __forceinline__ float scan_bins(
+    const float* my_bins, int num_bins, float th, float* total_out
+) {
+  float cum = 0.0f, spike_t = kInf;
+  if constexpr (WITH_TOTAL) {
+    for (int bin = 0; bin < num_bins; ++bin) {
+      cum += my_bins[bin];
+      if (spike_t == kInf && cum >= th) spike_t = (float)bin / (float)num_bins;
+    }
+    *total_out = cum;
+    return spike_t;
+  } else {
+    for (int bin = 0; bin < num_bins; ++bin) {
+      cum += my_bins[bin];
+      if (cum >= th) return (float)bin / (float)num_bins;
+    }
+    return kInf;
+  }
+}
+
+template <bool WITH_POT>
+__global__ void gather_first_spike_kernel_t(
+    const float* __restrict__ input_times,
+    const float* __restrict__ weights,
+    const float* __restrict__ thresholds,
+    int B, int C, int H, int W, int F, int kH, int kW,
+    int stride, int pad, int oH, int oW, int num_bins,
+    float* __restrict__ spike_times,
+    float* __restrict__ cum_potential
+) {
+  extern __shared__ float smem[];
+  const int tid = threadIdx.x;
+  const int idx = blockIdx.x * blockDim.x + tid;
+  if (idx >= B * F * oH * oW) return;
+
+  const int ow = idx % oW;
+  const int oh = (idx / oW) % oH;
+  const int f = (idx / (oW * oH)) % F;
+  const int b = idx / (oW * oH * F);
+
+  float* my_bins = smem + (size_t)tid * num_bins;
+  gather_bins(input_times, weights, b, C, H, W, f, kH, kW, oh, ow,
+              stride, pad, num_bins, my_bins);
+  float total;
+  spike_times[idx] = scan_bins<WITH_POT>(my_bins, num_bins, thresholds[f], &total);
+  if constexpr (WITH_POT) cum_potential[idx] = total;
+}
+
+template <bool WITH_POT>
+__global__ void gather_first_spike_multi_kernel_t(
+    const float* __restrict__ input_times,
+    const float* __restrict__ weights,
+    const float* __restrict__ thresholds_2d,
+    int B, int C, int H, int W, int F, int kH, int kW,
+    int stride, int pad, int oH, int oW, int num_bins, int K,
+    float* __restrict__ spike_times_K,
+    float* __restrict__ cum_potential
+) {
+  extern __shared__ float smem[];
+  const int tid = threadIdx.x;
+  const int idx = blockIdx.x * blockDim.x + tid;
+  if (idx >= B * F * oH * oW) return;
+
+  const int ow = idx % oW;
+  const int oh = (idx / oW) % oH;
+  const int f = (idx / (oW * oH)) % F;
+  const int b = idx / (oW * oH * F);
+
+  float* my_bins = smem + (size_t)tid * num_bins;
+  gather_bins(input_times, weights, b, C, H, W, f, kH, kW, oh, ow,
+              stride, pad, num_bins, my_bins);
+
+  if constexpr (WITH_POT) {
+    float total = 0.0f;
+    for (int bin = 0; bin < num_bins; ++bin) total += my_bins[bin];
+    cum_potential[idx] = total;
+  }
+  const size_t FoHoW = (size_t)F * oH * oW;
+  for (int k = 0; k < K; ++k) {
+    spike_times_K[(size_t)k * B * FoHoW + (size_t)idx] = scan_bins<false>(
+        my_bins, num_bins, thresholds_2d[(size_t)k * F + f], nullptr);
+  }
+}
+
+// Sort events by time once + single host sync for offsets/unique_t.
+struct SortedEvents {
+  at::Tensor sorted_events, uniq_t_cpu, offsets_cpu;
+  bool empty;
+};
+
+SortedEvents prepare_sorted_events(const at::Tensor& in_c) {
+  auto finite_mask = at::isfinite(in_c);
+  if (!finite_mask.any().item<bool>()) return {{}, {}, {}, true};
+  auto coords = at::nonzero(finite_mask).to(at::kInt);
+  auto times = in_c.masked_select(finite_mask);
+  auto [sorted_t, sort_idx] = at::sort(times);
+  auto sorted_events = coords.index_select(0, sort_idx).contiguous();
+  auto uniq = at::unique_consecutive(sorted_t, false, true);
+  auto offsets = at::cumsum(std::get<2>(uniq), 0);
+  return {sorted_events, std::get<0>(uniq).to(at::kCPU), offsets.to(at::kCPU), false};
+}
+
+static int pick_gather_block(int num_bins) {
+  int t = kGatherSmemBudgetBytes / (num_bins * (int)sizeof(float));
+  if (t > kGatherMaxBlock) t = kGatherMaxBlock;
+  t = (t / kWarpSize) * kWarpSize;
+  return t < kWarpSize ? kWarpSize : t;
+}
+
 }  // namespace
 
 std::tuple<at::Tensor, at::Tensor> spike_driven_conv_accumulate_cuda(
-    at::Tensor input_times,
-    at::Tensor weights_4d,
-    at::Tensor thresholds,
-    int64_t stride,
-    int64_t padding) {
-  TORCH_CHECK(input_times.is_cuda(), "input_times must be on CUDA");
-  TORCH_CHECK(weights_4d.is_cuda(), "weights_4d must be on CUDA");
-  TORCH_CHECK(thresholds.is_cuda(), "thresholds must be on CUDA");
-  TORCH_CHECK(input_times.scalar_type() == at::kFloat, "fp32 only");
-  TORCH_CHECK(weights_4d.scalar_type() == at::kFloat, "fp32 only");
-  TORCH_CHECK(thresholds.scalar_type() == at::kFloat, "fp32 only");
-  TORCH_CHECK(input_times.dim() == 4, "input_times must be (B,C,H,W)");
-  TORCH_CHECK(weights_4d.dim() == 4, "weights_4d must be (F,C,kH,kW)");
-  TORCH_CHECK(thresholds.dim() == 1, "thresholds must be (F,)");
+    at::Tensor input_times, at::Tensor weights_4d, at::Tensor thresholds,
+    int64_t stride, int64_t padding, bool compute_cum_potential
+) {
+  TORCH_CHECK(input_times.is_cuda() && weights_4d.is_cuda() && thresholds.is_cuda(),
+              "tensors must be on CUDA");
+  TORCH_CHECK(input_times.scalar_type() == at::kFloat
+              && weights_4d.scalar_type() == at::kFloat
+              && thresholds.scalar_type() == at::kFloat, "fp32 only");
+  TORCH_CHECK(input_times.dim() == 4 && weights_4d.dim() == 4 && thresholds.dim() == 1,
+              "input (B,C,H,W), weights (F,C,kH,kW), thresholds (F,)");
 
   const at::cuda::OptionalCUDAGuard guard(input_times.device());
-
   auto in_c = input_times.contiguous();
   auto W_c = weights_4d.contiguous();
   auto th_c = thresholds.contiguous();
 
-  const int B = in_c.size(0);
-  const int C = in_c.size(1);
-  const int H = in_c.size(2);
-  const int W = in_c.size(3);
-  const int F = W_c.size(0);
-  TORCH_CHECK(W_c.size(1) == C, "weights C must match input C");
-  const int kH = W_c.size(2);
-  const int kW = W_c.size(3);
-  TORCH_CHECK(th_c.size(0) == F, "thresholds size must equal F");
+  const int B = in_c.size(0), C = in_c.size(1), H = in_c.size(2), W = in_c.size(3);
+  const int F = W_c.size(0), kH = W_c.size(2), kW = W_c.size(3);
+  TORCH_CHECK(W_c.size(1) == C && th_c.size(0) == F, "shape mismatch");
   const int oH = (H + 2 * padding - kH) / stride + 1;
   const int oW = (W + 2 * padding - kW) / stride + 1;
   TORCH_CHECK(oH > 0 && oW > 0, "non-positive output");
@@ -193,77 +277,57 @@ std::tuple<at::Tensor, at::Tensor> spike_driven_conv_accumulate_cuda(
   auto opts = in_c.options();
   auto spike_times = at::full({B, F, oH, oW}, kInf, opts);
   auto cum_potential = at::zeros({B, F, oH, oW}, opts);
+  at::Tensor done = compute_cum_potential
+      ? at::Tensor{} : at::zeros({B, F, oH, oW}, opts.dtype(at::kByte));
 
-  // Compute the global set of unique input times across the batch.
-  auto finite_mask = at::isfinite(in_c);
-  if (!finite_mask.any().item<bool>()) {
-    return {spike_times, cum_potential};
-  }
-  auto finite_times = in_c.masked_select(finite_mask);
-  // torch::unique returns sorted ascending unique values
-  auto unique_t = std::get<0>(at::_unique(finite_times, /*sorted=*/true));
-  const int n_times = unique_t.size(0);
+  auto ev = prepare_sorted_events(in_c);
+  if (ev.empty) return {spike_times, cum_potential};
 
+  const int n_unique = (int)ev.uniq_t_cpu.size(0);
+  const int64_t* offsets_p = ev.offsets_cpu.data_ptr<int64_t>();
+  const float* uniq_t_p = ev.uniq_t_cpu.data_ptr<float>();
+  const int4* events_p = reinterpret_cast<const int4*>(ev.sorted_events.data_ptr<int>());
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  for (int ti = 0; ti < n_times; ++ti) {
-    float t = unique_t[ti].item<float>();
-    auto mask_t = (in_c == t);
-    auto event_idx = at::nonzero(mask_t).to(at::kInt);  // (N_events, 4)
-    int N_events = event_idx.size(0);
-    if (N_events == 0) continue;
-
-    // Pack into int4 for the kernel.
-    auto packed = event_idx.contiguous();
-    const int4* events_p =
-        reinterpret_cast<const int4*>(packed.data_ptr<int>());
-
-    const int threads = F;  // one thread per filter
-    const int blocks = N_events;
-    event_scatter_single<<<blocks, threads, 0, stream>>>(
-        events_p, N_events, t,
-        W_c.data_ptr<float>(),
-        th_c.data_ptr<float>(),
-        B, C, H, W, F, kH, kW,
-        (int)stride, (int)padding,
-        oH, oW,
-        spike_times.data_ptr<float>(),
-        cum_potential.data_ptr<float>());
+  int prev_off = 0;
+  for (int ti = 0; ti < n_unique; ++ti) {
+    int end_off = (int)offsets_p[ti];
+    int n_evt = end_off - prev_off;
+    if (n_evt > 0) {
+      auto launch = [&](auto kernel, uint8_t* done_p) {
+        kernel<<<n_evt, F, 0, stream>>>(
+            events_p + prev_off, n_evt, uniq_t_p[ti],
+            W_c.data_ptr<float>(), th_c.data_ptr<float>(),
+            B, C, H, W, F, kH, kW, (int)stride, (int)padding, oH, oW,
+            spike_times.data_ptr<float>(), cum_potential.data_ptr<float>(), done_p);
+      };
+      if (compute_cum_potential) launch(event_scatter_single_t<false>, nullptr);
+      else                       launch(event_scatter_single_t<true>, done.data_ptr<uint8_t>());
+    }
+    prev_off = end_off;
   }
-
   return {spike_times, cum_potential};
 }
 
 at::Tensor spike_driven_conv_accumulate_multi_threshold_cuda(
-    at::Tensor input_times,
-    at::Tensor weights_4d,
-    at::Tensor thresholds_2d,
-    int64_t stride,
-    int64_t padding) {
+    at::Tensor input_times, at::Tensor weights_4d, at::Tensor thresholds_2d,
+    int64_t stride, int64_t padding
+) {
   TORCH_CHECK(input_times.is_cuda(), "input_times must be on CUDA");
-  TORCH_CHECK(input_times.scalar_type() == at::kFloat, "fp32 only");
-  TORCH_CHECK(weights_4d.scalar_type() == at::kFloat, "fp32 only");
-  TORCH_CHECK(thresholds_2d.scalar_type() == at::kFloat, "fp32 only");
-  TORCH_CHECK(input_times.dim() == 4, "input_times must be (B,C,H,W)");
-  TORCH_CHECK(weights_4d.dim() == 4, "weights_4d must be (F,C,kH,kW)");
-  TORCH_CHECK(thresholds_2d.dim() == 2, "thresholds must be (K,F)");
+  TORCH_CHECK(input_times.scalar_type() == at::kFloat
+              && weights_4d.scalar_type() == at::kFloat
+              && thresholds_2d.scalar_type() == at::kFloat, "fp32 only");
+  TORCH_CHECK(input_times.dim() == 4 && weights_4d.dim() == 4 && thresholds_2d.dim() == 2,
+              "input (B,C,H,W), weights (F,C,kH,kW), thresholds (K,F)");
 
   const at::cuda::OptionalCUDAGuard guard(input_times.device());
-
   auto in_c = input_times.contiguous();
   auto W_c = weights_4d.contiguous();
   auto th_c = thresholds_2d.contiguous();
 
-  const int B = in_c.size(0);
-  const int C = in_c.size(1);
-  const int H = in_c.size(2);
-  const int W = in_c.size(3);
-  const int F = W_c.size(0);
-  const int kH = W_c.size(2);
-  const int kW = W_c.size(3);
-  const int K = th_c.size(0);
-  TORCH_CHECK(W_c.size(1) == C, "weights C must match input C");
-  TORCH_CHECK(th_c.size(1) == F, "threshold last dim must equal F");
+  const int B = in_c.size(0), C = in_c.size(1), H = in_c.size(2), W = in_c.size(3);
+  const int F = W_c.size(0), kH = W_c.size(2), kW = W_c.size(3), K = th_c.size(0);
+  TORCH_CHECK(W_c.size(1) == C && th_c.size(1) == F, "shape mismatch");
   const int oH = (H + 2 * padding - kH) / stride + 1;
   const int oW = (W + 2 * padding - kW) / stride + 1;
 
@@ -271,37 +335,114 @@ at::Tensor spike_driven_conv_accumulate_multi_threshold_cuda(
   auto spike_times = at::full({K, B, F, oH, oW}, kInf, opts);
   auto cum_potential = at::zeros({B, F, oH, oW}, opts);
 
-  auto finite_mask = at::isfinite(in_c);
-  if (!finite_mask.any().item<bool>()) return spike_times;
-  auto finite_times = in_c.masked_select(finite_mask);
-  auto unique_t = std::get<0>(at::_unique(finite_times, /*sorted=*/true));
-  const int n_times = unique_t.size(0);
+  auto ev = prepare_sorted_events(in_c);
+  if (ev.empty) return spike_times;
 
+  const int n_unique = (int)ev.uniq_t_cpu.size(0);
+  const int64_t* offsets_p = ev.offsets_cpu.data_ptr<int64_t>();
+  const float* uniq_t_p = ev.uniq_t_cpu.data_ptr<float>();
+  const int4* events_p = reinterpret_cast<const int4*>(ev.sorted_events.data_ptr<int>());
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  for (int ti = 0; ti < n_times; ++ti) {
-    float t = unique_t[ti].item<float>();
-    auto mask_t = (in_c == t);
-    auto event_idx = at::nonzero(mask_t).to(at::kInt);
-    int N_events = event_idx.size(0);
-    if (N_events == 0) continue;
-
-    auto packed = event_idx.contiguous();
-    const int4* events_p =
-        reinterpret_cast<const int4*>(packed.data_ptr<int>());
-
-    const int threads = F;
-    const int blocks = N_events;
-    event_scatter_multi<<<blocks, threads, 0, stream>>>(
-        events_p, N_events, t,
-        W_c.data_ptr<float>(),
-        th_c.data_ptr<float>(),
-        B, C, H, W, F, kH, kW,
-        (int)stride, (int)padding,
-        oH, oW, K,
-        spike_times.data_ptr<float>(),
-        cum_potential.data_ptr<float>());
+  int prev_off = 0;
+  for (int ti = 0; ti < n_unique; ++ti) {
+    int end_off = (int)offsets_p[ti];
+    int n_evt = end_off - prev_off;
+    if (n_evt > 0) {
+      event_scatter_multi<<<n_evt, F, 0, stream>>>(
+          events_p + prev_off, n_evt, uniq_t_p[ti],
+          W_c.data_ptr<float>(), th_c.data_ptr<float>(),
+          B, C, H, W, F, kH, kW, (int)stride, (int)padding, oH, oW, K,
+          spike_times.data_ptr<float>(), cum_potential.data_ptr<float>());
+    }
+    prev_off = end_off;
   }
-
   return spike_times;
+}
+
+std::tuple<at::Tensor, at::Tensor> first_spike_times_cuda(
+    at::Tensor input_times, at::Tensor weights_4d, at::Tensor thresholds,
+    int64_t num_bins, int64_t stride, int64_t padding, bool compute_cum_potential
+) {
+  TORCH_CHECK(input_times.is_cuda() && weights_4d.is_cuda() && thresholds.is_cuda(),
+              "tensors must be on CUDA");
+  TORCH_CHECK(input_times.scalar_type() == at::kFloat, "fp32 only");
+  TORCH_CHECK(num_bins > 0, "num_bins > 0");
+
+  const at::cuda::OptionalCUDAGuard guard(input_times.device());
+  auto in_c = input_times.contiguous();
+  auto W_c = weights_4d.contiguous();
+  auto th_c = thresholds.contiguous();
+
+  const int B = in_c.size(0), C = in_c.size(1), H = in_c.size(2), W = in_c.size(3);
+  const int F = W_c.size(0), kH = W_c.size(2), kW = W_c.size(3);
+  const int oH = (H + 2 * padding - kH) / stride + 1;
+  const int oW = (W + 2 * padding - kW) / stride + 1;
+  auto opts = in_c.options();
+  auto spike_times = at::full({B, F, oH, oW}, kInf, opts);
+  auto cum_potential = compute_cum_potential
+      ? at::zeros({B, F, oH, oW}, opts) : at::empty({0}, opts);
+
+  const int total = B * F * oH * oW;
+  if (total == 0) return {spike_times, cum_potential};
+
+  const int block = pick_gather_block((int)num_bins);
+  const int grid = (total + block - 1) / block;
+  const size_t smem = (size_t)block * (size_t)num_bins * sizeof(float);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  auto launch = [&](auto kernel, float* pot_p) {
+    kernel<<<grid, block, smem, stream>>>(
+        in_c.data_ptr<float>(), W_c.data_ptr<float>(), th_c.data_ptr<float>(),
+        B, C, H, W, F, kH, kW, (int)stride, (int)padding, oH, oW, (int)num_bins,
+        spike_times.data_ptr<float>(), pot_p);
+  };
+  if (compute_cum_potential) launch(gather_first_spike_kernel_t<true>,
+                                    cum_potential.data_ptr<float>());
+  else                       launch(gather_first_spike_kernel_t<false>, nullptr);
+  return {spike_times, cum_potential};
+}
+
+std::tuple<at::Tensor, at::Tensor> first_spike_times_multi_threshold_cuda(
+    at::Tensor input_times, at::Tensor weights_4d, at::Tensor thresholds_2d,
+    int64_t num_bins, int64_t stride, int64_t padding, bool compute_cum_potential
+) {
+  TORCH_CHECK(input_times.is_cuda() && weights_4d.is_cuda() && thresholds_2d.is_cuda(),
+              "tensors must be on CUDA");
+  TORCH_CHECK(input_times.scalar_type() == at::kFloat, "fp32 only");
+  TORCH_CHECK(thresholds_2d.dim() == 2 && num_bins > 0, "(K,F), num_bins > 0");
+
+  const at::cuda::OptionalCUDAGuard guard(input_times.device());
+  auto in_c = input_times.contiguous();
+  auto W_c = weights_4d.contiguous();
+  auto th_c = thresholds_2d.contiguous();
+
+  const int B = in_c.size(0), C = in_c.size(1), H = in_c.size(2), W = in_c.size(3);
+  const int F = W_c.size(0), kH = W_c.size(2), kW = W_c.size(3), K = th_c.size(0);
+  const int oH = (H + 2 * padding - kH) / stride + 1;
+  const int oW = (W + 2 * padding - kW) / stride + 1;
+  auto opts = in_c.options();
+  auto spike_times = at::full({K, B, F, oH, oW}, kInf, opts);
+  auto cum_potential = compute_cum_potential
+      ? at::zeros({B, F, oH, oW}, opts) : at::empty({0}, opts);
+
+  const int total = B * F * oH * oW;
+  if (total == 0) return {spike_times, cum_potential};
+
+  const int block = pick_gather_block((int)num_bins);
+  const int grid = (total + block - 1) / block;
+  const size_t smem = (size_t)block * (size_t)num_bins * sizeof(float);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  auto launch = [&](auto kernel, float* pot_p) {
+    kernel<<<grid, block, smem, stream>>>(
+        in_c.data_ptr<float>(), W_c.data_ptr<float>(), th_c.data_ptr<float>(),
+        B, C, H, W, F, kH, kW, (int)stride, (int)padding,
+        oH, oW, (int)num_bins, K,
+        spike_times.data_ptr<float>(), pot_p);
+  };
+  if (compute_cum_potential) launch(gather_first_spike_multi_kernel_t<true>,
+                                    cum_potential.data_ptr<float>());
+  else                       launch(gather_first_spike_multi_kernel_t<false>, nullptr);
+  return {spike_times, cum_potential};
 }

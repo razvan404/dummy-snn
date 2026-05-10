@@ -3,6 +3,10 @@ data/
 checkpoints/
 logs/
 archive/
+paper/
+papers/
+benchmarks/
+CLAUDE.md
 
 # Generated artefacts at repo root
 /*.png

@@ -36,7 +36,6 @@ class TestConvLayerConstruction:
     def test_weights_4d_property(self):
         layer = make_layer(in_channels=6, num_filters=4, kernel_size=5)
         assert layer.weights_4d.shape == (4, 6, 5, 5)
-        # Should be a view (same data)
         assert layer.weights_4d.data_ptr() == layer.weights.data_ptr()
 
     def test_threshold_shape(self):
@@ -83,13 +82,11 @@ class TestConvLayerConstruction:
         assert layer._oH is None
         spikes = torch.zeros(2, 8, 8)
         layer.train()
-        layer.forward(spikes, 0.0, 0.1)
-        # oH = oW = 8 - 3 + 1 = 6
+        layer.simulate_step(spikes, 0.0, 0.1)
         assert layer._oH == 6
-        assert layer._spike_times.shape == (4, 6, 6)
+        assert layer.spike_times.shape == (4, 6, 6)
 
     def test_reset_clears_output_size_for_reinit(self):
-        """reset() should clear _oH/_oW so the next forward re-runs lazy init."""
         layer = ConvIntegrateAndFireLayer(
             in_channels=2,
             num_filters=4,
@@ -97,65 +94,58 @@ class TestConvLayerConstruction:
             threshold_initialization=ConstantInitialization(1.0),
         )
         layer.train()
-        layer.forward(torch.zeros(2, 8, 8), 0.0, 0.1)
+        layer.simulate_step(torch.zeros(2, 8, 8), 0.0, 0.1)
         assert layer._oH == 6
 
         layer.reset()
         assert layer._oH is None
 
-        # Forward with a different input size should reinitialize correctly
-        layer.forward(torch.zeros(2, 12, 12), 0.0, 0.1)
-        # oH = oW = 12 - 3 + 1 = 10
+        layer.simulate_step(torch.zeros(2, 12, 12), 0.0, 0.1)
         assert layer._oH == 10
-        assert layer._spike_times.shape == (4, 10, 10)
+        assert layer.spike_times.shape == (4, 10, 10)
 
 
 class TestConvLayerForward:
     def test_output_shape(self):
         layer = make_layer(in_channels=6, num_filters=4, kernel_size=5, padding=0)
-        # Input: (6, 10, 10) → output spatial: (10-5+1, 10-5+1) = (6, 6)
         incoming = torch.ones(6, 10, 10)
-        output = layer.forward(incoming, current_time=0.1, dt=0.1)
+        output = layer.simulate_step(incoming, 0.1, 0.1)
         assert output.shape == (4, 6, 6)
 
     def test_output_shape_with_padding(self):
         layer = make_layer(in_channels=6, num_filters=4, kernel_size=5, padding=2)
         incoming = torch.ones(6, 10, 10)
-        output = layer.forward(incoming, current_time=0.1, dt=0.1)
+        output = layer.simulate_step(incoming, 0.1, 0.1)
         assert output.shape == (4, 10, 10)
 
     def test_output_shape_with_stride(self):
         layer = make_layer(in_channels=6, num_filters=4, kernel_size=5, stride=2)
         incoming = torch.ones(6, 10, 10)
-        output = layer.forward(incoming, current_time=0.1, dt=0.1)
+        output = layer.simulate_step(incoming, 0.1, 0.1)
         assert output.shape == (4, 3, 3)
 
     def test_no_spikes_from_zero_input(self):
         layer = make_layer(threshold=5.0)
         incoming = torch.zeros(6, 10, 10)
-        output = layer.forward(incoming, current_time=0.1, dt=0.1)
+        output = layer.simulate_step(incoming, 0.1, 0.1)
         assert (output == 0).all()
 
     def test_spike_times_recorded(self):
-        """When input is strong enough, spike times should be recorded."""
         layer = make_layer(
             in_channels=1, num_filters=1, kernel_size=3, padding=1,
             threshold=0.1,
         )
-        # Set weights high to guarantee spiking
         layer.weights.data.fill_(1.0)
         incoming = torch.ones(1, 5, 5)
-        layer.forward(incoming, current_time=0.3, dt=0.1)
-        # At least some neurons should have spiked
+        layer.simulate_step(incoming, current_time=0.3, dt=0.1)
         assert torch.isfinite(layer.spike_times).any()
-        # Spiked neurons should have time 0.3
         spiked = layer.spike_times[torch.isfinite(layer.spike_times)]
         assert (spiked == 0.3).all()
 
     def test_spike_times_shape(self):
         layer = make_layer(in_channels=6, num_filters=4, kernel_size=5, padding=0)
         incoming = torch.ones(6, 10, 10)
-        layer.forward(incoming, current_time=0.1, dt=0.1)
+        layer.simulate_step(incoming, current_time=0.1, dt=0.1)
         assert layer.spike_times.shape == (4, 6, 6)
 
 
@@ -167,7 +157,7 @@ class TestConvLayerReset:
         )
         layer.weights.data.fill_(1.0)
         incoming = torch.ones(1, 5, 5)
-        layer.forward(incoming, current_time=0.1, dt=0.1)
+        layer.simulate_step(incoming, current_time=0.1, dt=0.1)
         assert torch.isfinite(layer.spike_times).any()
         layer.reset()
         assert torch.isinf(layer.spike_times).all()
@@ -175,7 +165,7 @@ class TestConvLayerReset:
     def test_reset_clears_membrane_potentials(self):
         layer = make_layer(threshold=1000.0)  # high threshold so no spikes
         incoming = torch.ones(6, 10, 10)
-        layer.forward(incoming, current_time=0.1, dt=0.1)
+        layer.simulate_step(incoming, current_time=0.1, dt=0.1)
         assert (layer.membrane_potentials != 0).any()
         layer.reset()
         assert (layer.membrane_potentials == 0).all()
@@ -193,11 +183,11 @@ class TestConvLayerRefractory:
         )
         layer.weights.data.fill_(1.0)
         incoming = torch.ones(1, 5, 5)
-        layer.forward(incoming, current_time=0.1, dt=0.1)
+        layer.simulate_step(incoming, current_time=0.1, dt=0.1)
         first_spikes = layer.spike_times.clone()
 
         # Second forward — spiked neurons should stay refractory
-        layer.forward(incoming, current_time=0.2, dt=0.1)
+        layer.simulate_step(incoming, current_time=0.2, dt=0.1)
         assert (layer.spike_times == first_spikes).all()
 
 
@@ -215,7 +205,6 @@ class TestConvLayerAnalyticalInference:
         assert result.shape == (8, 4, 6, 6)
 
     def test_infer_matches_forward_pass(self):
-        """Analytical inference should match step-by-step forward pass."""
         torch.manual_seed(42)
         layer = make_layer(
             in_channels=2,
@@ -236,10 +225,9 @@ class TestConvLayerAnalyticalInference:
         layer.eval()
         layer.reset()
         for incoming_spikes, current_time, dt in iterate_spikes(input_times):
-            layer.forward(incoming_spikes, current_time, dt)
+            layer.simulate_step(incoming_spikes, current_time, dt)
         forward_times = layer.spike_times.clone()
 
-        # They should match
         both_finite = torch.isfinite(analytical) & torch.isfinite(forward_times)
         if both_finite.any():
             torch.testing.assert_close(
@@ -248,7 +236,6 @@ class TestConvLayerAnalyticalInference:
                 atol=1e-5,
                 rtol=1e-5,
             )
-        # Same inf pattern
         assert (torch.isinf(analytical) == torch.isinf(forward_times)).all()
 
     def test_all_inf_input(self):
@@ -264,21 +251,106 @@ class TestConvLayerAnalyticalInference:
         assert torch.isinf(result).all()
 
 
-class TestConvFCEquivalence:
-    """Verify ConvIntegrateAndFireLayer matches IntegrateAndFireLayer
-    when applied to the same input with the same weights.
+NUM_BINS = 64
 
-    Since ConvIntegrateAndFireLayer now inherits from IntegrateAndFireLayer
-    and delegates to super().infer_spike_times_batch(), equivalence is
-    structural — but we still verify it end-to-end.
-    """
+
+class TestConvLayerForward:
+    def _setup(self, B=2, seed=0):
+        torch.manual_seed(seed)
+        layer = make_layer(in_channels=2, num_filters=8, kernel_size=3, threshold=2.0)
+        layer.num_bins = NUM_BINS
+        layer.eval()
+        times = (torch.randint(0, NUM_BINS, (B, 2, 8, 8)).float() / NUM_BINS)
+        times = torch.where(
+            torch.rand(times.shape) < 0.5, times, torch.full_like(times, float("inf"))
+        )
+        return layer, times
+
+    @pytest.mark.parametrize("backend", ["dense", "scatter", "gather"])
+    def test_backend_matches_base(self, backend):
+        """Inputs bin-aligned to ``NUM_BINS`` so all three backends are exact vs ``base``."""
+        layer, times = self._setup()
+        layer._backend = "base"
+        ref, _ = layer(times, first_spike_only=False)
+        layer._backend = backend
+        out, _ = layer(times, first_spike_only=False)
+        finite = torch.isfinite(ref) & torch.isfinite(out)
+        if finite.any():
+            torch.testing.assert_close(ref[finite], out[finite], atol=1e-5, rtol=0)
+        assert torch.equal(torch.isinf(ref), torch.isinf(out))
+
+    def test_first_spike_only_keeps_one_filter_per_position(self):
+        layer, times = self._setup(B=1, seed=3)
+        st, _ = layer(times, first_spike_only=True)
+        st_full, _ = layer(times, first_spike_only=False)
+        assert (torch.isfinite(st).sum(dim=1) <= 1).all()
+        kept = torch.isfinite(st)
+        min_per_pos = st_full.amin(dim=1, keepdim=True).expand_as(st)
+        assert torch.equal(st[kept], min_per_pos[kept])
+
+    def test_training_requires_b1_and_caches_state(self):
+        layer, times = self._setup(B=4)
+        layer.train()
+        with pytest.raises(ValueError, match="B=1"):
+            layer(times)
+        layer(times[:1])
+        assert layer.spike_times is not None
+
+    def test_eval_is_stateless(self):
+        layer, times = self._setup(B=2)
+        layer.eval()
+        layer(times, first_spike_only=False)
+        assert layer.spike_times is None
+
+    @pytest.mark.parametrize("backend", ["differential_base", "differential_dense"])
+    def test_differential_backend_propagates_grad_to_thresholds(self, backend):
+        """STE: hard forward matches ``base``, backward writes non-trivial threshold grads."""
+        layer, times = self._setup(B=2, seed=1)
+        layer.tau = 0.05
+        layer.t_no_spike = 1.0
+        layer.weights.requires_grad_(False)
+        layer.thresholds.requires_grad_(True)
+
+        layer._backend = "base"
+        ref, _ = layer(times, first_spike_only=False)
+        layer._backend = backend
+        out, _ = layer(times, first_spike_only=False)
+        finite = torch.isfinite(ref) & torch.isfinite(out)
+        if finite.any():
+            torch.testing.assert_close(ref[finite], out[finite], atol=1e-5, rtol=0)
+        loss = torch.where(torch.isfinite(out), out, torch.zeros_like(out)).sum()
+        loss.backward()
+        assert layer.thresholds.grad is not None
+        assert layer.thresholds.grad.abs().sum().item() > 0
+
+    @pytest.mark.parametrize("num_bins", [32, 64, 128])
+    def test_gather_num_bins_is_precision_knob(self, num_bins):
+        """Gather error vs ``base`` is bounded by ``1/num_bins`` (continuous input)."""
+        torch.manual_seed(0)
+        layer = make_layer(in_channels=2, num_filters=8, kernel_size=3, threshold=2.0)
+        layer.eval()
+        times = torch.rand(2, 2, 8, 8)
+        times = torch.where(
+            torch.rand(times.shape) < 0.5, times, torch.full_like(times, float("inf"))
+        )
+        layer._backend = "base"
+        ref, _ = layer(times, first_spike_only=False)
+        layer._backend = "gather"
+        layer.num_bins = num_bins
+        out, _ = layer(times, first_spike_only=False)
+        finite = torch.isfinite(ref) & torch.isfinite(out)
+        if finite.any():
+            assert (ref[finite] - out[finite]).max().item() < 1.0 / num_bins + 1e-6
+            assert (ref[finite] - out[finite]).min().item() >= -1e-6
+
+
+class TestConvFCEquivalence:
+    """Conv layer must match the equivalent FC layer applied to flattened patches."""
 
     def test_5x5_kernel_on_5x5_image(self):
-        """Single 5x5 patch: conv output is 1x1, must match FC layer exactly."""
         C, K, F = 6, 5, 8
         torch.manual_seed(0)
 
-        # Create conv layer
         conv_init = ConstantInitialization(10.0)
         conv_layer = ConvIntegrateAndFireLayer(
             in_channels=C,
@@ -407,8 +479,6 @@ class TestConvFCEquivalence:
 
 
 class TestConv2dVsUnfoldEquivalence:
-    """Verify conv2d-based and unfold-based batch inference produce identical results."""
-
     def _make_input(self, B, C, H, W, seed=42):
         torch.manual_seed(seed)
         t = torch.rand(B, C, H, W)
@@ -448,17 +518,14 @@ class TestConv2dVsUnfoldEquivalence:
         assert torch.isinf(unfold_result).all()
 
     def test_single_image_matches(self):
-        """infer_spike_times (single, unfold) must match infer_spike_times_batch (conv2d)."""
         layer = make_layer(in_channels=6, num_filters=8, kernel_size=5, padding=0)
         inp = self._make_input(1, 6, 12, 12, seed=3)
-        batch_result = layer.infer_spike_times_batch(inp)  # (1, F, oH, oW)
-        single_result = layer.infer_spike_times(inp.squeeze(0))  # (F, oH, oW)
+        batch_result = layer.infer_spike_times_batch(inp)
+        single_result = layer.infer_spike_times(inp.squeeze(0))
         torch.testing.assert_close(batch_result.squeeze(0), single_result)
 
 
 class TestConvInferenceBenchmark:
-    """Benchmark conv2d vs unfold approaches on 64x64 images with 5x5 kernel."""
-
     def test_benchmark_64x64(self):
         import time
 
@@ -476,27 +543,23 @@ class TestConvInferenceBenchmark:
         warmup = 3
         runs = 10
 
-        # Warmup
         with torch.no_grad():
             for _ in range(warmup):
                 layer.infer_spike_times_batch(inp)
                 layer.infer_spike_times_batch_unfold(inp)
 
-        # Benchmark conv2d
         with torch.no_grad():
             t0 = time.perf_counter()
             for _ in range(runs):
                 layer.infer_spike_times_batch(inp)
             t_conv2d = (time.perf_counter() - t0) / runs
 
-        # Benchmark unfold
         with torch.no_grad():
             t0 = time.perf_counter()
             for _ in range(runs):
                 layer.infer_spike_times_batch_unfold(inp)
             t_unfold = (time.perf_counter() - t0) / runs
 
-        # Verify they match
         with torch.no_grad():
             r1 = layer.infer_spike_times_batch(inp)
             r2 = layer.infer_spike_times_batch_unfold(inp)

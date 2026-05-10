@@ -5,6 +5,10 @@ import torch.nn as nn
 
 
 class SpikingModule(nn.Module, ABC):
+    """Base class for spiking layers; ``_backend`` selects the inference backend."""
+
+    _backend: str = "gather"
+
     def __init__(self, num_inputs: int, num_outputs: int):
         super().__init__()
         self.num_inputs = num_inputs
@@ -13,10 +17,6 @@ class SpikingModule(nn.Module, ABC):
     @property
     @abstractmethod
     def spike_times(self):
-        pass
-
-    @abstractmethod
-    def forward(self, incoming_spikes: torch.Tensor, current_time: float, dt: float):
         pass
 
     @abstractmethod

@@ -1,10 +1,3 @@
-"""JIT loader for the spike-driven conv accumulator C++/CUDA module.
-
-First import compiles the C++/CUDA sources under
-``~/.cache/torch_extensions/spiking_backend/``. Subsequent imports reuse
-the cached shared library.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -16,17 +9,14 @@ import torch
 from torch.utils.cpp_extension import load
 
 logger = logging.getLogger(__name__)
-
 _CSRC_DIR = Path(__file__).parent / "csrc"
 
 
 def load_backend() -> Any | None:
-    """Compile and load the spike-driven-conv extension; ``None`` on failure."""
+    """JIT-compile the extension; ``None`` on build failure (cached under ``~/.cache/torch_extensions``)."""
     sources = [str(_CSRC_DIR / "spike_driven_conv.cpp")]
-
     extra_cflags = ["-O3", "-std=c++17"]
     extra_ldflags: list[str] = []
-    # OpenMP for batched parallelism. Linux toolchains use -fopenmp / libgomp.
     if os.name == "posix":
         extra_cflags.append("-fopenmp")
         extra_ldflags.append("-lgomp")
@@ -47,6 +37,6 @@ def load_backend() -> Any | None:
             with_cuda=use_cuda and has_cuda_src,
             verbose=False,
         )
-    except Exception as exc:  # pragma: no cover - build env issues
+    except Exception as exc:
         logger.warning("spiking_backend extension failed to build: %s", exc)
         return None

@@ -19,10 +19,11 @@ class IntegrateAndFireLayer(SpikingModule):
         super().__init__(num_inputs=num_inputs, num_outputs=num_outputs)
 
         self.refractory_period = refractory_period
+        self._dtype = dtype
 
         self.weights = nn.Parameter(torch.rand((num_outputs, num_inputs), dtype=dtype))
         self.thresholds = nn.Parameter(
-            threshold_initialization.initialize((num_outputs,))
+            threshold_initialization.initialize((num_outputs,)).to(dtype)
         )
 
         self.register_buffer(
@@ -77,11 +78,13 @@ class IntegrateAndFireLayer(SpikingModule):
 
         return self._output_spikes
 
-    def forward(
+    def simulate_step(
         self, incoming_spikes: torch.Tensor, current_time: float, dt: float
     ) -> torch.Tensor:
         active_neurons = self._update_refractory(dt)
         return self._update_potential(incoming_spikes, current_time, active_neurons)
+
+    forward = simulate_step
 
     def reset(self):
         self.membrane_potentials.zero_()
@@ -93,11 +96,7 @@ class IntegrateAndFireLayer(SpikingModule):
     def precompute_cumulative_potentials(
         self, input_times: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor] | None:
-        """Precompute sorted unique times and cumulative potentials at group boundaries.
-
-        Returns (unique_times, cum_at_boundaries) or None if no finite inputs.
-        cum_at_boundaries shape: (num_outputs, num_groups).
-        """
+        """Sorted unique times + cumulative potentials at group boundaries; ``None`` if all inf."""
         finite_mask = torch.isfinite(input_times)
         if not finite_mask.any():
             return None
@@ -125,7 +124,6 @@ class IntegrateAndFireLayer(SpikingModule):
         cum_at_boundaries: torch.Tensor,
         thresholds: torch.Tensor,
     ) -> torch.Tensor:
-        """Resolve first spike times from precomputed cumulative potentials."""
         num_outputs = cum_at_boundaries.shape[0]
         result = torch.full(
             (num_outputs,), float("inf"), dtype=unique_times.dtype,
@@ -141,7 +139,6 @@ class IntegrateAndFireLayer(SpikingModule):
 
     @torch.no_grad()
     def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
-        """Compute first spike times analytically without mutating model state."""
         precomputed = self.precompute_cumulative_potentials(input_times)
         if precomputed is None:
             return torch.full(
@@ -156,13 +153,7 @@ class IntegrateAndFireLayer(SpikingModule):
     def infer_spike_times_and_potentials_batch(
         self, input_times: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Batched analytical spike time inference, also returning final potentials.
-
-        :param input_times: (B, num_inputs)
-        :returns: (spike_times, cum_potential) both (B, num_outputs).
-            cum_potential holds each neuron's cumulative membrane potential at the
-            end of the input window (or at the moment it spiked).
-        """
+        """Batched analytical inference; returns ``(spike_times, cum_potential)``."""
         B = input_times.shape[0]
         dev = input_times.device
         result = torch.full(
@@ -198,14 +189,6 @@ class IntegrateAndFireLayer(SpikingModule):
 
     @torch.no_grad()
     def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
-        """Batched analytical spike time inference.
-
-        Iterates over unique input times and accumulates membrane potentials
-        via batched matmul. Efficient when inputs are discretized to few bins.
-
-        :param input_times: (B, num_inputs)
-        :returns: (B, num_outputs)
-        """
         result, _ = self.infer_spike_times_and_potentials_batch(input_times)
         return result
 

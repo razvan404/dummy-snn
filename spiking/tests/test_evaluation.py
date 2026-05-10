@@ -403,7 +403,7 @@ class TestInferSpikeTimes:
             # Iterative
             model.reset()
             for incoming_spikes, current_time, dt in iterate_spikes(input_times):
-                model.forward(incoming_spikes, current_time=current_time, dt=dt)
+                model.simulate_step(incoming_spikes, current_time, dt)
                 if torch.all(torch.isfinite(model.spike_times)):
                     break
             iterative_times = model.spike_times.clone()

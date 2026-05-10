@@ -29,12 +29,7 @@ def collect_conv_input_times(
     loader: DataLoader,
     chunk_size: int = 256,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Collect input spike times preserving spatial dims, plus labels.
-
-    :param loader: DataLoader providing (spike_times, labels) batches.
-    :param chunk_size: Batch size for iteration.
-    :returns: Tuple of (times, labels) where times is (N, C, H, W) and labels is (N,).
-    """
+    """Concatenate ``(times, labels)`` from a loader; preserves spatial dims."""
     batched = DataLoader(loader.dataset, batch_size=chunk_size, shuffle=False)
     time_parts = []
     label_parts = []
@@ -52,36 +47,32 @@ def multi_threshold_conv_accumulate(
     stride: int,
     padding: int,
     device: torch.device | str = "cpu",
-    use_backend: bool = False,
+    backend: str = "dense",
+    num_bins: int = 64,
 ) -> torch.Tensor:
-    """Single-pass conv2d accumulation checking multiple threshold sets.
-
-    :param input_times: (B, C, H, W) spike times (inf = no spike).
-        Assumed to be already discretized (e.g. via discretize_times with
-        num_bins=16/64), so the number of unique times is small.
-    :param weights_4d: (F, C, kH, kW) conv filter weights.
-    :param thresholds_2d: (num_fracs, F) threshold values per fraction.
-    :param stride: Conv stride.
-    :param padding: Conv padding.
-    :param device: Device for computation.
-    :returns: (num_fracs, B, F, oH, oW) spike times tensor.
-    """
+    """Single-pass conv accumulation across multiple threshold sets."""
     input_times = input_times.to(device)
     weights_4d = weights_4d.to(device)
     thresholds_2d = thresholds_2d.to(device)
 
-    if use_backend:
-        from spiking_backend import (
-            spike_driven_conv_accumulate_multi_threshold,
-        )
+    if backend == "scatter":
+        from spiking_backend import spike_driven_conv_accumulate_multi_threshold
 
         return spike_driven_conv_accumulate_multi_threshold(
-            input_times,
-            weights_4d,
-            thresholds_2d,
-            stride=stride,
-            padding=padding,
+            input_times, weights_4d, thresholds_2d,
+            stride=stride, padding=padding, num_bins=num_bins,
         ).cpu()
+    if backend == "gather":
+        from spiking_backend import first_spike_times_multi_threshold
+
+        return first_spike_times_multi_threshold(
+            input_times, weights_4d, thresholds_2d,
+            num_bins=num_bins, stride=stride, padding=padding,
+        ).cpu()
+    if backend != "dense":
+        raise ValueError(
+            f"backend must be 'dense', 'scatter', or 'gather'; got {backend!r}"
+        )
 
     B, C, H, W = input_times.shape
     num_fracs, num_filters = thresholds_2d.shape
@@ -133,20 +124,11 @@ def _spike_times_to_pooled_features(
     t_target: float | None,
     pool_size: int,
 ) -> np.ndarray:
-    """Convert (num_fracs, B, F, oH, oW) spike times to flat pooled features.
-
-    :param spike_times: (num_fracs, B, F, oH, oW) spike times tensor.
-    :param t_target: Target spike time for feature conversion.
-    :param pool_size: Spatial pool size.
-    :returns: (num_fracs, B, F * pool_size * pool_size) numpy array.
-    """
     num_fracs, B, F_dim, oH, oW = spike_times.shape
-    # Reshape to (num_fracs*B, F, oH, oW) for batch processing
     flat = spike_times.reshape(num_fracs * B, F_dim, oH, oW)
     features = spike_times_to_features(flat, t_target)
     pooled = sum_pool_features(features, pool_size)
     flat_features = pooled.flatten(1).numpy()
-    # Reshape back to (num_fracs, B, flat_dim)
     return flat_features.reshape(num_fracs, B, -1)
 
 
@@ -163,14 +145,7 @@ def compute_conv_perturbed_features(
     device: str = "cpu",
     chunk_size: int = 64,
 ) -> dict:
-    """Compute baseline and perturbed feature matrices for a conv layer.
-
-    Uses multi-threshold single-pass inference: conv2d accumulation is done once
-    per chunk, all 31 perturbation thresholds are checked simultaneously.
-
-    Returns dict with keys: baseline_train, baseline_val, labels_train, labels_val,
-    perturbed_train, perturbed_val, original_thresholds, perturbation_fractions.
-    """
+    """Compute baseline + perturbed feature matrices via single-pass multi-threshold inference."""
     if cache_dir and not force and _feature_cache_exists(cache_dir):
         return _load_feature_cache(cache_dir)
 
@@ -193,18 +168,15 @@ def compute_conv_perturbed_features(
     perturbation_fractions = PERTURBATION_FRACTIONS
     num_fracs = len(perturbation_fractions)
 
-    # Build threshold matrix: (num_fracs, F)
     thresholds_2d = torch.stack(
         [original_thresholds * (1.0 + frac) for frac in perturbation_fractions]
     )
 
-    # Process each split (train, val)
     results = {}
     for split_name, loader in [("train", train_loader), ("val", val_loader)]:
         all_times, all_labels = collect_conv_input_times(loader)
         N = all_times.shape[0]
 
-        # Compute flat feature dim analytically
         H, W = all_times.shape[2], all_times.shape[3]
         oH = (H + 2 * pad - layer.kernel_size) // stride + 1
         oW = (W + 2 * pad - layer.kernel_size) // stride + 1
@@ -212,7 +184,6 @@ def compute_conv_perturbed_features(
         pool_w = min(pool_size, oW)
         flat_dim = num_filters * pool_h * pool_w
 
-        # Compute baseline features in chunks (use GPU if available)
         layer.to(device)
         layer.eval()
         n_chunks = (N + chunk_size - 1) // chunk_size
@@ -231,7 +202,6 @@ def compute_conv_perturbed_features(
         layer.cpu()
         baseline_features = np.concatenate(baseline_parts, axis=0)
 
-        # Compute perturbed features in chunks using multi-threshold approach
         perturbed_features = np.zeros((num_fracs, N, flat_dim), dtype=np.float32)
         for start in tqdm(
             range(0, N, chunk_size),
@@ -281,18 +251,7 @@ def evaluate_conv_perturbations(
     cache_dir: str | None = None,
     alpha: float = 1.0,
 ) -> dict:
-    """Per-filter perturbation evaluation for conv layers.
-
-    Uses RidgeColumnSwap with Woodbury identity for efficient per-filter
-    evaluation. Each column swap costs O(d²k) instead of O(d³) refit.
-
-    :param features: Dict from compute_conv_perturbed_features.
-    :param num_filters: Number of conv filters.
-    :param pool_size: Spatial pool size used during feature extraction.
-    :param cache_dir: Optional directory for incremental saves.
-    :param alpha: Ridge regularization strength.
-    :returns: Dict with baseline metrics, accuracy/f1 matrices, optimal thresholds.
-    """
+    """Per-filter perturbation eval via Woodbury column-swap (O(d²k) per swap)."""
     X_train = features["baseline_train"]
     X_val = features["baseline_val"]
     y_train = features["labels_train"]
@@ -305,12 +264,10 @@ def evaluate_conv_perturbations(
     num_fracs = len(perturbation_fractions)
     cols_per_filter = pool_size * pool_size
 
-    # Baseline classifier with precomputed inverse for Woodbury updates
     baseline_clf = RidgeColumnSwap(alpha=alpha)
     baseline_clf.fit(X_train, y_train)
     baseline_metrics = compute_metrics(y_val, baseline_clf.predict(X_val))
 
-    # Load partial results if resuming
     accuracy_matrix = np.zeros((num_filters, num_fracs))
     f1_matrix = np.zeros((num_filters, num_fracs))
     completed_fractions = set()
@@ -361,7 +318,6 @@ def evaluate_conv_perturbations(
                 cache_dir, completed_fractions, accuracy_matrix, f1_matrix
             )
 
-    # Find per-filter optimal perturbation
     best_frac_indices = accuracy_matrix.argmax(axis=1)
     optimal_fracs = [perturbation_fractions[i] for i in best_frac_indices]
     optimal_thresholds = [
@@ -403,11 +359,7 @@ def run_conv_perturbation_sweep(
     device: str = "cpu",
     chunk_size: int = 64,
 ) -> dict:
-    """Run per-filter threshold perturbation sweep for a conv model.
-
-    For each filter, perturbs its threshold by fractions from -0.5 to +0.25,
-    recomputes that filter's pooled features, and measures accuracy impact.
-    """
+    """Per-filter threshold perturbation sweep for a conv model."""
     features = compute_conv_perturbed_features(
         model_path=model_path,
         dataset_loaders=dataset_loaders,

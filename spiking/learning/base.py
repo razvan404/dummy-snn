@@ -9,13 +9,7 @@ from spiking.threshold import ThresholdAdaptation
 
 
 class BaseLearner(ABC):
-    """Orchestrates STDP learning, competition, and threshold adaptation.
-
-    Subclasses must implement:
-        _update_weights: apply the learning rule to selected neurons.
-    Optionally override:
-        _get_spike_times: how to derive spike times for competition/adaptation.
-    """
+    """Orchestrates STDP learning, competition, and threshold adaptation."""
 
     def __init__(
         self,
@@ -30,7 +24,6 @@ class BaseLearner(ABC):
         self.threshold_adaptation = threshold_adaptation
 
     def _get_spike_times(self) -> torch.Tensor:
-        """Get spike times for competition and threshold adaptation."""
         return self.layer.spike_times
 
     def _select_neurons(self) -> torch.Tensor:
@@ -43,30 +36,21 @@ class BaseLearner(ABC):
     def _update_weights(
         self, neurons_to_learn: torch.Tensor, pre_spike_times: torch.Tensor
     ) -> float:
-        """Apply learning rule to selected neurons.
-
-        :param neurons_to_learn: indices of neurons to update.
-        :param pre_spike_times: pre-synaptic spike times.
-        :returns: Average absolute weight change.
-        """
+        """Apply learning rule to selected neurons; returns avg |dw|."""
 
     @torch.no_grad()
-    def step(self, pre_spike_times: torch.Tensor) -> float:
-        """Apply one learning step after a forward pass.
-
-        :param pre_spike_times: pre-synaptic spike times.
-        :returns: Average absolute weight change.
-        """
+    def step(self, pre_spike_times: torch.Tensor) -> torch.Tensor:
+        """One learning step; returns 0-dim avg-|dw| tensor (caller may defer host sync)."""
         neurons_to_learn = self._select_neurons().flatten()
         self.neurons_to_learn = neurons_to_learn
-        # Capture spike times before reset clears layer state
         spike_times_now = self._get_spike_times()
+        device = spike_times_now.device
         if len(neurons_to_learn) > 0:
-            self.winner_spike_time = spike_times_now[neurons_to_learn[0]].min().item()
+            self.winner_spike_time = spike_times_now[neurons_to_learn[0]].min()
         else:
-            self.winner_spike_time = float("inf")
+            self.winner_spike_time = torch.tensor(float("inf"), device=device)
 
-        dw = 0.0
+        dw = torch.zeros((), device=device, dtype=spike_times_now.dtype)
         if self.learning_mechanism and len(neurons_to_learn) > 0:
             dw = self._update_weights(neurons_to_learn, pre_spike_times)
 
@@ -83,7 +67,7 @@ class BaseLearner(ABC):
             )
 
         if not self.learning_mechanism:
-            return 0.0
+            return torch.zeros((), device=device, dtype=spike_times_now.dtype)
         return dw
 
     def learning_rate_step(self):

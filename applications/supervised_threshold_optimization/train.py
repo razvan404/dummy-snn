@@ -1,9 +1,4 @@
-"""Supervised threshold optimization via differentiable spike times.
-
-Loads a pre-trained SNN, freezes weights, and optimizes thresholds + a linear
-classifier jointly using gradient descent through a soft first-crossing
-spike time approximation.
-"""
+"""Supervised threshold optimization via differentiable spike times."""
 
 import argparse
 import json
@@ -20,7 +15,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from applications.common import load_split_data, resolve_model_dir, set_seed
 from spiking.evaluation.conv_feature_extraction import sum_pool_features
 from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
-from spiking.layers.differentiable_spike_times import DifferentiableConvSpikeTime
+from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 from spiking.utils.checkpoints import load_model
 
 logger = logging.getLogger(__name__)
@@ -28,35 +23,28 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Config:
-    """All hyperparameters for the experiment."""
-
     dataset: str = "cifar10"
     seed: int = 1
     num_filters: int = 256
     t_obj: float = 0.7
 
-    # Optimization
     lr_threshold: float = 1e-3
     lr_classifier: float = 1e-3
     weight_decay: float = 0.0
     grad_clip: float = 1.0
     batch_size: int = 64
     epochs: int = 50
-    warmup_epochs: int = 0  # train only classifier for this many epochs
-    loss: str = "hinge"  # "hinge" or "ce"
-    classifier_init: str = "svc"  # "svc", "ridge", or "random"
+    warmup_epochs: int = 0
+    loss: str = "hinge"
+    classifier_init: str = "svc"
 
-    # Gradient mode
-    use_ste: bool = False  # straight-through estimator: hard forward, soft backward
-    sign_update: bool = False  # sign-based updates: fixed step in gradient direction
-    sign_step_size: float = 0.01  # absolute step size per epoch for sign updates
+    sign_update: bool = False
+    sign_step_size: float = 0.01
 
-    # Temperature schedule
     tau_start: float = 0.1
     tau_end: float = 0.05
-    tau_schedule: str = "cosine"  # "cosine" or "linear"
+    tau_schedule: str = "cosine"
 
-    # Evaluation
     pool_size: int = 2
     ridge_alpha: float = 1.0
 
@@ -65,7 +53,6 @@ class Config:
 
 
 def get_tau(config: Config, epoch: int) -> float:
-    """Compute temperature for the current epoch."""
     if config.epochs <= 1:
         return config.tau_end
     frac = epoch / (config.epochs - 1)
@@ -73,7 +60,6 @@ def get_tau(config: Config, epoch: int) -> float:
         return config.tau_end + 0.5 * (config.tau_start - config.tau_end) * (
             1 + math.cos(math.pi * frac)
         )
-    # linear
     return config.tau_start + frac * (config.tau_end - config.tau_start)
 
 
@@ -82,12 +68,7 @@ def differentiable_features(
     t_target: float,
     pool_size: int,
 ) -> torch.Tensor:
-    """Convert soft spike times to pooled feature vectors (differentiable).
-
-    TargetRelative conversion with clamp to [0, 1] — matches the hard pipeline.
-    Gradient is zero for saturated features (t < t_target or non-spiking),
-    but in-range features provide sufficient signal for threshold optimization.
-    """
+    """Soft spike times → pooled features; clamp matches the hard pipeline."""
     features = 1.0 - (soft_spike_times - t_target) / (1.0 - t_target)
     features = features.clamp(0.0, 1.0)
     pooled = sum_pool_features(features, pool_size)
@@ -102,7 +83,6 @@ def extract_hard_features(
     chunk_size: int,
     device: str,
 ) -> np.ndarray:
-    """Extract features using hard spike times (for baseline and Ridge eval)."""
     from spiking.evaluation.conv_feature_extraction import sum_pool_features as sp
     from spiking.evaluation.feature_extraction import spike_times_to_features
 
@@ -129,10 +109,9 @@ def init_classifier_from_ridge(
     in_features: int,
     num_classes: int,
 ) -> nn.Linear:
-    """Initialize nn.Linear from a fitted Ridge classifier."""
     linear = nn.Linear(in_features, num_classes)
-    w = ridge.weights  # (d, K) numpy
-    intercept = ridge._to_np(ridge._intercept)  # (K,) numpy
+    w = ridge.weights
+    intercept = ridge._to_np(ridge._intercept)
     linear.weight.data = torch.tensor(w.T, dtype=torch.float32)
     linear.bias.data = torch.tensor(intercept, dtype=torch.float32).squeeze()
     return linear
@@ -142,10 +121,7 @@ def init_classifier_from_svc(
     X_train: np.ndarray,
     y_train: np.ndarray,
 ) -> nn.Linear:
-    """Fit LinearSVC on hard features and transfer weights to nn.Linear.
-
-    Uses cuml GPU SVC if available, else sklearn CPU.
-    """
+    """Fit LinearSVC (cuml if available, else sklearn) and transfer to ``nn.Linear``."""
     try:
         from cuml.svm import LinearSVC
 
@@ -171,14 +147,13 @@ def init_classifier_from_svc(
 
 
 def get_criterion(loss_name: str) -> nn.Module:
-    """Return loss function by name."""
     if loss_name == "hinge":
         return nn.MultiMarginLoss()
     return nn.CrossEntropyLoss()
 
 
 def evaluate_epoch(
-    spike_module: DifferentiableConvSpikeTime,
+    spike_module: ConvIntegrateAndFireLayer,
     classifier: nn.Linear,
     criterion: nn.Module,
     loader: DataLoader,
@@ -186,7 +161,6 @@ def evaluate_epoch(
     pool_size: int,
     device: str,
 ) -> tuple[float, float]:
-    """Evaluate accuracy and loss on a dataset."""
     spike_module.eval()
     classifier.eval()
     correct = 0
@@ -196,7 +170,7 @@ def evaluate_epoch(
     with torch.no_grad():
         for images, labels in loader:
             images, labels = images.to(device), labels.to(device)
-            soft_st = spike_module(images)
+            soft_st, _ = spike_module(images, first_spike_only=False)
             feats = differentiable_features(soft_st, t_target, pool_size)
             logits = classifier(feats)
             total_loss += criterion(logits, labels).item() * labels.size(0)
@@ -207,7 +181,7 @@ def evaluate_epoch(
 
 
 def train_epoch(
-    spike_module: DifferentiableConvSpikeTime,
+    spike_module: ConvIntegrateAndFireLayer,
     classifier: nn.Linear,
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -218,7 +192,6 @@ def train_epoch(
     grad_clip: float = 1.0,
     freeze_thresholds: bool = False,
 ) -> tuple[float, float]:
-    """Train one epoch. Returns (accuracy, avg_loss)."""
     spike_module.train()
     classifier.train()
 
@@ -234,7 +207,7 @@ def train_epoch(
     for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad()
-        soft_st = spike_module(images)
+        soft_st, _ = spike_module(images, first_spike_only=False)
         feats = differentiable_features(soft_st, t_target, pool_size)
         logits = classifier(feats)
         loss = criterion(logits, labels)
@@ -253,7 +226,7 @@ def train_epoch(
 
 
 def train_epoch_sign(
-    spike_module: DifferentiableConvSpikeTime,
+    spike_module: ConvIntegrateAndFireLayer,
     classifier: nn.Linear,
     criterion: nn.Module,
     loader: DataLoader,
@@ -262,12 +235,7 @@ def train_epoch_sign(
     device: str,
     step_size: float = 0.01,
 ) -> tuple[float, float]:
-    """Train one epoch with sign-based threshold updates.
-
-    Accumulates gradients over all batches for a stable sign estimate,
-    then applies one update: θ ← θ - step_size * sign(accumulated_grad).
-    Classifier stays frozen.
-    """
+    """Sign-based threshold update: θ ← θ − step·sign(Σ grad). Classifier frozen."""
     spike_module.train()
     classifier.eval()
     spike_module.thresholds.requires_grad_(True)
@@ -282,7 +250,7 @@ def train_epoch_sign(
         if spike_module.thresholds.grad is not None:
             spike_module.thresholds.grad.zero_()
 
-        st = spike_module(images)
+        st, _ = spike_module(images, first_spike_only=False)
         feats = differentiable_features(st, t_target, pool_size)
         logits = classifier(feats)
         loss = criterion(logits, labels)
@@ -319,11 +287,6 @@ def main() -> None:
         "--classifier-init", default="svc", choices=["svc", "ridge", "random"]
     )
     parser.add_argument(
-        "--ste",
-        action="store_true",
-        help="Use straight-through estimator: hard forward, soft backward",
-    )
-    parser.add_argument(
         "--sign-update",
         action="store_true",
         help="Sign-based updates: fixed step in gradient direction per epoch",
@@ -341,9 +304,6 @@ def main() -> None:
     args = parser.parse_args()
 
     raw = vars(args)
-    raw["use_ste"] = raw.pop("ste", False)
-    raw["sign_update"] = raw.pop("sign_update", False)
-    raw["sign_step_size"] = raw.pop("sign_step_size", 0.01)
     config = Config(
         **{k: v for k, v in raw.items() if k in Config.__dataclass_fields__}
     )
@@ -351,7 +311,6 @@ def main() -> None:
     set_seed(config.seed)
     device = torch.device(config.device)
 
-    # Resolve paths
     model_dir = resolve_model_dir(
         config.dataset, config.num_filters, config.t_obj, config.seed
     )
@@ -367,11 +326,9 @@ def main() -> None:
     output_dir = config.output_dir or f"{model_dir}/supervised_opt"
     os.makedirs(output_dir, exist_ok=True)
 
-    # Save config
     with open(f"{output_dir}/config.json", "w") as f:
         json.dump(asdict(config), f, indent=4)
 
-    # --- Load model and data ---
     logger.info("Loading model from %s", model_path)
     layer = load_model(model_path)
 
@@ -383,7 +340,6 @@ def main() -> None:
         "Train: %d images, Test: %d images", len(train_images), len(test_images)
     )
 
-    # --- Baseline evaluation (hard spike times + Ridge) ---
     logger.info("Computing baseline features...")
     X_train = extract_hard_features(
         layer,
@@ -404,7 +360,6 @@ def main() -> None:
     y_train = train_labels.numpy()
     y_test = test_labels.numpy()
 
-    # --- Baselines ---
     logger.info("Fitting Ridge baseline...")
     ridge = RidgeColumnSwap(alpha=config.ridge_alpha)
     ridge.fit(X_train, y_train)
@@ -427,17 +382,14 @@ def main() -> None:
         baseline_svc_val["accuracy"],
     )
 
-    # --- Create differentiable pipeline ---
     original_thresholds = layer.thresholds.detach().clone()
-    spike_module = DifferentiableConvSpikeTime(
-        weights_4d=layer.weights_4d.detach(),
-        thresholds=original_thresholds,
-        stride=layer.stride,
-        padding=layer.padding,
-        tau=config.tau_start,
-        t_no_spike=1.0,
-        use_ste=config.use_ste,
-    ).to(device)
+    layer = layer.to(device)
+    layer.eval()
+    layer._backend = "differential_dense"
+    layer.tau = config.tau_start
+    layer.t_no_spike = 1.0
+    layer.weights.requires_grad_(False)
+    spike_module = layer
 
     in_features = config.num_filters * config.pool_size * config.pool_size
     num_classes = len(np.unique(y_train))
@@ -453,9 +405,7 @@ def main() -> None:
     del ridge
 
     criterion = get_criterion(config.loss)
-    mode = "STE" if config.use_ste else "soft"
-    if config.sign_update:
-        mode += "+sign"
+    mode = "STE+sign" if config.sign_update else "STE"
     logger.info(
         "Loss: %s, Classifier init: %s, Mode: %s",
         config.loss,
@@ -463,7 +413,6 @@ def main() -> None:
         mode,
     )
 
-    # --- Optimizer (not used in sign_update mode) ---
     optimizer = torch.optim.Adam(
         [
             {"params": [spike_module.thresholds], "lr": config.lr_threshold},
@@ -472,7 +421,6 @@ def main() -> None:
         weight_decay=config.weight_decay,
     )
 
-    # --- Data loaders ---
     train_dataset = TensorDataset(train_images, train_labels)
     test_dataset = TensorDataset(test_images, test_labels)
     train_loader = DataLoader(
@@ -487,7 +435,6 @@ def main() -> None:
         shuffle=False,
     )
 
-    # --- Training loop ---
     history = {
         "train_acc": [],
         "val_acc": [],
@@ -581,10 +528,8 @@ def main() -> None:
             threshold_drift,
         )
 
-    # --- Final evaluation ---
     logger.info("=== Final Results ===")
 
-    # Load best checkpoint
     best = torch.load(f"{output_dir}/best_checkpoint.pt", weights_only=True)
     spike_module.thresholds.data = best["thresholds"].to(device)
     classifier.weight.data = best["classifier_weight"].to(device)
@@ -601,7 +546,6 @@ def main() -> None:
     )
     logger.info("Best supervised — val: %.4f", final_val_acc)
 
-    # Evaluate optimized thresholds with fresh classifiers (isolate threshold improvement)
     logger.info("Evaluating optimized thresholds with fresh classifiers...")
     layer.thresholds.data = best["thresholds"]
     X_train_opt = extract_hard_features(
@@ -640,7 +584,6 @@ def main() -> None:
         opt_svc_val["accuracy"],
     )
 
-    # --- Save results ---
     results = {
         "baseline": {
             "ridge_train_acc": float(baseline_ridge_train),

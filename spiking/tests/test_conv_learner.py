@@ -44,11 +44,14 @@ def make_biological_stdp():
 
 
 def run_forward(layer, input_times):
-    """Run forward pass to produce spikes in the layer."""
+    """Run a step-by-step simulation to produce spikes in the layer."""
     layer.train()
     layer.reset()
     for incoming_spikes, current_time, dt in iterate_spikes(input_times):
-        layer.forward(incoming_spikes, current_time, dt)
+        layer.simulate_step(incoming_spikes, current_time, dt)
+    # The conv learner reads ``layer.spike_times``; copy the simulation
+    # output into the training-mode cache so the property exposes it.
+    layer._spike_times = layer._step_spike_times.clone()
 
 
 class TestConvLearnerConstruction:
@@ -70,7 +73,7 @@ class TestConvLearnerConstruction:
 
 
 class TestConvLearnerStep:
-    def test_step_returns_float(self):
+    def test_step_returns_scalar_tensor(self):
         torch.manual_seed(42)
         layer = make_layer(threshold=0.5)
         layer.weights.data.fill_(0.5)
@@ -83,7 +86,7 @@ class TestConvLearnerStep:
         run_forward(layer, input_times)
 
         dw = learner.step(input_times)
-        assert isinstance(dw, float)
+        assert isinstance(dw, torch.Tensor) and dw.dim() == 0
 
     def test_step_updates_weights(self):
         torch.manual_seed(42)
