@@ -282,7 +282,7 @@ class TestEvaluateClassifier:
 
     def test_custom_classifier(self):
         from spiking.evaluation.eval_classifier import evaluate_classifier
-        from sklearn.svm import LinearSVC
+        from spiking.evaluation.torch_svc import TorchLinearSVC
 
         np.random.seed(42)
         X_train = np.random.rand(20, 10)
@@ -290,7 +290,7 @@ class TestEvaluateClassifier:
         X_test = np.random.rand(10, 10)
         y_test = np.array([0, 1] * 5)
 
-        classifier = LinearSVC(max_iter=20000)
+        classifier = TorchLinearSVC(C=1.0)
         train_metrics, val_metrics = evaluate_classifier(
             X_train, y_train, X_test, y_test, classifier=classifier
         )

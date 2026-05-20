@@ -1,26 +1,9 @@
 import numpy as np
 from sklearn.base import TransformerMixin
 from sklearn.decomposition import PCA
-from sklearn.svm import LinearSVC
 
 from spiking.evaluation.eval_utils import compute_metrics
-from spiking.evaluation.torch_svc import TorchLinearSVC, _CUDA_AVAILABLE
-
-try:
-    from cuml.svm import LinearSVC as CumlLinearSVC
-
-    _HAS_CUML = True
-except ImportError:
-    _HAS_CUML = False
-
-
-def _default_svc():
-    """Create a LinearSVC, preferring TorchLinearSVC (GPU) > cuML > sklearn."""
-    if _CUDA_AVAILABLE:
-        return TorchLinearSVC(C=1.0)
-    if _HAS_CUML:
-        return CumlLinearSVC(tol=1e-3, max_iter=10000)
-    return LinearSVC(dual=False, tol=1e-3, max_iter=10000)
+from spiking.evaluation.torch_svc import TorchLinearSVC
 
 
 def evaluate_classifier(
@@ -32,10 +15,10 @@ def evaluate_classifier(
 ) -> tuple[dict, dict]:
     """Fit a classifier and return (train_metrics, val_metrics).
 
-    Defaults to TorchLinearSVC (GPU) > cuML > sklearn CPU.
+    Defaults to ``TorchLinearSVC`` (CPU- or CUDA-accelerated; self-selects).
     """
     if classifier is None:
-        classifier = _default_svc()
+        classifier = TorchLinearSVC(C=1.0)
 
     classifier.fit(X_train, y_train)
 

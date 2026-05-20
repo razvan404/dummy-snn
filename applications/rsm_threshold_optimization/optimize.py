@@ -213,14 +213,9 @@ def make_classifier(name: str, alpha: float = 1.0):
 
         return RidgeColumnSwap(alpha=alpha)
     if name == "svc":
-        try:
-            from cuml.svm import LinearSVC
+        from spiking.evaluation.torch_svc import TorchLinearSVC
 
-            return LinearSVC(tol=1e-3, max_iter=10000)
-        except ImportError:
-            from sklearn.svm import LinearSVC
-
-            return LinearSVC(dual="auto", tol=1e-3, max_iter=5000)
+        return TorchLinearSVC(C=1.0)
     raise ValueError(f"Unknown classifier: {name}")
 
 

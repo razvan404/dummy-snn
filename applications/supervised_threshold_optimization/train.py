@@ -121,24 +121,21 @@ def init_classifier_from_svc(
     X_train: np.ndarray,
     y_train: np.ndarray,
 ) -> nn.Linear:
-    """Fit LinearSVC (cuml if available, else sklearn) and transfer to ``nn.Linear``."""
-    try:
-        from cuml.svm import LinearSVC
+    """Fit a linear SVM (TorchLinearSVC, CPU/CUDA) and transfer to ``nn.Linear``.
 
-        logger.info("Fitting LinearSVC (cuml GPU) for classifier initialization...")
-        svc = LinearSVC(tol=1e-3, max_iter=10000)
-    except ImportError:
-        from sklearn.svm import LinearSVC
+    Uses ``standardize=False`` so the fitted weights/bias act directly on the
+    raw feature space the downstream ``nn.Linear`` will see.
+    """
+    from spiking.evaluation.torch_svc import TorchLinearSVC
 
-        logger.info("Fitting LinearSVC (sklearn CPU) for classifier initialization...")
-        svc = LinearSVC(max_iter=5000, dual="auto")
-
+    logger.info("Fitting TorchLinearSVC for classifier initialization...")
+    svc = TorchLinearSVC(C=1.0, standardize=False)
     svc.fit(X_train, y_train)
     train_acc = (np.asarray(svc.predict(X_train)) == y_train).mean()
     logger.info("SVC init — train acc: %.4f", train_acc)
 
-    coef = np.asarray(svc.coef_)
-    intercept = np.asarray(svc.intercept_)
+    coef = np.asarray(svc.weights).T  # (d, K) -> (K, d)
+    intercept = svc._b.detach().cpu().numpy()
     num_classes, in_features = coef.shape
     linear = nn.Linear(in_features, num_classes)
     linear.weight.data = torch.tensor(coef, dtype=torch.float32)
