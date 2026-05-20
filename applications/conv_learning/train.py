@@ -276,8 +276,7 @@ def train_model(
         perm = torch.randperm(N)
         layer.train()
         epoch_dws = torch.empty(N, device=dev)
-        it = tqdm(range(N), desc=f"epoch {epoch}", unit="patch", leave=False)
-        for i in it:
+        for i in range(N):
             dw = trainer.step_batch(i, patches[perm[i]])
             epoch_dws[i] = dw
 
