@@ -122,9 +122,11 @@ __device__ __forceinline__ void gather_bins(
 ) {
   for (int i = 0; i < num_bins; ++i) my_bins[i] = 0.0f;
   for (int c = 0; c < C; ++c) {
+    #pragma unroll
     for (int ky = 0; ky < kH; ++ky) {
       int y = oh * stride + ky - pad;
       if (y < 0 || y >= H) continue;
+      #pragma unroll
       for (int kx = 0; kx < kW; ++kx) {
         int x = ow * stride + kx - pad;
         if (x < 0 || x >= W) continue;
@@ -179,7 +181,7 @@ __global__ void gather_first_spike_kernel_t(
   const int f = (idx / (oW * oH)) % F;
   const int b = idx / (oW * oH * F);
 
-  float* my_bins = smem + (size_t)tid * num_bins;
+  float* my_bins = smem + (size_t)tid * (num_bins + 1);
   gather_bins(input_times, weights, b, C, H, W, f, kH, kW, oh, ow,
               stride, pad, num_bins, my_bins);
   float total;
@@ -207,7 +209,7 @@ __global__ void gather_first_spike_multi_kernel_t(
   const int f = (idx / (oW * oH)) % F;
   const int b = idx / (oW * oH * F);
 
-  float* my_bins = smem + (size_t)tid * num_bins;
+  float* my_bins = smem + (size_t)tid * (num_bins + 1);
   gather_bins(input_times, weights, b, C, H, W, f, kH, kW, oh, ow,
               stride, pad, num_bins, my_bins);
 
@@ -242,7 +244,7 @@ SortedEvents prepare_sorted_events(const at::Tensor& in_c) {
 }
 
 static int pick_gather_block(int num_bins) {
-  int t = kGatherSmemBudgetBytes / (num_bins * (int)sizeof(float));
+  int t = kGatherSmemBudgetBytes / ((num_bins + 1) * (int)sizeof(float));
   if (t > kGatherMaxBlock) t = kGatherMaxBlock;
   t = (t / kWarpSize) * kWarpSize;
   return t < kWarpSize ? kWarpSize : t;
@@ -388,7 +390,7 @@ std::tuple<at::Tensor, at::Tensor> first_spike_times_cuda(
 
   const int block = pick_gather_block((int)num_bins);
   const int grid = (total + block - 1) / block;
-  const size_t smem = (size_t)block * (size_t)num_bins * sizeof(float);
+  const size_t smem = (size_t)block * (size_t)(num_bins + 1) * sizeof(float);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   auto launch = [&](auto kernel, float* pot_p) {
@@ -431,7 +433,7 @@ std::tuple<at::Tensor, at::Tensor> first_spike_times_multi_threshold_cuda(
 
   const int block = pick_gather_block((int)num_bins);
   const int grid = (total + block - 1) / block;
-  const size_t smem = (size_t)block * (size_t)num_bins * sizeof(float);
+  const size_t smem = (size_t)block * (size_t)(num_bins + 1) * sizeof(float);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   auto launch = [&](auto kernel, float* pot_p) {
