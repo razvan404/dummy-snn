@@ -1,9 +1,4 @@
-import numpy as np
 import torch
-from torch.utils.data import DataLoader
-
-from spiking.evaluation.feature_extraction import spike_times_to_features
-from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 
 
 def sum_pool_features(features: torch.Tensor, pool_size: int = 2) -> torch.Tensor:
@@ -32,38 +27,3 @@ def sum_pool_features(features: torch.Tensor, pool_size: int = 2) -> torch.Tenso
     if needs_batch:
         pooled = pooled.squeeze(0)
     return pooled
-
-
-@torch.no_grad()
-def extract_conv_features(
-    model: ConvIntegrateAndFireLayer,
-    dataloader: DataLoader,
-    pool_size: int = 2,
-    t_target: float | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Run conv model inference and extract flat feature vectors.
-
-    Uses batched analytical spike time computation, then applies
-    spike_times_to_features and sum pooling.
-
-    :param model: Convolutional spiking layer.
-    :param dataloader: DataLoader yielding (times, labels) per sample.
-    :param pool_size: Sum pooling window size.
-    :param t_target: Optional target time for feature conversion.
-    :returns: (X, y) where X is (N, flat_features) and y is (N,) numpy arrays.
-    """
-    model.eval()
-
-    chunk_loader = DataLoader(dataloader.dataset, batch_size=256, shuffle=False)
-
-    X_parts: list[np.ndarray] = []
-    y_parts: list[np.ndarray] = []
-
-    for batch_times, batch_labels in chunk_loader:
-        spike_times = model.infer_spike_times_batch(batch_times)
-        features = spike_times_to_features(spike_times, t_target)
-        pooled = sum_pool_features(features, pool_size)
-        X_parts.append(pooled.flatten(1).numpy())
-        y_parts.append(batch_labels.numpy())
-
-    return np.concatenate(X_parts, axis=0), np.concatenate(y_parts, axis=0)

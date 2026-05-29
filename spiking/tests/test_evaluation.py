@@ -383,9 +383,9 @@ class TestInferSpikeTimes:
             # Analytical
             analytical_times = layer.infer_spike_times(input_times)
 
-            assert torch.allclose(
-                iterative_times, analytical_times, atol=1e-6
-            ), f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
+            assert torch.allclose(iterative_times, analytical_times, atol=1e-6), (
+                f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
+            )
 
     def test_sequential_equivalence(self):
         """Multi-layer analytical must match iterative."""
@@ -412,9 +412,9 @@ class TestInferSpikeTimes:
             # Analytical
             analytical_times = model.infer_spike_times(input_times)
 
-            assert torch.allclose(
-                iterative_times, analytical_times, atol=1e-6
-            ), f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
+            assert torch.allclose(iterative_times, analytical_times, atol=1e-6), (
+                f"Seed {seed}: iterative={iterative_times} vs analytical={analytical_times}"
+            )
 
 
 class TestInferSpikeTimesBatch:
@@ -620,8 +620,9 @@ class TestPrecomputeCumulativePotentials:
                 unique_times, cum_at_boundaries * factor, layer.thresholds
             )
 
-            torch.testing.assert_close(actual, expected, atol=1e-6, rtol=0), (
-                f"Mismatch at factor={factor}"
+            (
+                torch.testing.assert_close(actual, expected, atol=1e-6, rtol=0),
+                (f"Mismatch at factor={factor}"),
             )
 
     def test_with_mixed_inf_finite(self):
@@ -638,82 +639,6 @@ class TestPrecomputeCumulativePotentials:
         )
 
         torch.testing.assert_close(actual, expected, atol=1e-6, rtol=0)
-
-
-class TestBinaryFirstSpike:
-    def test_single_earliest_spike(self):
-        from spiking.evaluation.decoding import BinaryFirstSpike
-
-        decoder = BinaryFirstSpike()
-        # batch=1, neurons=4: neuron 1 spikes earliest
-        spike_times = torch.tensor([[0.5, 0.2, 0.8, float("inf")]])
-        result = decoder.decode(spike_times)
-
-        expected = torch.tensor([[0.0, 1.0, 0.0, 0.0]])
-        torch.testing.assert_close(result, expected)
-
-    def test_tied_earliest_spikes(self):
-        from spiking.evaluation.decoding import BinaryFirstSpike
-
-        decoder = BinaryFirstSpike()
-        # Two neurons tie for earliest
-        spike_times = torch.tensor([[0.3, 0.3, 0.8, float("inf")]])
-        result = decoder.decode(spike_times)
-
-        expected = torch.tensor([[1.0, 1.0, 0.0, 0.0]])
-        torch.testing.assert_close(result, expected)
-
-    def test_all_inf(self):
-        from spiking.evaluation.decoding import BinaryFirstSpike
-
-        decoder = BinaryFirstSpike()
-        spike_times = torch.tensor([[float("inf"), float("inf")]])
-        result = decoder.decode(spike_times)
-
-        expected = torch.tensor([[0.0, 0.0]])
-        torch.testing.assert_close(result, expected)
-
-    def test_batch(self):
-        from spiking.evaluation.decoding import BinaryFirstSpike
-
-        decoder = BinaryFirstSpike()
-        spike_times = torch.tensor(
-            [
-                [0.5, 0.2, 0.8],
-                [0.1, 0.5, 0.5],
-            ]
-        )
-        result = decoder.decode(spike_times)
-
-        expected = torch.tensor(
-            [
-                [0.0, 1.0, 0.0],
-                [1.0, 0.0, 0.0],
-            ]
-        )
-        torch.testing.assert_close(result, expected)
-
-
-class TestLinearInversion:
-    def test_specific_values(self):
-        from spiking.evaluation.decoding import LinearInversion
-
-        decoder = LinearInversion()
-        spike_times = torch.tensor([[0.0, 0.3, 0.7, 1.0, float("inf")]])
-        result = decoder.decode(spike_times)
-
-        expected = torch.tensor([[1.0, 0.7, 0.3, 0.0, 0.0]])
-        torch.testing.assert_close(result, expected, atol=1e-6, rtol=0)
-
-    def test_output_range(self):
-        from spiking.evaluation.decoding import LinearInversion
-
-        decoder = LinearInversion()
-        spike_times = torch.tensor([[-0.5, 0.5, 1.5, float("inf")]])
-        result = decoder.decode(spike_times)
-
-        assert torch.all(result >= 0.0)
-        assert torch.all(result <= 1.0)
 
 
 class TestScaledInversion:
@@ -804,196 +729,6 @@ class TestTargetRelative:
         legacy = spike_times_to_features(spike_times, t_target=0.7)
 
         torch.testing.assert_close(decoded, legacy, atol=1e-6, rtol=0)
-
-
-class TestNeuronMeanRelative:
-    def test_specific_values(self):
-        from spiking.evaluation.decoding import NeuronMeanRelative
-
-        mean_spike_times = torch.tensor([0.5, 0.7, 0.3])
-        decoder = NeuronMeanRelative(mean_spike_times)
-
-        # spike_times[i] - mean[i]: deviation from mean
-        spike_times = torch.tensor([[0.5, 0.8, 0.5]])
-        result = decoder.decode(spike_times)
-
-        # clamp(1 - (t - mean), 0, 1)
-        # n0: 1 - (0.5 - 0.5) = 1.0
-        # n1: 1 - (0.8 - 0.7) = 0.9
-        # n2: 1 - (0.5 - 0.3) = 0.8
-        expected = torch.tensor([[1.0, 0.9, 0.8]])
-        torch.testing.assert_close(result, expected, atol=1e-6, rtol=0)
-
-    def test_inf_maps_to_zero(self):
-        from spiking.evaluation.decoding import NeuronMeanRelative
-
-        mean_spike_times = torch.tensor([0.5, 0.7])
-        decoder = NeuronMeanRelative(mean_spike_times)
-
-        spike_times = torch.tensor([[float("inf"), 0.7]])
-        result = decoder.decode(spike_times)
-
-        assert result[0, 0].item() == pytest.approx(0.0)
-        assert result[0, 1].item() == pytest.approx(1.0)
-
-    def test_early_spike_clamped_to_one(self):
-        from spiking.evaluation.decoding import NeuronMeanRelative
-
-        mean_spike_times = torch.tensor([0.8])
-        decoder = NeuronMeanRelative(mean_spike_times)
-
-        # t=0.2, mean=0.8 → 1 - (0.2 - 0.8) = 1.6 → clamped to 1.0
-        spike_times = torch.tensor([[0.2]])
-        result = decoder.decode(spike_times)
-
-        assert result[0, 0].item() == pytest.approx(1.0)
-
-
-class TestBinaryWindowFirstSpike:
-    def test_single_earliest_within_tolerance(self):
-        from spiking.evaluation.decoding import BinaryWindowFirstSpike
-
-        decoder = BinaryWindowFirstSpike(tolerance=0.05)
-        # neuron 1 spikes earliest at 0.2; neuron 0 at 0.24 is within 0.05
-        spike_times = torch.tensor([[0.24, 0.2, 0.8, float("inf")]])
-        result = decoder.decode(spike_times)
-
-        expected = torch.tensor([[1.0, 1.0, 0.0, 0.0]])
-        torch.testing.assert_close(result, expected)
-
-    def test_outside_tolerance_excluded(self):
-        from spiking.evaluation.decoding import BinaryWindowFirstSpike
-
-        decoder = BinaryWindowFirstSpike(tolerance=0.05)
-        # neuron 1 spikes at 0.2; neuron 0 at 0.26 is outside ±0.05
-        spike_times = torch.tensor([[0.26, 0.2, 0.8, float("inf")]])
-        result = decoder.decode(spike_times)
-
-        expected = torch.tensor([[0.0, 1.0, 0.0, 0.0]])
-        torch.testing.assert_close(result, expected)
-
-    def test_all_inf(self):
-        from spiking.evaluation.decoding import BinaryWindowFirstSpike
-
-        decoder = BinaryWindowFirstSpike(tolerance=0.05)
-        spike_times = torch.tensor([[float("inf"), float("inf")]])
-        result = decoder.decode(spike_times)
-
-        expected = torch.tensor([[0.0, 0.0]])
-        torch.testing.assert_close(result, expected)
-
-    def test_batch(self):
-        from spiking.evaluation.decoding import BinaryWindowFirstSpike
-
-        decoder = BinaryWindowFirstSpike(tolerance=0.05)
-        spike_times = torch.tensor(
-            [
-                [0.24, 0.2, 0.8],  # min=0.2, 0.24 within tolerance
-                [0.1, 0.5, 0.14],  # min=0.1, 0.14 within tolerance
-            ]
-        )
-        result = decoder.decode(spike_times)
-
-        expected = torch.tensor(
-            [
-                [1.0, 1.0, 0.0],
-                [1.0, 0.0, 1.0],
-            ]
-        )
-        torch.testing.assert_close(result, expected)
-
-    def test_exact_boundary_included(self):
-        from spiking.evaluation.decoding import BinaryWindowFirstSpike
-
-        decoder = BinaryWindowFirstSpike(tolerance=0.05)
-        # neuron at exactly min + tolerance should be included
-        spike_times = torch.tensor([[0.25, 0.2, 0.8]])
-        result = decoder.decode(spike_times)
-
-        expected = torch.tensor([[1.0, 1.0, 0.0]])
-        torch.testing.assert_close(result, expected)
-
-
-class TestExtractSpikeTimes:
-    def test_returns_correct_shapes(self):
-        from spiking.evaluation.feature_extraction import extract_spike_times
-
-        torch.manual_seed(42)
-        shape = (2, 4, 4)
-        num_inputs = 2 * 4 * 4
-        num_outputs = 5
-        num_samples = 5
-
-        layer = make_layer(num_inputs=num_inputs, num_outputs=num_outputs)
-        loader = make_fake_dataloader(num_samples=num_samples, shape=shape)
-
-        spike_times, labels = extract_spike_times(layer, loader)
-
-        assert spike_times.shape == (num_samples, num_outputs)
-        assert labels.shape == (num_samples,)
-
-    def test_returns_raw_spike_times(self):
-        """extract_spike_times should return actual spike times, not features."""
-        from spiking.evaluation.feature_extraction import extract_spike_times
-
-        torch.manual_seed(42)
-        shape = (2, 4, 4)
-        num_inputs = 2 * 4 * 4
-        layer = make_layer(num_inputs=num_inputs, num_outputs=5, avg_threshold=0.01)
-        loader = make_fake_dataloader(num_samples=3, shape=shape)
-
-        spike_times, _ = extract_spike_times(layer, loader)
-
-        # With very low thresholds, neurons spike early → spike_times should be small
-        # but NOT clamped to [0,1] like features would be
-        # Raw spike times can be any non-negative value (or inf)
-        assert spike_times.dtype == torch.float32
-
-    def test_matches_extract_features_with_scaled_inversion(self):
-        """extract_spike_times + ScaledInversion should match extract_features."""
-        from spiking.evaluation.decoding import ScaledInversion
-        from spiking.evaluation.feature_extraction import (
-            extract_features,
-            extract_spike_times,
-        )
-
-        torch.manual_seed(42)
-        shape = (2, 4, 4)
-        num_inputs = 2 * 4 * 4
-        layer = make_layer(num_inputs=num_inputs, num_outputs=5)
-        loader = make_fake_dataloader(num_samples=5, shape=shape)
-
-        spike_times, labels = extract_spike_times(layer, loader)
-        decoder = ScaledInversion()
-        X_decoded = decoder.decode(spike_times).numpy()
-
-        X_default, y_default = extract_features(layer, loader, t_target=None)
-
-        np.testing.assert_allclose(X_decoded, X_default, atol=1e-6)
-        np.testing.assert_array_equal(labels.numpy(), y_default)
-
-    def test_matches_extract_features_with_target_relative(self):
-        """extract_spike_times + TargetRelative should match extract_features with t_target."""
-        from spiking.evaluation.decoding import TargetRelative
-        from spiking.evaluation.feature_extraction import (
-            extract_features,
-            extract_spike_times,
-        )
-
-        torch.manual_seed(42)
-        shape = (2, 4, 4)
-        num_inputs = 2 * 4 * 4
-        layer = make_layer(num_inputs=num_inputs, num_outputs=5, avg_threshold=0.01)
-        loader = make_fake_dataloader(num_samples=5, shape=shape)
-
-        spike_times, labels = extract_spike_times(layer, loader)
-        decoder = TargetRelative(t_target=0.7)
-        X_decoded = decoder.decode(spike_times).numpy()
-
-        X_legacy, y_legacy = extract_features(layer, loader, t_target=0.7)
-
-        np.testing.assert_allclose(X_decoded, X_legacy, atol=1e-6)
-        np.testing.assert_array_equal(labels.numpy(), y_legacy)
 
 
 class TestIterateSpikes:

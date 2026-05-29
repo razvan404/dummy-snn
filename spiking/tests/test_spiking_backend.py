@@ -4,9 +4,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from applications.threshold_research.conv_neuron_perturbation import (
-    multi_threshold_conv_accumulate,
-)
+from spiking.tests.multi_threshold_reference import multi_threshold_conv_accumulate
 from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 from spiking.threshold.normal_initialization import NormalInitialization
 import spiking_backend

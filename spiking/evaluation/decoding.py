@@ -16,43 +16,6 @@ class Decoder(ABC):
         """
 
 
-class BinaryFirstSpike(Decoder):
-    """Neurons with the earliest finite spike time get 1.0, rest get 0.0."""
-
-    def decode(self, spike_times: torch.Tensor) -> torch.Tensor:
-        min_times = spike_times.min(dim=-1, keepdim=True).values
-        result = torch.where(
-            torch.isfinite(spike_times) & (spike_times == min_times),
-            torch.ones_like(spike_times),
-            torch.zeros_like(spike_times),
-        )
-        return result
-
-
-class BinaryWindowFirstSpike(Decoder):
-    """Neurons within ±tolerance of the earliest spike time get 1.0, rest get 0.0."""
-
-    def __init__(self, tolerance: float):
-        self.tolerance = tolerance
-
-    def decode(self, spike_times: torch.Tensor) -> torch.Tensor:
-        filled = spike_times.clone()
-        filled[~torch.isfinite(filled)] = float("inf")
-        min_times = filled.min(dim=-1, keepdim=True).values
-        return torch.where(
-            torch.isfinite(spike_times) & (spike_times <= min_times + self.tolerance),
-            torch.ones_like(spike_times),
-            torch.zeros_like(spike_times),
-        )
-
-
-class LinearInversion(Decoder):
-    """clamp(1 - t, 0, 1). Earlier spikes yield higher features."""
-
-    def decode(self, spike_times: torch.Tensor) -> torch.Tensor:
-        return torch.clamp(1.0 - spike_times, min=0, max=1.0)
-
-
 class ScaledInversion(Decoder):
     """Per-sample scaling: clamp((1 - t) / (1 - min_t), 0, 1).
 
@@ -91,14 +54,3 @@ class TargetRelative(Decoder):
             min=0,
             max=1.0,
         )
-
-
-class NeuronMeanRelative(Decoder):
-    """Decode relative to per-neuron mean spike times: clamp(1 - (t - mean), 0, 1)."""
-
-    def __init__(self, mean_spike_times: torch.Tensor):
-        self.mean_spike_times = mean_spike_times
-
-    def decode(self, spike_times: torch.Tensor) -> torch.Tensor:
-        raw = 1.0 - (spike_times - self.mean_spike_times)
-        return torch.clamp(raw, min=0, max=1.0)

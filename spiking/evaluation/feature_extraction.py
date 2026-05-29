@@ -20,24 +20,6 @@ def spike_times_to_features(
 
 
 @torch.no_grad()
-def extract_spike_times(
-    model: SpikingModule,
-    dataloader: DataLoader,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run model inference on a dataloader and return raw spike times and labels.
-
-    Returns (spike_times, labels) as torch tensors.
-    """
-    model.eval()
-    full_loader = DataLoader(
-        dataloader.dataset, batch_size=len(dataloader.dataset), shuffle=False
-    )
-    all_times, all_labels = next(iter(full_loader))
-    spike_times = model.infer_spike_times_batch(all_times.flatten(1))
-    return spike_times, all_labels
-
-
-@torch.no_grad()
 def extract_features(
     model: SpikingModule,
     dataloader: DataLoader,
