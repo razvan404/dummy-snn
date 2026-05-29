@@ -1,6 +1,6 @@
 """Multi-pass greedy threshold optimization from precomputed feature cache.
 
-Reads the per-neuron feature cache (compute_feature_cache.py) and runs
+Reads the per-neuron feature cache (feature_cache.py) and runs
 coordinate descent to maximize **training accuracy**.
 
 Classifier backends:
@@ -30,7 +30,7 @@ import numpy as np
 import torch
 
 from applications.common import set_seed
-from applications.threshold_research.filter_ordering import ORDERINGS, get_filter_order
+from applications.refinement.filter_ordering import ORDERINGS, get_filter_order
 from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
 
 logger = logging.getLogger(__name__)

@@ -3,6 +3,7 @@ data/
 checkpoints/
 logs/
 archive/
+local/
 paper/
 papers/
 benchmarks/

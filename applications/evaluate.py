@@ -1,4 +1,4 @@
-"""Evaluate a trained conv SNN with LinearSVC and Ridge classifiers."""
+"""Evaluate a trained conv SNN with a Torch LinearSVC classifier."""
 
 import argparse
 import gc
@@ -9,8 +9,6 @@ import os
 import numpy as np
 import torch
 from tqdm import tqdm
-
-from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
 
 from applications.common import load_split_data, resolve_params
 from spiking.evaluation import evaluate_classifier
@@ -56,7 +54,7 @@ def _extract_features(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Evaluate conv SNN with LinearSVC and Ridge"
+        description="Evaluate conv SNN with a Torch LinearSVC"
     )
     parser.add_argument(
         "--dataset",
@@ -115,7 +113,7 @@ def main() -> None:
     del test_data
     gc.collect()
 
-    # LinearSVC
+    # LinearSVC (Torch)
     svc_train, svc_val = evaluate_classifier(X_train, y_train, X_test, y_test)
     logger.info(
         "LinearSVC  — train: %.4f, val: %.4f",
@@ -123,20 +121,8 @@ def main() -> None:
         svc_val["accuracy"],
     )
 
-    # Ridge
-    ridge = RidgeColumnSwap(alpha=1.0)
-    ridge_train, ridge_val = evaluate_classifier(
-        X_train, y_train, X_test, y_test, classifier=ridge
-    )
-    logger.info(
-        "Ridge      — train: %.4f, val: %.4f",
-        ridge_train["accuracy"],
-        ridge_val["accuracy"],
-    )
-
     metrics = {
         "linear_svc": {"train": svc_train, "validation": svc_val},
-        "ridge": {"train": ridge_train, "validation": ridge_val},
     }
     with open(f"{model_dir}/metrics.json", "w") as f:
         json.dump(metrics, f, indent=4)
