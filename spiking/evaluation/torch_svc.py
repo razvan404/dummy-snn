@@ -192,9 +192,7 @@ class TorchLinearSVC(ColumnSwapClassifier):
         out[:, self._feat_const] = 0.0
         return out
 
-    def _scale_cols_np(
-        self, cols: np.ndarray, col_indices: np.ndarray
-    ) -> np.ndarray:
+    def _scale_cols_np(self, cols: np.ndarray, col_indices: np.ndarray) -> np.ndarray:
         """Scale a subset of columns (n, k) using stored min/max for those cols."""
         if not self._standardize or self._feat_min is None:
             return cols.astype(np.float32, copy=True)
@@ -497,7 +495,7 @@ class TorchLinearSVC(ColumnSwapClassifier):
         Warm-starts from the current ``self._Wa`` for speed (~300 ms per
         call). Warm-start drift across many commits in one pass is cleaned
         up by a cold refit at pass boundaries (see ``main()`` in
-        ``applications/cached_greedy_optimization/optimize.py``).
+        ``applications/refinement/greedy.py``).
         """
         col_indices = np.asarray(col_indices)
         new_scaled = self._scale_cols_np(new_train_cols, col_indices)
@@ -521,3 +519,21 @@ class TorchLinearSVC(ColumnSwapClassifier):
     def weights(self) -> np.ndarray:
         """Weight matrix as numpy array, shape (d, K)."""
         return self._W.cpu().numpy()
+
+    _loss_type = "svc"
+
+    def loss_state(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per-(sample, class) (coef, hess_weight) used by EM gradient/curvature.
+
+        Squared hinge with active set D = 1[margin < 1]:
+          coef_nk        = −2C · D_nk · (1 − margin_nk) · Y_nk
+          hess_weight_nk = 2C · D_nk
+
+        `coef @ Wa.T` gives the loss gradient in scaled feature space.
+        """
+        score = self._Xa @ self._Wa
+        margin = self._Y * score
+        active = (margin < 1.0).float()
+        coef = -2.0 * self._C * active * (1.0 - margin) * self._Y
+        hess_weight = 2.0 * self._C * active
+        return coef, hess_weight
