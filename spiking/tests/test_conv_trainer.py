@@ -72,7 +72,7 @@ class TestConvTrainerStepBatch:
         times = torch.rand(2, 8, 8)
         times[times > 0.7] = float("inf")
         # Run the analytical forward without the trailing reset()
-        spike_times, _ = layer(times.unsqueeze(0), first_spike_only=False)
+        spike_times = layer(times.unsqueeze(0), first_spike_only=False)
         assert spike_times.dim() == 4  # (B, F, oH, oW)
 
     def test_step_batch_resets_after(self):

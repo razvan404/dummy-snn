@@ -9,8 +9,8 @@ from spiking.threshold import ThresholdInitialization
 class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
     """Conv IF layer with pluggable analytical inference backends.
 
-    Stateless by default; caches ``_spike_times`` / ``_cum_potential``
-    only when ``self.training`` (STDP requires B=1).
+    Spike times in, spike times out. Stateless by default; caches
+    ``_spike_times`` only when ``self.training`` (STDP requires B=1).
     """
 
     num_bins: int = 64
@@ -53,7 +53,6 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         self._dtype = dtype
         self._backend = backend
         self._spike_times: torch.Tensor | None = None
-        self._cum_potential: torch.Tensor | None = None
 
     @property
     def weights_4d(self) -> torch.Tensor:
@@ -74,7 +73,10 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         if self.padding > 0:
             input_times = F.pad(input_times, [self.padding] * 4, value=float("inf"))
         patches = F.unfold(
-            input_times, kernel_size=self.kernel_size, padding=0, stride=self.stride,
+            input_times,
+            kernel_size=self.kernel_size,
+            padding=0,
+            stride=self.stride,
         )
         patches = patches.permute(0, 2, 1)
         return patches if has_batch else patches.squeeze(0)
@@ -83,8 +85,13 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         self,
         input_times: torch.Tensor,
         first_spike_only: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Batched analytical inference. Returns ``(spike_times, cum_potential)``."""
+    ) -> torch.Tensor:
+        """Spike times in, spike times out: ``(B, C, H, W) -> (B, F, oH, oW)``.
+
+        Potentials are not computed here — STDP and threshold adaptation read
+        only spike times. Use ``infer_spike_times_and_potentials_batch`` when
+        you explicitly need cumulative potentials.
+        """
         from spiking.layers.backends import is_differentiable
 
         if input_times.dim() != 4:
@@ -99,29 +106,36 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
 
         ctx = torch.enable_grad if diff else torch.no_grad
         with ctx():
-            spike_times, cum_potential = self._dispatch_backend(
-                input_times, with_cum_potential=True,
+            spike_times, _ = self._dispatch_backend(
+                input_times,
+                with_cum_potential=False,
             )
             if first_spike_only:
                 spike_times = self._wta_across_filters(spike_times)
 
         if self.training and not diff:
             self._spike_times = spike_times[0].detach()
-            if cum_potential.numel() > 0:
-                self._cum_potential = cum_potential[0].detach()
 
-        return spike_times, cum_potential
+        return spike_times
 
     def _dispatch_backend(
-        self, input_times: torch.Tensor, *, with_cum_potential: bool,
+        self,
+        input_times: torch.Tensor,
+        *,
+        with_cum_potential: bool,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         from spiking.layers.backends import get_backend
 
         return get_backend(self._backend)(
-            input_times, self.weights_4d, self.thresholds,
-            stride=self.stride, padding=self.padding,
-            num_bins=self.num_bins, with_cum_potential=with_cum_potential,
-            tau=self.tau, t_no_spike=self.t_no_spike,
+            input_times,
+            self.weights_4d,
+            self.thresholds,
+            stride=self.stride,
+            padding=self.padding,
+            num_bins=self.num_bins,
+            with_cum_potential=with_cum_potential,
+            tau=self.tau,
+            t_no_spike=self.t_no_spike,
         )
 
     @staticmethod
@@ -146,8 +160,11 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         from spiking.layers.backends.dense import dense
 
         return dense(
-            input_times, self.weights_4d, self.thresholds,
-            stride=self.stride, padding=self.padding,
+            input_times,
+            self.weights_4d,
+            self.thresholds,
+            stride=self.stride,
+            padding=self.padding,
         )
 
     def _init_spatial_buffers(self, oH: int, oW: int) -> None:
@@ -164,8 +181,9 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         )
         self.register_buffer(
             "_step_spike_times",
-            torch.full((self.num_filters, oH, oW), float("inf"),
-                       dtype=self._dtype, device=dev),
+            torch.full(
+                (self.num_filters, oH, oW), float("inf"), dtype=self._dtype, device=dev
+            ),
         )
         self.register_buffer(
             "_output_spikes",
@@ -190,8 +208,10 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
             return self._output_spikes
 
         contrib = F.conv2d(
-            incoming_spikes.unsqueeze(0), self.weights_4d,
-            stride=self.stride, padding=self.padding,
+            incoming_spikes.unsqueeze(0),
+            self.weights_4d,
+            stride=self.stride,
+            padding=self.padding,
         ).squeeze(0)
 
         update_mask = active & torch.isinf(self._step_spike_times)
@@ -208,7 +228,6 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
 
     def reset(self):
         self._spike_times = None
-        self._cum_potential = None
         if self._oH is not None:
             self.membrane_potentials.zero_()
             self.refractory_times.zero_()
@@ -225,19 +244,21 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
 
     @torch.no_grad()
     def _conv2d_accumulate(
-        self, input_times: torch.Tensor, *, with_cum_potential: bool = False,
+        self,
+        input_times: torch.Tensor,
+        *,
+        with_cum_potential: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         return self._dispatch_backend(
-            input_times, with_cum_potential=with_cum_potential,
+            input_times,
+            with_cum_potential=with_cum_potential,
         )
 
     @torch.no_grad()
     def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
         if input_times.dim() == 2:
             return super().infer_spike_times_batch(input_times)
-        spike_times, _ = self._conv2d_accumulate(
-            input_times, with_cum_potential=False
-        )
+        spike_times, _ = self._conv2d_accumulate(input_times, with_cum_potential=False)
         return spike_times
 
     @torch.no_grad()

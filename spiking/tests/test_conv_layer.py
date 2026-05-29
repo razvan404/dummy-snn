@@ -132,7 +132,10 @@ class TestConvLayerForward:
 
     def test_spike_times_recorded(self):
         layer = make_layer(
-            in_channels=1, num_filters=1, kernel_size=3, padding=1,
+            in_channels=1,
+            num_filters=1,
+            kernel_size=3,
+            padding=1,
             threshold=0.1,
         )
         layer.weights.data.fill_(1.0)
@@ -152,7 +155,10 @@ class TestConvLayerForward:
 class TestConvLayerReset:
     def test_reset_clears_spike_times(self):
         layer = make_layer(
-            in_channels=1, num_filters=1, kernel_size=3, padding=1,
+            in_channels=1,
+            num_filters=1,
+            kernel_size=3,
+            padding=1,
             threshold=0.1,
         )
         layer.weights.data.fill_(1.0)
@@ -260,7 +266,7 @@ class TestConvLayerForward:
         layer = make_layer(in_channels=2, num_filters=8, kernel_size=3, threshold=2.0)
         layer.num_bins = NUM_BINS
         layer.eval()
-        times = (torch.randint(0, NUM_BINS, (B, 2, 8, 8)).float() / NUM_BINS)
+        times = torch.randint(0, NUM_BINS, (B, 2, 8, 8)).float() / NUM_BINS
         times = torch.where(
             torch.rand(times.shape) < 0.5, times, torch.full_like(times, float("inf"))
         )
@@ -271,9 +277,9 @@ class TestConvLayerForward:
         """Inputs bin-aligned to ``NUM_BINS`` so all three backends are exact vs ``base``."""
         layer, times = self._setup()
         layer._backend = "base"
-        ref, _ = layer(times, first_spike_only=False)
+        ref = layer(times, first_spike_only=False)
         layer._backend = backend
-        out, _ = layer(times, first_spike_only=False)
+        out = layer(times, first_spike_only=False)
         finite = torch.isfinite(ref) & torch.isfinite(out)
         if finite.any():
             torch.testing.assert_close(ref[finite], out[finite], atol=1e-5, rtol=0)
@@ -281,8 +287,8 @@ class TestConvLayerForward:
 
     def test_first_spike_only_keeps_one_filter_per_position(self):
         layer, times = self._setup(B=1, seed=3)
-        st, _ = layer(times, first_spike_only=True)
-        st_full, _ = layer(times, first_spike_only=False)
+        st = layer(times, first_spike_only=True)
+        st_full = layer(times, first_spike_only=False)
         assert (torch.isfinite(st).sum(dim=1) <= 1).all()
         kept = torch.isfinite(st)
         min_per_pos = st_full.amin(dim=1, keepdim=True).expand_as(st)
@@ -312,9 +318,9 @@ class TestConvLayerForward:
         layer.thresholds.requires_grad_(True)
 
         layer._backend = "base"
-        ref, _ = layer(times, first_spike_only=False)
+        ref = layer(times, first_spike_only=False)
         layer._backend = backend
-        out, _ = layer(times, first_spike_only=False)
+        out = layer(times, first_spike_only=False)
         finite = torch.isfinite(ref) & torch.isfinite(out)
         if finite.any():
             torch.testing.assert_close(ref[finite], out[finite], atol=1e-5, rtol=0)
@@ -334,10 +340,10 @@ class TestConvLayerForward:
             torch.rand(times.shape) < 0.5, times, torch.full_like(times, float("inf"))
         )
         layer._backend = "base"
-        ref, _ = layer(times, first_spike_only=False)
+        ref = layer(times, first_spike_only=False)
         layer._backend = "gather"
         layer.num_bins = num_bins
-        out, _ = layer(times, first_spike_only=False)
+        out = layer(times, first_spike_only=False)
         finite = torch.isfinite(ref) & torch.isfinite(out)
         if finite.any():
             assert (ref[finite] - out[finite]).max().item() < 1.0 / num_bins + 1e-6
@@ -473,9 +479,9 @@ class TestConvFCEquivalence:
                 for c in range(oW):
                     patch = input_times[b, :, r : r + K, c : c + K].flatten()
                     fc_result = fc_layer.infer_spike_times(patch)
-                    assert torch.allclose(
-                        conv_result[b, :, r, c], fc_result
-                    ), f"Mismatch at batch={b}, pos=({r},{c})"
+                    assert torch.allclose(conv_result[b, :, r, c], fc_result), (
+                        f"Mismatch at batch={b}, pos=({r},{c})"
+                    )
 
 
 class TestConv2dVsUnfoldEquivalence:
@@ -495,7 +501,11 @@ class TestConv2dVsUnfoldEquivalence:
 
     def test_with_padding(self):
         layer = make_layer(
-            in_channels=6, num_filters=8, kernel_size=5, padding=2, threshold=5.0,
+            in_channels=6,
+            num_filters=8,
+            kernel_size=5,
+            padding=2,
+            threshold=5.0,
         )
         inp = self._make_input(8, 6, 10, 10, seed=7)
         conv2d_result = layer.infer_spike_times_batch(inp)
@@ -534,7 +544,10 @@ class TestConvInferenceBenchmark:
         torch.manual_seed(42)
 
         layer = make_layer(
-            in_channels=C, num_filters=F_n, kernel_size=K, threshold=10.0,
+            in_channels=C,
+            num_filters=F_n,
+            kernel_size=K,
+            threshold=10.0,
         )
         inp = torch.rand(B, C, H, W)
         inp = (inp * 16).floor() / 16
@@ -566,10 +579,10 @@ class TestConvInferenceBenchmark:
         torch.testing.assert_close(r1, r2)
 
         oH, oW = layer._compute_output_size(H, W)
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Benchmark: {B}x{C}x{H}x{W} input, {F_n} filters, {K}x{K} kernel")
-        print(f"Output spatial: {oH}x{oW} = {oH*oW} positions")
-        print(f"  conv2d:  {t_conv2d*1000:.2f} ms")
-        print(f"  unfold:  {t_unfold*1000:.2f} ms")
-        print(f"  speedup: {t_unfold/t_conv2d:.2f}x")
-        print(f"{'='*60}")
+        print(f"Output spatial: {oH}x{oW} = {oH * oW} positions")
+        print(f"  conv2d:  {t_conv2d * 1000:.2f} ms")
+        print(f"  unfold:  {t_unfold * 1000:.2f} ms")
+        print(f"  speedup: {t_unfold / t_conv2d:.2f}x")
+        print(f"{'=' * 60}")
