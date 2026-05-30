@@ -17,7 +17,6 @@ def set_seed(seed: int):
 
 
 def resolve_model_dir(dataset: str, num_filters: int, t_obj: float, seed: int) -> str:
-    """Compute model directory from experiment parameters."""
     if dataset == "cifar10":
         base = "cifar10_whitened"
         return f"logs/{base}/sweep/nf_{num_filters}/tobj_{t_obj:.2f}/seed_{seed}"
@@ -25,7 +24,6 @@ def resolve_model_dir(dataset: str, num_filters: int, t_obj: float, seed: int) -
 
 
 def resolve_params(args) -> tuple[int, float, str]:
-    """Return (num_filters, t_obj, model_dir) from CLI args + paper defaults."""
     from applications.paper_hyperparams import get_paper_hyperparams
 
     hp = get_paper_hyperparams(args.dataset)
@@ -34,14 +32,21 @@ def resolve_params(args) -> tuple[int, float, str]:
     return nf, t_obj, resolve_model_dir(args.dataset, nf, t_obj, args.seed)
 
 
-def load_split_data(dataset: str) -> tuple[dict, dict]:
-    """Load train and test image tensors + labels."""
+def load_split_data(dataset: str, num_bins: int | None = None) -> tuple[dict, dict]:
+    if num_bins is None and dataset in ("cifar10", "fashion_mnist"):
+        from applications.paper_hyperparams import get_paper_hyperparams
+
+        num_bins = get_paper_hyperparams(dataset).get("num_bins", 64)
     if dataset == "cifar10":
         from applications.datasets import Cifar10WhitenedDataset
 
-        train_ds = Cifar10WhitenedDataset("data", "train")
+        train_ds = Cifar10WhitenedDataset("data", "train", num_bins=num_bins)
         test_ds = Cifar10WhitenedDataset(
-            "data", "test", kernels=train_ds.kernels, mean=train_ds.mean
+            "data",
+            "test",
+            num_bins=num_bins,
+            kernels=train_ds.kernels,
+            mean=train_ds.mean,
         )
         return (
             {"images": train_ds.all_times, "labels": train_ds.outputs},
@@ -51,10 +56,16 @@ def load_split_data(dataset: str) -> tuple[dict, dict]:
         from applications.datasets import FashionMnistDataset
 
         train_ds = FashionMnistDataset(
-            "data", "train", cache_path="data/fashion_mnist_cache/train_dog.pt"
+            "data",
+            "train",
+            cache_path="data/fashion_mnist_cache/train_dog.pt",
+            num_bins=num_bins,
         )
         test_ds = FashionMnistDataset(
-            "data", "test", cache_path="data/fashion_mnist_cache/test_dog.pt"
+            "data",
+            "test",
+            cache_path="data/fashion_mnist_cache/test_dog.pt",
+            num_bins=num_bins,
         )
         return (
             {"images": train_ds.all_times, "labels": train_ds.outputs},
@@ -68,7 +79,7 @@ def load_split_data(dataset: str) -> tuple[dict, dict]:
 
 
 def create_dataloaders(dataset: str):
-    """Create (train_loader, val_loader) for threshold optimization."""
+    ...
     if dataset == "cifar10":
         from applications.datasets import Cifar10WhitenedDataset
         from torch.utils.data import DataLoader
@@ -87,10 +98,6 @@ def create_dataloaders(dataset: str):
 
 
 def evaluate_model(model, train_loader, val_loader, t_target=None):
-    """Extract features and evaluate classifier. Moves model to CPU.
-
-    t_target: if provided, use Falez Eq 10 for feature conversion.
-    """
     model = model.cpu()
 
     X_train, y_train = extract_features(model, train_loader, t_target)
@@ -100,11 +107,7 @@ def evaluate_model(model, train_loader, val_loader, t_target=None):
 
 
 def aggregate_metrics(all_metrics: list[dict]) -> dict:
-    """Compute mean and std for each metric across seeds.
-
-    :param all_metrics: List of {"train": {...}, "validation": {...}} dicts.
-    :returns: {"train": {"accuracy": {"mean": ..., "std": ...}, ...}, ...}
-    """
+    ...
     splits = all_metrics[0].keys()
     metric_keys = all_metrics[0][next(iter(splits))].keys()
 
@@ -121,11 +124,6 @@ def aggregate_metrics(all_metrics: list[dict]) -> dict:
 
 
 def merge_seed_results(directory: str):
-    """Scan seed_*/metrics.json under directory, produce merged_results.json and summary.json.
-
-    merged_results.json: {"seeds": [1,2,...], "train": {"accuracy": [...], ...}, "validation": {...}}
-    summary.json: mean/std per metric via aggregate_metrics().
-    """
     seed_dirs = []
     for name in os.listdir(directory):
         match = re.match(r"^seed_(\d+)$", name)

@@ -1,7 +1,5 @@
 import torch
 
-from spiking.preprocessing.latency_encoding import apply_latency_encoding
-
 
 def encode_whitened_image(whitened_image: torch.Tensor) -> torch.Tensor:
     """Encode a whitened image into spike times (Falez 2020 Section IV-A).
@@ -30,5 +28,6 @@ def encode_whitened_image(whitened_image: torch.Tensor) -> torch.Tensor:
     interleaved = torch.stack([pos, neg], dim=1)  # (C, 2, H, W)
     split = interleaved.reshape(2 * C, H, W)
 
-    # Apply latency encoding: t = 1 - x, zero intensity → inf
-    return apply_latency_encoding(split)
+    times = torch.clamp(1.0 - split, min=0.0)
+    times[times == 1.0] = float("inf")  # zero intensity never spikes
+    return times

@@ -3,28 +3,16 @@ import os
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+from torchvision.transforms import v2
 
 from spiking.preprocessing import (
+    DiscretizeTimes,
+    LatencyEncoding,
     apply_difference_of_gaussians_filter_batch,
-    apply_latency_encoding,
-    discretize_times,
 )
 
 
 class SpikeEncodingDataset(Dataset):
-    """Spike-encoded image dataset with optional random patch extraction.
-
-    When patch_size and num_patches are set, __getitem__ returns a tensor of
-    patches instead of the full image. Patch positions are sampled uniformly
-    (distinct per image) and cached for reproducibility.
-
-    :param inputs: (N, H, W) raw images.
-    :param outputs: (N,) integer labels.
-    :param image_shape: Optional resize target (H, W).
-    :param cache_path: Path for caching spike times (and patch positions).
-    :param patch_size: Side length of square patches. None to disable.
-    :param num_patches: Number of patches per image. 0 to disable.
-    """
 
     def __init__(
         self,
@@ -34,6 +22,8 @@ class SpikeEncodingDataset(Dataset):
         cache_path: str | None = None,
         patch_size: int | None = None,
         num_patches: int = 0,
+        num_bins: int = 64,
+        transform=None,
     ):
         self.outputs = outputs.long()
         self.inputs = inputs.float()
@@ -45,11 +35,17 @@ class SpikeEncodingDataset(Dataset):
                 mode="nearest",
             ).squeeze(1)
 
+        self._transform = (
+            transform
+            if transform is not None
+            else v2.Compose([LatencyEncoding(), DiscretizeTimes(num_bins)])
+        )
+
         if cache_path and os.path.exists(cache_path):
             self.all_times = torch.load(cache_path, weights_only=True)
         else:
             dog = apply_difference_of_gaussians_filter_batch(self.inputs)
-            self.all_times = discretize_times(apply_latency_encoding(dog))
+            self.all_times = self._transform(dog)
             if cache_path:
                 os.makedirs(os.path.dirname(cache_path), exist_ok=True)
                 torch.save(self.all_times, cache_path)
@@ -81,15 +77,6 @@ class SpikeEncodingDataset(Dataset):
     def _generate_patch_positions(
         N: int, H: int, W: int, patch_size: int, num_patches: int
     ) -> torch.Tensor:
-        """Generate distinct uniform patch positions for each image.
-
-        :param N: Number of images.
-        :param H: Spatial height of encoded images.
-        :param W: Spatial width of encoded images.
-        :param patch_size: Patch side length.
-        :param num_patches: Patches per image.
-        :returns: (N, num_patches, 2) int tensor of (row, col) positions.
-        """
         max_row = H - patch_size
         max_col = W - patch_size
         num_valid = (max_row + 1) * (max_col + 1)
@@ -103,12 +90,10 @@ class SpikeEncodingDataset(Dataset):
 
     @property
     def patch_positions(self) -> torch.Tensor | None:
-        """Cached (N, num_patches, 2) patch positions, or None if not patching."""
         return self._patch_positions
 
     @property
     def image_shape(self) -> tuple[int, int]:
-        """Return (H, W) of the stored images."""
         return (self.inputs.shape[1], self.inputs.shape[2])
 
     def __len__(self):

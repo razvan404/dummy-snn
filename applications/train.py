@@ -54,7 +54,6 @@ def _create_stdp(variant: str, params: dict) -> MultiplicativeSTDP | BiologicalS
 
 
 def _create_threshold_adaptation(params: dict) -> SequentialThresholdAdaptation:
-    """``threshold_mode``: ``falez`` (competitive + target-ts) or ``weight_mean``."""
     mode = params.get("threshold_mode", "falez")
     competitive = CompetitiveThresholdAdaptation(
         min_threshold=params["min_threshold"],
@@ -91,6 +90,7 @@ def _create_threshold_adaptation(params: dict) -> SequentialThresholdAdaptation:
 
 
 def _save_filter_grid(weights_4d: torch.Tensor, path: str, ncols: int = 16):
+    ...
     num_filters, C, kH, kW = weights_4d.shape
     nrows = (num_filters + ncols - 1) // ncols
     w = weights_4d.detach().cpu().numpy()
@@ -125,6 +125,7 @@ def _save_filter_grid(weights_4d: torch.Tensor, path: str, ncols: int = 16):
 def _save_training_summary(
     layer, neuron_wins: torch.Tensor, output_dir: str, num_filters: int
 ):
+    ...
     fig, axes = plt.subplots(1, 2, figsize=(14, 4))
 
     ax = axes[0]
@@ -150,7 +151,6 @@ def _save_training_summary(
 
 
 def _extract_random_patches(images: torch.Tensor, kernel_size: int) -> torch.Tensor:
-    """One random spatial patch per image; ``(N, C, kH, kW)``."""
     N, C, H, W = images.shape
     max_row = H - kernel_size
     max_col = W - kernel_size
@@ -165,17 +165,23 @@ def _extract_random_patches(images: torch.Tensor, kernel_size: int) -> torch.Ten
     return patches
 
 
-def _load_training_images(dataset: str, processed_dir: str | None) -> torch.Tensor:
+def _load_training_images(
+    dataset: str, processed_dir: str | None, num_bins: int = 64
+) -> torch.Tensor:
+    ...
     if dataset == "cifar10" and processed_dir is None:
         from applications.datasets import Cifar10WhitenedDataset
 
-        ds = Cifar10WhitenedDataset("data", "train")
+        ds = Cifar10WhitenedDataset("data", "train", num_bins=num_bins)
         return ds.all_times
     if dataset == "fashion_mnist" and processed_dir is None:
         from applications.datasets import FashionMnistDataset
 
         ds = FashionMnistDataset(
-            "data", "train", cache_path="data/fashion_mnist_cache/train_dog.pt"
+            "data",
+            "train",
+            cache_path="data/fashion_mnist_cache/train_dog.pt",
+            num_bins=num_bins,
         )
         return ds.all_times
     if processed_dir is None:
@@ -195,7 +201,7 @@ def train_model(
     output_dir: str,
     params_override: dict | None = None,
 ) -> dict:
-    """Train a conv SNN on preprocessed data; saves model, setup, training logs."""
+    ...
     params = get_paper_hyperparams(dataset)
     if params_override:
         params.update(params_override)
@@ -223,7 +229,7 @@ def train_model(
     )
 
     logger.info("Loading training data for %s...", dataset)
-    all_images = _load_training_images(dataset, processed_dir)
+    all_images = _load_training_images(dataset, processed_dir, params["num_bins"])
     N = len(all_images)
     in_channels = all_images.shape[1]
     ksize = params["kernel_size"]
@@ -244,6 +250,7 @@ def train_model(
         refractory_period=float("inf"),
     )
     torch.nn.init.uniform_(layer.weights, a=params["w_min"], b=params["w_max"])
+    layer.num_bins = params["num_bins"]
 
     stdp = _create_stdp(stdp_variant, params)
     adaptation = _create_threshold_adaptation(params)
@@ -282,9 +289,7 @@ def train_model(
 
             ntl = learner.neurons_to_learn
             if ntl is not None and ntl.numel() > 0:
-                neuron_wins.scatter_add_(
-                    0, ntl, torch.ones_like(ntl, dtype=torch.long)
-                )
+                neuron_wins.scatter_add_(0, ntl, torch.ones_like(ntl, dtype=torch.long))
 
             steps_remaining = total_steps - global_step
             if steps_remaining <= log_last_n:

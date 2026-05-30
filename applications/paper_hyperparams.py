@@ -3,12 +3,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class MnistHyperparams:
-    """Falez 2019 (Paper 19) Table I — MNIST with DoG preprocessing."""
-
     # Preprocessing
     sigma_center: float = 1.0
     sigma_surround: float = 4.0
     in_channels: int = 2  # ON/OFF from DoG
+    num_bins: int = 64  # spike-time discretisation grid
 
     # Architecture
     kernel_size: int = 5
@@ -40,13 +39,12 @@ class MnistHyperparams:
 
 @dataclass(frozen=True)
 class Cifar10Hyperparams:
-    """Falez 2020 (Paper 20) Table I — CIFAR-10 with ZCA whitening."""
-
     # Preprocessing
     whitening_patch_size: int = 9
     whitening_epsilon: float = 1e-2
     whitening_rho: float = 1.0
     in_channels: int = 6  # R+/R-/G+/G-/B+/B-
+    num_bins: int = 64  # spike-time discretisation grid
 
     # Architecture
     kernel_size: int = 5
@@ -80,8 +78,6 @@ class Cifar10Hyperparams:
 
 @dataclass(frozen=True)
 class FashionMnistHyperparams(MnistHyperparams):
-    """Fashion MNIST — same architecture as MNIST with DoG preprocessing."""
-
     num_filters: int = 256
     target_timestamp: float = 0.9
 
@@ -98,12 +94,6 @@ _CONFIGS = {
 
 
 def get_paper_hyperparams(dataset: str) -> dict:
-    """Return paper-exact hyperparameters as a plain dict.
-
-    :param dataset: 'mnist' or 'cifar10'.
-    :returns: Dict of all hyperparameters for the dataset.
-    :raises ValueError: If dataset name is unknown.
-    """
     if dataset not in _CONFIGS:
         raise ValueError(
             f"Unknown dataset: {dataset!r}. Available: {list(_CONFIGS.keys())}"

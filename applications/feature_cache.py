@@ -1,18 +1,3 @@
-"""Precompute per-neuron feature cache for all perturbation levels.
-
-For each neuron and each threshold level, computes pooled features for the
-entire dataset. The cache enables instant Woodbury-based coordinate descent
-across multiple rounds without re-running SNN inference.
-
-Architecture:
-  Phase 1 (per chunk): conv2d accumulation → store potentials at all T steps
-  Phase 2 (per neuron): scan precomputed potentials for 21 threshold levels
-  Output: cache[neuron, level, image, pool_feature]
-
-Memory: 256 neurons × 21 levels × 60k images × 4 pool × 4 bytes ≈ 5.2 GB
-GPU: ~3.3 GB per chunk (potentials) — fits on 20 GB card
-"""
-
 import argparse
 import json
 import logging
@@ -43,13 +28,6 @@ def compute_feature_cache(
     device: str = "cuda",
     chunk_size: int = 32,
 ) -> np.ndarray:
-    """Precompute features for all neurons × all perturbation levels.
-
-    Two-phase approach: conv2d once per chunk, threshold check per neuron.
-
-    :param perturbation_fractions: list of fractional perturbations (e.g., [-0.5, -0.45, ..., 0.5]).
-    :returns: (num_filters, num_fracs, N, pool_features) float32 array.
-    """
     N = len(images)
     num_filters = weights_4d.shape[0]
     kH = weights_4d.shape[2]
@@ -183,7 +161,9 @@ def main() -> None:
     model_dir = resolve_model_dir(args.dataset, args.num_filters, args.t_obj, args.seed)
     model_path = f"{model_dir}/model.pth"
     with open(f"{model_dir}/setup.json") as f:
-        t_target = json.load(f).get("target_timestamp", args.t_obj)
+        setup = json.load(f)
+    t_target = setup.get("target_timestamp", args.t_obj)
+    data_num_bins = setup.get("num_bins")
 
     layer = load_model(model_path)
     logger.info("Loaded model from %s", model_path)
@@ -201,7 +181,7 @@ def main() -> None:
 
     # Load data
     logger.info("Loading data...")
-    train_data, test_data = load_split_data(args.dataset)
+    train_data, test_data = load_split_data(args.dataset, data_num_bins)
     train_images = train_data["images"]
     test_images = test_data["images"]
     y_train = train_data["labels"].numpy()

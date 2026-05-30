@@ -1,5 +1,3 @@
-"""Evaluate a trained conv SNN with a Torch LinearSVC classifier."""
-
 import argparse
 import gc
 import json
@@ -29,7 +27,6 @@ def _extract_features(
     chunk_size: int,
     device: str,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Extract conv features with sum pooling."""
     layer.eval()
     layer.to(device)
     flat_dim = layer.num_filters * pool_size * pool_size
@@ -85,7 +82,7 @@ def main() -> None:
     t_target = setup.get("target_timestamp")
 
     layer = load_model(f"{model_dir}/model.pth")
-    train_data, test_data = load_split_data(args.dataset)
+    train_data, test_data = load_split_data(args.dataset, setup.get("num_bins"))
 
     logger.info("Extracting train features (%d images)...", len(train_data["images"]))
     X_train, y_train = _extract_features(

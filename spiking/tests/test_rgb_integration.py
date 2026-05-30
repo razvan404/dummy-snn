@@ -6,13 +6,12 @@ from spiking.preprocessing.whitening_kernels import (
     apply_whitening_kernels,
 )
 from spiking.preprocessing.whitened_spike_encoding import encode_whitened_image
-from spiking.preprocessing.latency_encoding import discretize_times
+from spiking.preprocessing import DiscretizeTimes
 from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 from spiking.threshold import ConstantInitialization
 
 
 def make_random_rgb_images(n: int, h: int, w: int, seed: int = 42) -> torch.Tensor:
-    """Create random RGB images in [0, 1] simulating normalized uint8 input."""
     torch.manual_seed(seed)
     return torch.rand(n, 3, h, w)
 
@@ -24,10 +23,6 @@ def run_full_pipeline(
     num_bins: int = 16,
     whitening_patch_size: int = 9,
 ) -> tuple[torch.Tensor, ConvIntegrateAndFireLayer]:
-    """Run full pipeline: whitening → encoding → discretization → conv inference.
-
-    :returns: (spike_times, layer) where spike_times is (N, F, oH, oW).
-    """
     N, C, H, W = images.shape
 
     # Step 1: Fit and apply whitening
@@ -42,7 +37,7 @@ def run_full_pipeline(
     encoded = torch.stack([encode_whitened_image(img) for img in whitened])
 
     # Step 3: Discretize
-    spike_times = discretize_times(encoded, num_bins=num_bins)
+    spike_times = DiscretizeTimes(num_bins)(encoded)
 
     # Step 4: Conv inference
     in_channels = spike_times.shape[1]  # 2*C = 6
@@ -80,15 +75,13 @@ class TestFullPipeline:
     def test_high_threshold_produces_non_spiking(self):
         images = make_random_rgb_images(8, 32, 32)
         output, layer = run_full_pipeline(images, kernel_size=5, num_filters=16)
-        # With default threshold, dense input causes all to spike.
-        # Raise threshold to make some neurons silent.
         layer.thresholds.data.fill_(1000.0)
         with torch.no_grad():
             # Re-encode for this test
             kernels, mean = fit_whitening_kernels(images, patch_size=9, n_patches=500)
             whitened = apply_whitening_kernels(images, kernels, mean)
             encoded = torch.stack([encode_whitened_image(img) for img in whitened])
-            spike_times = discretize_times(encoded, num_bins=16)
+            spike_times = DiscretizeTimes(16)(encoded)
             output = layer.infer_spike_times_batch(spike_times)
         assert torch.isinf(output).any()
 
@@ -120,7 +113,7 @@ class TestWhiteningToSpikes:
         kernels, mean = fit_whitening_kernels(images, patch_size=9, n_patches=500)
         whitened = apply_whitening_kernels(images, kernels, mean)
         encoded = encode_whitened_image(whitened[0])
-        discretized = discretize_times(encoded, num_bins=16)
+        discretized = DiscretizeTimes(16)(encoded)
         finite = discretized[torch.isfinite(discretized)]
         # All finite values should be multiples of 1/16
         remainders = (finite * 16) - torch.floor(finite * 16)
@@ -144,7 +137,7 @@ class TestConv2dVsUnfoldOnRealData:
         kernels, mean = fit_whitening_kernels(images, patch_size=9, n_patches=500)
         whitened = apply_whitening_kernels(images, kernels, mean)
         encoded = torch.stack([encode_whitened_image(img) for img in whitened])
-        spike_times = discretize_times(encoded, num_bins=16)
+        spike_times = DiscretizeTimes(16)(encoded)
 
         iH, iW = spike_times.shape[2], spike_times.shape[3]
         init = ConstantInitialization(10.0)
@@ -167,7 +160,7 @@ class TestConv2dVsUnfoldOnRealData:
         kernels, mean = fit_whitening_kernels(images, patch_size=9, n_patches=500)
         whitened = apply_whitening_kernels(images, kernels, mean)
         encoded = torch.stack([encode_whitened_image(img) for img in whitened])
-        spike_times = discretize_times(encoded, num_bins=16)
+        spike_times = DiscretizeTimes(16)(encoded)
 
         iH, iW = spike_times.shape[2], spike_times.shape[3]
         init = ConstantInitialization(10.0)
