@@ -19,7 +19,6 @@ def make_stdp(**kwargs):
 
 class TestMultiplicativeSTDPPotentiation:
     def test_causal_pair_increases_weight(self):
-        """Pre before post (delta_t > 0) → potentiation."""
         stdp = make_stdp()
         weights = torch.tensor([[0.5]])
         pre = torch.tensor([0.2])  # pre spike time
@@ -28,7 +27,6 @@ class TestMultiplicativeSTDPPotentiation:
         assert updated[0, 0] > weights[0, 0]
 
     def test_potentiation_larger_near_wmin(self):
-        """Weights near w_min should get larger potentiation."""
         stdp = make_stdp(beta=2.0)
         pre = torch.tensor([0.2])
         post = torch.tensor([[0.5]])
@@ -42,7 +40,6 @@ class TestMultiplicativeSTDPPotentiation:
 
 class TestMultiplicativeSTDPDepression:
     def test_anticausal_pair_decreases_weight(self):
-        """Post before pre (delta_t < 0) → depression."""
         stdp = make_stdp()
         weights = torch.tensor([[0.5]])
         pre = torch.tensor([0.8])  # pre spike time (after post)
@@ -51,7 +48,6 @@ class TestMultiplicativeSTDPDepression:
         assert updated[0, 0] < weights[0, 0]
 
     def test_depression_larger_near_wmax(self):
-        """Weights near w_max should get larger depression."""
         stdp = make_stdp(beta=2.0)
         pre = torch.tensor([0.8])
         post = torch.tensor([[0.3]])
@@ -87,7 +83,6 @@ class TestMultiplicativeSTDPBounds:
 
 class TestMultiplicativeSTDPTltp:
     def test_pair_beyond_tltp_causes_depression(self):
-        """If pre-post delay exceeds t_ltp, treat as depression."""
         stdp = make_stdp(t_ltp=0.1)
         weights = torch.tensor([[0.5]])
         pre = torch.tensor([0.1])
@@ -117,7 +112,6 @@ class TestMultiplicativeSTDPMultipleWeights:
         assert not torch.allclose(updated, weights)
 
     def test_inf_pre_spike_causes_depression(self):
-        """Non-spiking pre-synaptic → depression."""
         stdp = make_stdp()
         weights = torch.tensor([[0.5]])
         pre = torch.tensor([float("inf")])

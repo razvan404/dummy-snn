@@ -24,7 +24,6 @@ def classic_discrete_time_sim(
     stride: int = 1,
     padding: int = 0,
 ) -> torch.Tensor:
-    """Textbook discrete-time IF: one ``F.conv2d`` per bin + threshold check."""
     B, C, H, W = input_times.shape
     F_, _, kH, kW = weights_4d.shape
     oH = (H + 2 * padding - kH) // stride + 1
@@ -82,7 +81,6 @@ def _make_inputs(
     sparsity: float = 0.5,
     seed: int = 0,
 ) -> torch.Tensor:
-    """Latency-encoded spike times: random discrete values in [0, 1] or inf."""
     g = torch.Generator().manual_seed(seed)
     times = (
         torch.randint(0, num_bins, (batch, in_channels, H, W), generator=g).float()
@@ -97,12 +95,6 @@ def _make_inputs(
 @pytest.mark.parametrize("padding", [0, 2])
 @pytest.mark.parametrize("num_bins", [16, 64])
 def test_spike_driven_matches_dense(seed: int, padding: int, num_bins: int) -> None:
-    """Single-threshold sparse-event implementation matches dense ``F.conv2d``.
-
-    Tolerance scales with the discretisation bin size (1/num_bins): tied
-    events at the same time bin can flip crossing order across paths because
-    of float-summation non-associativity.
-    """
     layer = _make_layer(padding=padding)
     times = _make_inputs(seed=seed, num_bins=num_bins)
 
@@ -122,18 +114,10 @@ def test_spike_driven_matches_dense(seed: int, padding: int, num_bins: int) -> N
         assert (
             (dense_st[finite] - sparse_st[finite]).abs().max() <= bin_size + 1e-6
         )
-    # Spike-vs-no-spike disagreement must stay within tied/border cells: such
-    # cells should be near threshold in both paths.
     only_dense = torch.isfinite(dense_st) & torch.isinf(sparse_st)
     only_sparse = torch.isinf(dense_st) & torch.isfinite(sparse_st)
     disagreement = (only_dense | only_sparse).float().mean().item()
     assert disagreement < 0.01, f"too many spike/no-spike mismatches: {disagreement}"
-    # We deliberately do NOT compare ``cum_potential`` element-wise: the
-    # dense path early-exits once all positions have spiked, freezing its
-    # potential, while our path processes all timesteps. The two paths
-    # therefore see different totals once everything has saturated. Final
-    # spike times — the only quantity downstream consumers depend on —
-    # are validated above.
 
 
 @pytest.mark.parametrize("seed", [0, 3])
@@ -184,7 +168,6 @@ def test_no_finite_inputs_returns_inf() -> None:
 @pytest.mark.parametrize("num_bins", [16, 64])
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_cuda_matches_dense(seed: int, num_bins: int) -> None:
-    """CUDA implementation matches the dense reference on GPU tensors."""
     layer = _make_layer().cuda()
     times = _make_inputs(seed=seed, num_bins=num_bins).cuda()
     dense_st, _ = layer._conv2d_accumulate(times)
@@ -216,7 +199,7 @@ def test_cuda_multi_threshold(seed: int) -> None:
     sparse = spike_driven_conv_accumulate_multi_threshold(
         times, layer.weights_4d, thresholds_2d, stride=layer.stride, padding=layer.padding
     )
-    sparse = sparse.cpu()  # dense returns on CPU per existing implementation
+    sparse = sparse.cpu()
     assert dense.shape == sparse.shape
     bin_size = 1.0 / 16
     finite = torch.isfinite(dense) & torch.isfinite(sparse)
@@ -225,7 +208,6 @@ def test_cuda_multi_threshold(seed: int) -> None:
 
 
 def test_layer_backend_flag() -> None:
-    """Setting layer._backend swaps the inference path inside _conv2d_accumulate."""
     layer = _make_layer()
     times = _make_inputs(seed=0, num_bins=16)
     bin_tol = 1.0 / 16 + 1e-6
@@ -245,17 +227,11 @@ def test_layer_backend_flag() -> None:
 
 
 def test_layer_backend_default_is_gather() -> None:
-    """Default ``_backend`` is ``"gather"`` — fastest path for first-spike."""
     layer = _make_layer()
     assert layer._backend == "gather"
 
 
 def test_layer_gather_returns_cum_potential_when_requested() -> None:
-    """Gather computes cum_potential when the caller asks for it.
-
-    Compare against the scatter path (which also accumulates across all
-    events, i.e. no early-exit, so the totals are the same up to FP order).
-    """
     layer = _make_layer()
     times = _make_inputs(seed=0, num_bins=16)
 
@@ -280,7 +256,6 @@ def test_layer_backend_invalid_name_raises() -> None:
 
 
 def test_layer_constructor_accepts_backend() -> None:
-    """Constructor sets the backend; default is 'gather'."""
     init = NormalInitialization(avg_threshold=2.0, std_dev=0.2, min_threshold=0.5)
     default = ConvIntegrateAndFireLayer(
         in_channels=2, num_filters=4, kernel_size=3,
@@ -309,13 +284,6 @@ def test_layer_constructor_accepts_backend() -> None:
 def test_gather_first_spike_matches_dense(
     seed: int, padding: int, num_bins: int
 ) -> None:
-    """Gather kernel returns the same first-spike crossings as the dense path.
-
-    The gather kernel quantises spike times to ``1/num_bins``, so the
-    tolerance scales with that bin size. We require finite-vs-finite
-    agreement within a bin and a small spike/no-spike disagreement rate
-    (ties at the threshold can flip between paths).
-    """
     layer = _make_layer(padding=padding)
     times = _make_inputs(seed=seed, num_bins=num_bins)
     dense_st, _ = layer._conv2d_accumulate(times)
@@ -345,7 +313,6 @@ def test_gather_first_spike_matches_dense(
 @pytest.mark.parametrize("seed", [0, 5])
 @pytest.mark.parametrize("num_bins", [16, 64])
 def test_gather_reference_matches_compiled_cpu(seed: int, num_bins: int) -> None:
-    """Pure-PyTorch gather matches the compiled CPU kernel exactly."""
     layer = _make_layer()
     times = _make_inputs(seed=seed, num_bins=num_bins)
     ref, _ = first_spike_times_gather(
@@ -367,8 +334,6 @@ def test_gather_reference_matches_compiled_cpu(seed: int, num_bins: int) -> None
     bin_size = 1.0 / num_bins
     finite = torch.isfinite(ref) & torch.isfinite(compiled)
     if finite.any():
-        # Float-summation order differs between paths (rf-major loop in C++
-        # vs scatter-add in PyTorch), so allow one bin of slack.
         assert (ref[finite] - compiled[finite]).abs().max() <= bin_size + 1e-6
 
 
@@ -403,7 +368,6 @@ def test_gather_multi_threshold_cpu(seed: int, num_bins: int) -> None:
 
 
 def test_gather_wta_keeps_one_filter_per_position() -> None:
-    """WTA flag enforces at most one finite spike across F at each (b, oh, ow)."""
     layer = _make_layer()
     times = _make_inputs(seed=2, num_bins=16)
     out = spiking_backend.first_spike_times(
@@ -420,7 +384,6 @@ def test_gather_wta_keeps_one_filter_per_position() -> None:
 
 
 def test_gather_wta_keeps_earliest_filter() -> None:
-    """The surviving filter under WTA must be the argmin of the unfiltered run."""
     layer = _make_layer()
     times = _make_inputs(seed=3, num_bins=16)
     base = spiking_backend.first_spike_times(
@@ -511,18 +474,6 @@ def test_gather_cuda_multi_threshold(seed: int) -> None:
 def test_backend_matches_classic_discrete_time_sim(
     seed: int, num_bins: int
 ) -> None:
-    """Both backend paths reproduce a classical SNN discrete-time simulation.
-
-    The backend never iterates time — it does the math analytically. This
-    test pins the analytical result against the textbook integrate-and-fire
-    loop (one ``F.conv2d`` per discrete timestep, accumulate, threshold
-    check). They must agree on every output spike time, exactly, when input
-    times are quantised to multiples of ``1/num_bins``.
-
-    Tolerance: 0 bins on finite spikes for the gather path; ≤ 1 bin for the
-    scatter path (FP-summation non-associativity moves a small fraction of
-    near-tie crossings by one bin).
-    """
     layer = _make_layer()
     times = _make_inputs(seed=seed, num_bins=num_bins)
 
@@ -552,15 +503,12 @@ def test_backend_matches_classic_discrete_time_sim(
     )
 
     bin_size = 1.0 / num_bins
-    # Gather: exact agreement on finite spikes (same per-output deterministic
-    # accumulation order as the discrete-time loop).
     finite_g = torch.isfinite(classic_st) & torch.isfinite(gather_st)
     if finite_g.any():
         assert (
             (classic_st[finite_g] - gather_st[finite_g]).abs().max() <= 1e-6
         ), "gather path drifted from classic discrete-time simulation"
 
-    # Scatter: within one bin (atomic-add ordering can flip near-tie crossings).
     finite_s = torch.isfinite(classic_st) & torch.isfinite(scatter_st)
     if finite_s.any():
         assert (
@@ -568,8 +516,6 @@ def test_backend_matches_classic_discrete_time_sim(
             <= bin_size + 1e-6
         )
 
-    # Spike-vs-no-spike disagreement: must be small for both paths (only
-    # tied/border cells right at the threshold can differ).
     for name, backend_st in [("gather", gather_st), ("scatter", scatter_st)]:
         only_classic = torch.isfinite(classic_st) & torch.isinf(backend_st)
         only_backend = torch.isinf(classic_st) & torch.isfinite(backend_st)
@@ -585,13 +531,6 @@ def test_backend_matches_classic_discrete_time_sim(
 def test_scatter_skip_spiked_matches_full(
     seed: int, padding: int
 ) -> None:
-    """``compute_cum_potential=False`` (skip-spiked) must not change ``spike_times``.
-
-    Skipping events for already-spiked outputs treats cum_potential as
-    scratch — but spike_times semantics are identical to the full mode.
-    We verify that bit-exactly on CPU; on CUDA we allow the usual
-    atomic-ordering 1-bin slack.
-    """
     layer = _make_layer(padding=padding)
     times = _make_inputs(seed=seed, num_bins=64)
 
@@ -611,7 +550,6 @@ def test_scatter_skip_spiked_matches_full(
         compute_cum_potential=False,
     )
     assert default_st.shape == fast_st.shape
-    # CPU is deterministic in both modes, so spike_times must match exactly.
     assert torch.equal(default_st, fast_st), (
         "fast mode produced different spike_times than default mode"
     )
@@ -620,7 +558,6 @@ def test_scatter_skip_spiked_matches_full(
 @pytest.mark.parametrize("seed", [0, 2])
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_scatter_skip_spiked_cuda_matches_full(seed: int) -> None:
-    """On CUDA spike_times may differ by ≤ 1 bin (atomic-add ordering)."""
     layer = _make_layer().cuda()
     times = _make_inputs(seed=seed, num_bins=64).cuda()
     default_st, _ = spiking_backend.spike_driven_conv_accumulate(
@@ -648,11 +585,6 @@ def test_scatter_skip_spiked_cuda_matches_full(seed: int) -> None:
 @pytest.mark.parametrize("num_bins", [16, 64])
 @pytest.mark.parametrize("compute_cum_potential", [True, False])
 def test_b1_patch_sized_input(num_bins: int, compute_cum_potential: bool) -> None:
-    """B=1 with H=kH, W=kW (single patch — STDP training case): oH=oW=1.
-
-    Only output position is (0, 0) per filter. Verify both gather and
-    scatter handle the degenerate spatial extent and agree with dense.
-    """
     layer = _make_layer(kernel_size=5, padding=0)
     times = _make_inputs(batch=1, H=5, W=5, seed=0, num_bins=num_bins)
     dense_st, _ = layer._conv2d_accumulate(times)
@@ -681,7 +613,6 @@ def test_b1_patch_sized_input(num_bins: int, compute_cum_potential: bool) -> Non
 
 @pytest.mark.parametrize("num_bins", [16, 64])
 def test_b1_patch_sized_multi_threshold(num_bins: int) -> None:
-    """B=1 + patch-sized input across the multi-threshold variant."""
     layer = _make_layer(kernel_size=5, padding=0)
     times = _make_inputs(batch=1, H=5, W=5, seed=2, num_bins=num_bins)
     fracs = torch.tensor([-0.5, -0.25, 0.0, 0.25])
@@ -710,7 +641,6 @@ def test_b1_patch_sized_multi_threshold(num_bins: int) -> None:
 
 
 def test_dense_stride_handling() -> None:
-    """Stride != 1 path still matches dense."""
     num_bins = 16
     layer = _make_layer(stride=2, kernel_size=3, padding=0)
     times = _make_inputs(H=10, W=10, seed=11, num_bins=num_bins)

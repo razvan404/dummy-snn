@@ -5,8 +5,6 @@ import torch.nn as nn
 
 
 class SpikingModule(nn.Module, ABC):
-    """Base class for spiking layers; ``_backend`` selects the inference backend."""
-
     _backend: str = "gather"
 
     def __init__(self, num_inputs: int, num_outputs: int):

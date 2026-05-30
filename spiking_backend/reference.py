@@ -13,7 +13,6 @@ def _output_size(in_size: int, kernel: int, stride: int, padding: int) -> int:
 def _affected_out_range(
     pos_padded: int, kernel: int, stride: int, out_size: int
 ) -> Tuple[int, int]:
-    """Half-open output indices whose receptive field covers a padded input."""
     lo = max(0, -(-(pos_padded - kernel + 1) // stride))
     hi = min(out_size, pos_padded // stride + 1)
     return lo, hi
@@ -82,7 +81,6 @@ def spike_driven_conv_accumulate_multi_threshold(
     stride: int = 1,
     padding: int = 0,
 ) -> torch.Tensor:
-    """Multi-threshold scatter reference; returns ``(K, B, F, oH, oW)``."""
     B, C, H, W = input_times.shape
     F_, C_w, kH, kW = weights_4d.shape
     K, F_th = thresholds_2d.shape
@@ -140,7 +138,6 @@ def _build_bins(
     stride: int,
     padding: int,
 ) -> torch.Tensor:
-    """Per-output bin histogram of weighted contributions: ``(B, F, L, num_bins)``."""
     B, _, _, _ = input_times.shape
     F_, rf = weights_flat.shape
     if padding > 0:
@@ -174,7 +171,6 @@ def first_spike_times_gather(
     padding: int = 0,
     compute_cum_potential: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Gather-with-bins reference; ``cum_potential`` is empty unless requested."""
     B, C, H, W = input_times.shape
     F_, C_w, kH, kW = weights_4d.shape
     if C_w != C:
@@ -212,7 +208,6 @@ def first_spike_times_gather_multi_threshold(
     padding: int = 0,
     compute_cum_potential: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Multi-threshold gather reference; cum_potential shared across K."""
     B, C, H, W = input_times.shape
     F_, _, kH, kW = weights_4d.shape
     K, F_th = thresholds_2d.shape

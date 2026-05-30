@@ -35,7 +35,6 @@ class TargetTimestampAdaptation(ThresholdAdaptation):
         Without ``neurons_to_learn``, falls back to per-neuron updates using
         each neuron's own spike time.
         """
-        # Resolve target timestamp to a scalar value.
         if isinstance(self.target_timestamp, torch.Tensor):
             target_val = self.target_timestamp.to(current_thresholds.device)
         else:
@@ -43,11 +42,10 @@ class TargetTimestampAdaptation(ThresholdAdaptation):
 
         neurons_to_learn = kwargs.get("neurons_to_learn")
         if neurons_to_learn is not None and len(neurons_to_learn) > 0:
-            # Paper Eq 6: use the winner's spike time for ALL neurons.
             winner_time = spike_times[neurons_to_learn].min()
             if not torch.isfinite(winner_time):
                 return current_thresholds
-            error = winner_time - target_val  # scalar
+            error = winner_time - target_val
             if self.epsilon > 0 and abs(error) <= self.epsilon:
                 return current_thresholds
             if self.epsilon > 0:
@@ -55,7 +53,6 @@ class TargetTimestampAdaptation(ThresholdAdaptation):
             threshold_delta = self.learning_rate * error
             updated_thresholds = current_thresholds - threshold_delta
         else:
-            # Fallback: per-neuron updates using each neuron's own spike time.
             threshold_delta = torch.zeros_like(current_thresholds)
             if isinstance(target_val, float):
                 target = torch.full_like(current_thresholds, target_val)

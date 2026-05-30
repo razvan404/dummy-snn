@@ -8,7 +8,6 @@ from spiking.preprocessing.whitening_kernels import (
 
 
 def make_random_rgb_images(n=100, h=32, w=32):
-    """Create random RGB images in [0, 1] for testing."""
     return torch.rand(n, 3, h, w)
 
 
@@ -25,14 +24,12 @@ class TestFitWhiteningKernels:
         assert kernels.shape == (1, 1, 3, 3)
 
     def test_default_rho(self):
-        """Default rho=1.0 per Falez 2020 Table I; all eigenvalues retained."""
         images = make_random_rgb_images(n=50)
         kernels, mean = fit_whitening_kernels(images, patch_size=5, n_patches=500)
         # With rho=1.0, all eigenvalues retained; kernel shape unchanged
         assert kernels.shape == (3, 3, 5, 5)
 
     def test_filter_mean_is_zero(self):
-        """Each kernel should have zero mean (DC removal)."""
         images = make_random_rgb_images(n=50)
         kernels, mean = fit_whitening_kernels(images, patch_size=5, n_patches=500)
         for c in range(kernels.shape[0]):
@@ -51,7 +48,6 @@ class TestFitWhiteningKernels:
         assert torch.isfinite(mean).all()
 
     def test_rho_reduces_eigenvalues(self):
-        """Using rho < 1 should still produce valid kernels."""
         images = make_random_rgb_images(n=50)
         kernels, mean = fit_whitening_kernels(
             images, patch_size=5, n_patches=500, rho=0.5

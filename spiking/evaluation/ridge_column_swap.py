@@ -1,8 +1,3 @@
-"""Ridge classifier with Woodbury-accelerated column-swap evaluation.
-
-Optionally uses cupy for GPU-accelerated linear algebra when *use_gpu=True*.
-"""
-
 import numpy as np
 from sklearn.preprocessing import LabelBinarizer
 
@@ -17,39 +12,26 @@ except ImportError:
 
 
 def _xp(use_gpu: bool):
-    """Return the array module to use (cupy or numpy)."""
     return cp if use_gpu else np
 
 
 class RidgeColumnSwap(ColumnSwapClassifier):
-    """Ridge classifier optimized for evaluating many column-swap perturbations.
-
-    Fits the baseline classifier once in O(d^3 + nd^2), then uses the Woodbury
-    identity to update predictions in O(d^2 k + md) per swap.
-
-    :param alpha: Regularization strength (same as sklearn RidgeClassifier).
-    :param use_gpu: If True and cupy is available, run on GPU.
-    """
-
     def __init__(self, alpha: float = 1.0, use_gpu: bool = False):
         self.alpha = alpha
         self._gpu = use_gpu and _HAS_CUPY
         self._xp = _xp(self._gpu)
 
     def _to_xp(self, arr: np.ndarray):
-        """Convert numpy array to the active backend."""
         if self._gpu:
             return cp.asarray(arr, dtype=cp.float64)
         return np.asarray(arr, dtype=np.float64)
 
     def _to_np(self, arr) -> np.ndarray:
-        """Convert array to numpy."""
         if self._gpu:
             return cp.asnumpy(arr)
         return np.asarray(arr)
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "RidgeColumnSwap":
-        """Fit baseline classifier and precompute inverse."""
         xp = self._xp
 
         self._binarizer = LabelBinarizer(neg_label=-1, pos_label=1)
@@ -81,7 +63,6 @@ class RidgeColumnSwap(ColumnSwapClassifier):
         return self
 
     def predict(self, X_val: np.ndarray) -> np.ndarray:
-        """Predict class labels using baseline weights."""
         X_dev = self._to_xp(X_val)
         scores = X_dev @ self._w + self._intercept
         return self._decode(self._to_np(scores))
@@ -92,7 +73,6 @@ class RidgeColumnSwap(ColumnSwapClassifier):
         new_train_cols: np.ndarray,
         X_val_mod: np.ndarray,
     ) -> np.ndarray:
-        """Predict after replacing columns using Woodbury update."""
         xp = self._xp
         col_indices = np.asarray(col_indices)
         k = len(col_indices)
@@ -138,7 +118,6 @@ class RidgeColumnSwap(ColumnSwapClassifier):
         col_indices: list[int] | np.ndarray,
         new_train_cols: np.ndarray,
     ) -> None:
-        """Permanently apply a column swap, updating all internal state."""
         xp = self._xp
         col_indices = np.asarray(col_indices)
         k = len(col_indices)
@@ -176,11 +155,9 @@ class RidgeColumnSwap(ColumnSwapClassifier):
 
     @property
     def weights(self) -> np.ndarray:
-        """Weight matrix as numpy array, shape (d, K)."""
         return self._to_np(self._w)
 
     def _decode(self, scores: np.ndarray) -> np.ndarray:
-        """Convert score matrix to class labels."""
         if scores.shape[1] == 1:
             return self.classes_[(scores.ravel() > 0).astype(int)]
         return self.classes_[scores.argmax(axis=1)]

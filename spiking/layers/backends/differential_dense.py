@@ -16,12 +16,6 @@ def differential_dense(
     tau: float = 1.0,
     t_no_spike: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """STE-style differentiable dense: hard forward + sigmoid-CDF backward into thresholds.
-
-    Soft spike time E[t_spike] is summation-by-parts of
-    ``p_k = σ((cum_potential_k − θ) / τ)`` (running probability of having
-    crossed by time t_k). Weights are detached.
-    """
     B, _, H, W = input_times.shape
     num_filters, _, kH, kW = weights_4d.shape
     oH = (H + 2 * padding - kH) // stride + 1

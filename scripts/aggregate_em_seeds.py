@@ -1,5 +1,3 @@
-"""Aggregate per-seed EM-alternation results: mean ± std + per-seed table."""
-
 from __future__ import annotations
 
 import argparse

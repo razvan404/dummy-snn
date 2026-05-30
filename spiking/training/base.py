@@ -10,14 +10,6 @@ from spiking.layers.sequential import SpikingSequential
 
 
 class BaseUnsupervisedTrainer(ABC):
-    """Base trainer for unsupervised spiking networks.
-
-    Subclasses must implement:
-        _prepare_input: how to prepare raw input times for the forward pass.
-    Optionally override:
-        _get_pre_spike_times: how to derive pre-synaptic spike times for learning.
-    """
-
     def __init__(
         self,
         model: SpikingModule,
@@ -36,24 +28,14 @@ class BaseUnsupervisedTrainer(ABC):
 
     @abstractmethod
     def _prepare_input(self, times: torch.Tensor) -> torch.Tensor:
-        """Prepare raw input times for the forward pass."""
+        ...
 
     def _get_pre_spike_times(self, prepared_times: torch.Tensor) -> torch.Tensor:
-        """Get pre-synaptic spike times for the learner.
-
-        Default: return the prepared input times.
-        Override for multilayer support.
-        """
         return prepared_times
 
     def _write_spike_times(
         self, layer: SpikingModule, spike_times: torch.Tensor
     ) -> None:
-        """Write inferred spike times into the layer's state buffer.
-
-        Handles lazy spatial buffer initialization for conv layers whose
-        _spike_times buffer doesn't exist until the first forward() call.
-        """
         if hasattr(layer, "_oH") and layer._oH is None:
             if spike_times.dim() >= 3:
                 oH, oW = spike_times.shape[-2], spike_times.shape[-1]
@@ -61,11 +43,6 @@ class BaseUnsupervisedTrainer(ABC):
         layer._spike_times.copy_(spike_times)
 
     def _forward_analytical(self, prepared: torch.Tensor) -> None:
-        """Run analytical spike time inference and write results into model state.
-
-        For SpikingSequential, writes each layer's spike times so that
-        _get_pre_spike_times can find the previous layer's output.
-        """
         if isinstance(self.model, SpikingSequential):
             times = prepared
             for layer in self.model.layers:
@@ -121,7 +98,6 @@ class BaseUnsupervisedTrainer(ABC):
         progress: bool,
         shuffle: bool,
     ):
-        """Fast path: direct dataset indexing, bypasses DataLoader overhead."""
         n = len(dataset)
         indices = torch.randperm(n) if shuffle else torch.arange(n)
         it = range(n)
@@ -134,7 +110,6 @@ class BaseUnsupervisedTrainer(ABC):
             self.step_batch(batch_idx, times, split=split)
 
     def _step_loader_iterable(self, loader, split: str, progress: bool):
-        """Fallback: iterate over any iterable (DataLoader or list)."""
         it = enumerate(loader)
         if progress:
             from tqdm import tqdm

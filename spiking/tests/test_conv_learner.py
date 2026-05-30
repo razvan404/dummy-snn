@@ -44,13 +44,10 @@ def make_biological_stdp():
 
 
 def run_forward(layer, input_times):
-    """Run a step-by-step simulation to produce spikes in the layer."""
     layer.train()
     layer.reset()
     for incoming_spikes, current_time, dt in iterate_spikes(input_times):
         layer.simulate_step(incoming_spikes, current_time, dt)
-    # The conv learner reads ``layer.spike_times``; copy the simulation
-    # output into the training-mode cache so the property exposes it.
     layer._spike_times = layer._step_spike_times.clone()
 
 

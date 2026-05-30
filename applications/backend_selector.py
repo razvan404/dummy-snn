@@ -19,4 +19,5 @@ def select_backend(
 
 
 def is_valid_backend(name: str) -> bool:
+    ...
     return name in _VALID

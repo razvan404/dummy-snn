@@ -1,29 +1,9 @@
-"""GPU-accelerated multinomial OVR logistic regression.
-
-Smooth differentiable analog of TorchLinearSVC — same interface (inherits from
-it), but the loss is strictly convex C^∞ everywhere (no active-set kinks).
-Used as the optimisation surrogate for threshold tuning when SVM's non-smooth
-loss confuses local gradient / curvature analysis. Final classification
-accuracy is still reported via TorchLinearSVC.
-"""
-
 import torch
 
 from spiking.evaluation.torch_svc import TorchLinearSVC
 
 
 class TorchLogisticRegression(TorchLinearSVC):
-    """L2-regularised OVR logistic regression via Newton-IRLS.
-
-    Loss per (n, k):  log(1 + exp(−Y_nk · score_nk))   (softplus).
-    OVR multinomial: each class is an independent binary logistic; argmax
-    over class scores at predict time.
-
-    Inherits TorchLinearSVC's standardisation, column-swap, and GPU plumbing.
-    Only `_solve_l2svm` is overridden to use the logistic Hessian/gradient
-    (sigmoid-based, no margin-active gating).
-    """
-
     _loss_type = "logistic"
 
     def _solve_l2svm(
@@ -32,13 +12,6 @@ class TorchLogisticRegression(TorchLinearSVC):
         Y: torch.Tensor,
         W_init: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Newton-IRLS for L2-regularised OVR logistic regression.
-
-        Per-class binary logistic gradient and Hessian:
-          residual_nk    = −(1 − σ_nk) · Y_nk         where σ_nk = sigmoid(Y_nk · score_nk)
-          hess_weight_nk = σ_nk · (1 − σ_nk)
-        Loss: 0.5·||W||² + C·Σ softplus(−Y·score).
-        """
         da = Xa.shape[1]
         d = da - 1
         K = Y.shape[1]
@@ -111,15 +84,6 @@ class TorchLogisticRegression(TorchLinearSVC):
         return W
 
     def loss_state(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """Per-(sample, class) (coef, hess_weight) used by EM gradient/curvature.
-
-        For logistic:
-          coef_nk        = −C · (1 − σ_nk) · Y_nk
-          hess_weight_nk = C · σ_nk · (1 − σ_nk)
-
-        Both are smooth (no boundary kinks). `coef @ Wa.T` gives the gradient
-        in scaled feature space.
-        """
         score = self._Xa @ self._Wa
         margin = self._Y * score
         sigma = torch.sigmoid(margin)

@@ -1,12 +1,3 @@
-"""AOT build for the spike-driven C++/CUDA extension.
-
-Compiled into ``spiking_backend._ext`` so ``import spiking_backend`` works
-without a JIT step. Falls through to ``spiking_backend.build.load_backend``
-(JIT) and finally to the pure-PyTorch reference if the compiled module
-isn't importable. Compiler flags come from ``spiking_backend._build_flags``,
-which is also used by the JIT path so the two binaries can't drift.
-"""
-
 from __future__ import annotations
 
 import importlib.util

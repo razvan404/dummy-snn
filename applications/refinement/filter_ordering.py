@@ -28,7 +28,6 @@ ORDERINGS = [
 
 
 def _interleave(indices: np.ndarray) -> np.ndarray:
-    """Interleave from both ends: [0, -1, 1, -2, 2, -3, ...]."""
     result = []
     lo, hi = 0, len(indices) - 1
     toggle = True
@@ -52,24 +51,6 @@ def get_filter_order(
     last_win_index: np.ndarray | None = None,
     seed: int = 1,
 ) -> np.ndarray:
-    """Return filter indices in the specified processing order.
-
-    :param ordering: One of ORDERINGS.
-    :param filter_importance: Per-filter Ridge coefficient magnitude sum.
-    :param mean_spike_times: Per-filter mean spike time over the training set.
-    :param threshold_drift: Per-filter deviation from the mean threshold,
-        i.e. |threshold_i - mean(thresholds)|. Required for high_abs_drift /
-        low_abs_drift. Computed directly from the model's current thresholds.
-    :param training_spike_times: Per-filter last spike time at end of training
-        (from training_logs.pt). Required for training_*_spike orderings.
-        May contain NaN for filters that never fired; those are placed last.
-    :param last_win_index: Per-filter index of last win in last10k_winners
-        (from training_logs.pt). Higher = more recently changed threshold.
-        Required for recent_winner / oldest_winner orderings.
-        -1 for filters that never won.
-    :param seed: Random seed for the 'random' ordering.
-    :returns: 1-D array of filter indices in the order they should be processed.
-    """
     num_filters = len(filter_importance)
     asc_imp = np.argsort(filter_importance)
     asc_spike = np.argsort(mean_spike_times)

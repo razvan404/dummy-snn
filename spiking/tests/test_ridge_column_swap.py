@@ -6,7 +6,6 @@ from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
 
 
 def _make_data(n_train=100, n_val=30, d=10, n_classes=3, seed=42):
-    """Create synthetic classification data."""
     rng = np.random.RandomState(seed)
     X_train = rng.randn(n_train, d).astype(np.float32)
     X_val = rng.randn(n_val, d).astype(np.float32)
@@ -16,8 +15,6 @@ def _make_data(n_train=100, n_val=30, d=10, n_classes=3, seed=42):
 
 
 class TestBaselinePrediction:
-    """Verify baseline predictions match sklearn RidgeClassifier."""
-
     def test_matches_sklearn_multiclass(self):
         X_train, X_val, y_train, y_val = _make_data(n_classes=5)
         alpha = 1.0
@@ -63,10 +60,7 @@ class TestBaselinePrediction:
 
 
 class TestColumnSwapCorrectness:
-    """Verify predict_swapped matches full refit with modified data."""
-
     def test_single_column_swap(self):
-        """Swapping one column should match a full refit."""
         X_train, X_val, y_train, _ = _make_data(d=10)
         rng = np.random.RandomState(99)
 
@@ -91,7 +85,6 @@ class TestColumnSwapCorrectness:
         np.testing.assert_array_equal(pred_woodbury, pred_refit)
 
     def test_multi_column_swap(self):
-        """Swapping multiple columns should match a full refit."""
         X_train, X_val, y_train, _ = _make_data(d=16)
         rng = np.random.RandomState(99)
 
@@ -114,7 +107,6 @@ class TestColumnSwapCorrectness:
         np.testing.assert_array_equal(pred_woodbury, pred_refit)
 
     def test_multiple_sequential_swaps_independent(self):
-        """Each swap should be independent (not cumulative)."""
         X_train, X_val, y_train, _ = _make_data(d=10)
         rng = np.random.RandomState(77)
 
@@ -137,7 +129,6 @@ class TestColumnSwapCorrectness:
             np.testing.assert_array_equal(pred_woodbury, pred_refit)
 
     def test_no_change_gives_baseline(self):
-        """Swapping a column with identical data should give baseline predictions."""
         X_train, X_val, y_train, _ = _make_data(d=8)
 
         clf = RidgeColumnSwap(alpha=1.0)
@@ -151,7 +142,6 @@ class TestColumnSwapCorrectness:
         np.testing.assert_array_equal(swapped, baseline)
 
     def test_different_alpha_values(self):
-        """Woodbury should work correctly with different regularization."""
         X_train, X_val, y_train, _ = _make_data(d=10)
         rng = np.random.RandomState(123)
         col = 7
@@ -177,7 +167,6 @@ class TestColumnSwapCorrectness:
             )
 
     def test_binary_classification_swap(self):
-        """Column swap should work for binary classification."""
         X_train, X_val, y_train, _ = _make_data(d=8, n_classes=2)
         rng = np.random.RandomState(55)
 
@@ -200,10 +189,7 @@ class TestColumnSwapCorrectness:
 
 
 class TestApplySwap:
-    """Test that apply_swap permanently updates classifier state."""
-
     def test_apply_then_predict_matches_refit(self):
-        """After apply_swap, predict should match a fresh fit on modified data."""
         X_train, X_val, y_train, _ = _make_data(d=10)
         rng = np.random.RandomState(88)
 
@@ -226,7 +212,6 @@ class TestApplySwap:
         np.testing.assert_array_equal(pred_applied, pred_refit)
 
     def test_chained_apply_swap(self):
-        """Two sequential apply_swaps should match a fresh fit on both columns modified."""
         X_train, X_val, y_train, _ = _make_data(d=8)
         rng = np.random.RandomState(66)
 
@@ -252,8 +237,6 @@ class TestApplySwap:
         np.testing.assert_array_equal(pred_chained, pred_refit)
 
     def test_apply_swap_then_predict_swapped(self):
-        """After apply_swap on col A, predict_swapped on col B should match
-        a fresh fit with both A and B modified."""
         X_train, X_val, y_train, _ = _make_data(d=10)
         rng = np.random.RandomState(77)
 
@@ -280,7 +263,6 @@ class TestApplySwap:
         np.testing.assert_array_equal(pred, pred_refit)
 
     def test_multi_column_apply_swap(self):
-        """apply_swap with multiple columns at once should match refit."""
         X_train, X_val, y_train, _ = _make_data(d=12)
         rng = np.random.RandomState(99)
 
@@ -302,10 +284,7 @@ class TestApplySwap:
 
 
 class TestLargerDimensions:
-    """Test with dimensions closer to real conv scenarios."""
-
     def test_high_dimensional_features(self):
-        """d=1024 (256 filters * 2*2 pool) — the real conv scenario."""
         rng = np.random.RandomState(42)
         d = 1024
         n_train, n_val = 200, 50

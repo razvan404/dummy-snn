@@ -96,7 +96,6 @@ class IntegrateAndFireLayer(SpikingModule):
     def precompute_cumulative_potentials(
         self, input_times: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor] | None:
-        """Sorted unique times + cumulative potentials at group boundaries; ``None`` if all inf."""
         finite_mask = torch.isfinite(input_times)
         if not finite_mask.any():
             return None
@@ -153,7 +152,6 @@ class IntegrateAndFireLayer(SpikingModule):
     def infer_spike_times_and_potentials_batch(
         self, input_times: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Batched analytical inference; returns ``(spike_times, cum_potential)``."""
         B = input_times.shape[0]
         dev = input_times.device
         result = torch.full(

@@ -1,14 +1,3 @@
-"""Per-input-time conv-IF accumulation primitives used by the headline pipeline.
-
-`multi_threshold_conv_accumulate` is the one-pass equivalent (CLAUDE.md §4.2) used
-by the C++/CUDA backend equivalence tests and the differentiable backends.
-`collect_conv_input_times` and `_spike_times_to_pooled_features` are the small
-helpers around it. Legacy `compute_conv_perturbed_features` / `evaluate_*` /
-`run_*` sweep machinery lived here too; it depended on the deleted
-`neuron_perturbation.py` Ridge/Woodbury path and has been removed — see
-`failed_experiments.md` §5.
-"""
-
 import numpy as np
 import torch
 import torch.nn.functional as F

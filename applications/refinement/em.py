@@ -1,19 +1,3 @@
-"""EM-style alternation thresholds: simultaneous per-neuron updates between SVC refits.
-
-Loop:
-  1. Fit SVC at current offsets.
-  2. Compute analytical squared-hinge gradient at the fitted W, in raw-feature
-     space (divide by _feat_range_t to undo SVC's per-column standardisation).
-  3. For each neuron, do tensor contraction over (samples, pool) against all
-     31 cached offsets — argmin gives that neuron's first-order best move
-     under the current classifier.
-  4. Apply all updates simultaneously; refit; repeat.
-
-Cost per iteration: ~one SVC refit + ~few seconds for the contraction. No
-per-offset SVM evals anywhere — the whole sweep over 256 × 31 candidates is
-one einsum.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -31,7 +15,6 @@ from spiking.evaluation.torch_svc import TorchLinearSVC
 
 
 def make_classifier(name: str):
-    """Construct the surrogate classifier (svc or logistic)."""
     if name == "svc":
         return TorchLinearSVC(C=1.0)
     if name == "logistic":
@@ -45,12 +28,6 @@ def build_X(cache: np.ndarray, offsets: np.ndarray) -> np.ndarray:
 
 
 def compute_raw_feature_gradient(clf) -> np.ndarray:
-    """Gradient of the classifier's primal w.r.t. raw (un-standardised) features.
-
-    Classifier-agnostic: pulls coef from `clf.loss_state()` and turns it into
-    a per-feature gradient via `coef @ Wa.T` (then divides by per-column
-    range to undo SVC/logistic standardisation).
-    """
     coef, _ = clf.loss_state()
     grad_scaled = (coef @ clf._Wa.T)[:, :-1]  # (N, D)
     grad_raw = grad_scaled / (clf._feat_range_t.unsqueeze(0) + 1e-12)
@@ -58,12 +35,6 @@ def compute_raw_feature_gradient(clf) -> np.ndarray:
 
 
 def gradient_at_external_features(clf, X_raw: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """Compute the loss gradient w.r.t. *external* features using clf's W.
-
-    Used by bootstrap gradient averaging: we fit `clf` on a bootstrapped
-    subset, then evaluate its gradient on the FULL training set to get a
-    consistent per-feature gradient that can be averaged across bootstraps.
-    """
     X_scaled = clf._scale_np(X_raw.astype(np.float32, copy=True))
     X_t = torch.from_numpy(X_scaled).to(clf._device)
     n = X_t.shape[0]
@@ -97,11 +68,6 @@ def bootstrap_averaged_gradient(
     n_bootstrap: int,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Average gradient across K bootstrap classifiers.
-
-    For each bootstrap k: resample (X, y) with replacement, fit classifier,
-    compute gradient on the FULL (X_tr, y_train). Average across k.
-    """
     grads = []
     n = X_tr.shape[0]
     for _ in range(n_bootstrap):
@@ -118,15 +84,6 @@ def find_best_offsets_linear(
     current_offsets: np.ndarray | None = None,
     max_step: int = 0,
 ) -> np.ndarray:
-    """Argmin per neuron of Σ_{n, p} cache[i, f, n, p] · grad[i, n, p].
-
-    The constant `Σ cache[i, current_offset, n, p] · grad[i, n, p]` cancels in
-    the argmin over f, so we omit it.
-
-    If max_step > 0, restrict the argmin to a trust region of ±max_step
-    offsets around the current per-neuron offset — keeps each step inside the
-    Taylor-accurate regime where sign agreement with the true loss change is ~1.
-    """
     F_n, num_fracs, N, pool = train_cache.shape
     grad_per_neuron = grad_raw.reshape(N, F_n, pool).transpose(1, 0, 2)  # (F, N, pool)
     pseudo_score = np.einsum(
@@ -147,17 +104,6 @@ def find_best_offsets_quadratic(
     current_offsets: np.ndarray,
     max_step: int = 0,
 ) -> np.ndarray:
-    """Argmin per neuron of full quadratic ΔL = linear + curvature.
-
-    Classifier-agnostic: gets (coef, hess_weight) per-(sample, class) from
-    `clf.loss_state()`. For SVC, `hess_weight = 2C · active` (zero outside the
-    margin); for logistic, `hess_weight = C · σ(1−σ)` (always positive). The
-    quadratic term grows with |δ|², so the optimum is interior — no boundary
-    saturation. Loops over neurons; per-neuron einsums are sub-second on CPU.
-
-    If max_step > 0, restrict the argmin to a trust region of ±max_step
-    offsets around the current per-neuron offset.
-    """
     coef, hess_weight = clf.loss_state()
     grad_scaled = (coef @ clf._Wa.T)[:, :-1]  # (N, D)
 

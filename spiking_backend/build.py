@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def load_backend() -> Any | None:
-    """JIT-compile the extension; ``None`` on build failure (cached under ``~/.cache/torch_extensions``)."""
+    """Cached in ~/.cache/torch_extensions; returns None on build failure."""
     use_cuda = detect_cuda()
     try:
         return load(

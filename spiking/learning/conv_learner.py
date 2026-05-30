@@ -5,8 +5,6 @@ from spiking.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 
 
 class ConvLearner(BaseLearner):
-    """STDP for conv layers; per-filter winners, spatial-mean weight updates."""
-
     layer: ConvIntegrateAndFireLayer
 
     def _get_spike_times(self) -> torch.Tensor:

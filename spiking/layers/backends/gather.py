@@ -19,7 +19,6 @@ def gather(
     tau: float = 1.0,
     t_no_spike: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Per-output bin-histogram scan; spike times at bin granularity (``k / num_bins``)."""
     from spiking_backend import first_spike_times
 
     out = first_spike_times(

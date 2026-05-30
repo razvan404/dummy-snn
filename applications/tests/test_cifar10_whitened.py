@@ -10,7 +10,6 @@ from applications.datasets.cifar10_whitened import (
 
 
 def make_fake_cifar_data(n=20):
-    """Create fake CIFAR-10 data matching torchvision format."""
     data = np.random.randint(0, 256, (n, 32, 32, 3), dtype=np.uint8)
     targets = list(np.random.randint(0, 10, n))
     return data, targets
@@ -18,7 +17,6 @@ def make_fake_cifar_data(n=20):
 
 @pytest.fixture
 def mock_cifar10():
-    """Patch torchvision.datasets.CIFAR10 to avoid downloading."""
     data, targets = make_fake_cifar_data(n=50)
     with patch("torchvision.datasets.CIFAR10") as mock_cls:
         mock_dataset = MagicMock()

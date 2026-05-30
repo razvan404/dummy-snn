@@ -42,7 +42,6 @@ def spike_driven_conv_accumulate(
     num_bins: int = 64,
     compute_cum_potential: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Sparse-event scatter; ``compute_cum_potential=False`` lets it skip already-spiked outputs."""
     is_cuda = input_times.device.type == "cuda"
     fn = _dispatch(
         input_times,
@@ -74,7 +73,6 @@ def spike_driven_conv_accumulate_multi_threshold(
     padding: int = 0,
     num_bins: int = 64,
 ) -> torch.Tensor:
-    """Scatter multi-threshold; returns ``(K, B, F, oH, oW)``."""
     is_cuda = input_times.device.type == "cuda"
     fn = _dispatch(
         input_times,
@@ -98,7 +96,6 @@ def spike_driven_conv_accumulate_multi_threshold(
 
 
 def _wta_per_position(spike_times: torch.Tensor) -> torch.Tensor:
-    """Earliest filter wins per ``(b, oh, ow)``."""
     winner_f = spike_times.argmin(dim=1, keepdim=True)
     F_ = spike_times.size(1)
     f_idx = torch.arange(F_, device=spike_times.device).view(1, F_, 1, 1)
@@ -116,7 +113,6 @@ def first_spike_times(
     wta: bool = False,
     compute_cum_potential: bool = False,
 ):
-    """Gather first-spike: per-output bin-histogram + prefix-sum; quantises to ``1/num_bins``."""
     fn = _dispatch(
         input_times, "first_spike_times_cuda", "first_spike_times_cpu"
     )
@@ -150,7 +146,6 @@ def first_spike_times_multi_threshold(
     padding: int = 0,
     compute_cum_potential: bool = False,
 ):
-    """Gather first-spike multi-threshold; cum_potential is shared across K."""
     fn = _dispatch(
         input_times,
         "first_spike_times_multi_threshold_cuda",

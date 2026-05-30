@@ -1,5 +1,3 @@
-"""Tests for TorchLinearSVC: accuracy on separable data and column-swap API."""
-
 import numpy as np
 
 from spiking.evaluation.torch_svc import TorchLinearSVC
@@ -20,8 +18,6 @@ def _make_data(n_train=200, n_val=60, d=20, n_classes=3, seed=42):
 
 
 class TestAccuracy:
-    """Reaches reasonable accuracy on linearly-separable clusters."""
-
     def test_multiclass_5(self):
         X_train, X_val, y_train, y_val = _make_data(
             n_train=500, n_val=100, d=20, n_classes=5, seed=10
@@ -41,8 +37,6 @@ class TestAccuracy:
 
 
 class TestColumnSwapCorrectness:
-    """Verify column-swap operations produce consistent results."""
-
     def test_predict_swapped_changes_output(self):
         X_train, X_val, y_train, _ = _make_data(d=10, seed=30)
         rng = np.random.RandomState(99)
@@ -92,7 +86,6 @@ class TestColumnSwapCorrectness:
         np.testing.assert_array_equal(pred_after, pred_again)
 
     def test_apply_swap_matches_predict_swapped(self):
-        """apply_swap + predict should equal predict_swapped."""
         X_train, X_val, y_train, _ = _make_data(d=10, seed=60)
         rng = np.random.RandomState(88)
 
@@ -112,7 +105,6 @@ class TestColumnSwapCorrectness:
         np.testing.assert_array_equal(pred_swapped, pred_applied)
 
     def test_chained_apply_swap(self):
-        """Chained warm-start swaps should closely match cold-start refit."""
         X_train, X_val, y_train, _ = _make_data(d=8, seed=70)
         rng = np.random.RandomState(66)
 
@@ -140,8 +132,6 @@ class TestColumnSwapCorrectness:
 
 
 class TestWarmStart:
-    """Test warm-start and GPU persistence."""
-
     def test_eval_swapped_train_acc_returns_valid(self):
         X_train, _, y_train, _ = _make_data(n_train=200, d=10, n_classes=3, seed=100)
         import torch
@@ -175,7 +165,6 @@ class TestWarmStart:
         )
 
     def test_warm_start_accuracy_close_to_cold(self):
-        """Warm-start predict_swapped should match cold-start accuracy."""
         X_train, X_val, y_train, y_val = _make_data(
             n_train=500, n_val=100, d=20, n_classes=5, seed=120
         )
@@ -207,8 +196,6 @@ class TestWarmStart:
 
 
 class TestWeightsProperty:
-    """Test the weights property."""
-
     def test_multiclass_shape(self):
         X_train, _, y_train, _ = _make_data(d=10, n_classes=5, seed=90)
         clf = TorchLinearSVC(C=1.0)

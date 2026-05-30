@@ -2,12 +2,7 @@ import torch
 
 
 def iterate_spikes(times: torch.Tensor):
-    """Yields (incoming_spikes, current_time, delta_time) for each unique spike time.
-
-    Precomputes index grouping so each frame costs O(K_i) instead of O(N).
-
-    :param times: tensor of spike times (e.g. shape (2, H, W)). Non-spiking entries are inf.
-    """
+    """Precomputes index grouping to amortize frame reuse cost."""
     flat = times.flatten()
     valid_indices = torch.nonzero(torch.isfinite(flat), as_tuple=True)[0]
     if len(valid_indices) == 0:

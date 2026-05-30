@@ -29,7 +29,6 @@ def make_learner(layer):
 
 
 def make_loader(n=10, C=2, H=8, W=8):
-    """Create a fake DataLoader with spike time tensors."""
     torch.manual_seed(42)
     times = torch.rand(n, C, H, W)
     times[times > 0.7] = float("inf")
@@ -61,8 +60,6 @@ class TestConvTrainerStepBatch:
         assert isinstance(dw, torch.Tensor) and dw.dim() == 0
 
     def test_step_batch_preserves_spatial_shape(self):
-        """Per-filter spike times must keep spatial structure during the
-        forward (verified by intercepting the cached state mid-step)."""
         layer = make_layer(threshold=0.5)
         layer.weights.data.fill_(0.5)
         learner = make_learner(layer)

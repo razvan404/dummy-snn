@@ -16,7 +16,6 @@ def dense(
     tau: float = 1.0,
     t_no_spike: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Batched ``F.conv2d`` per unique input time; exact (no time quantisation)."""
     B, _, H, W = input_times.shape
     num_filters, _, kH, kW = weights_4d.shape
     oH = (H + 2 * padding - kH) // stride + 1

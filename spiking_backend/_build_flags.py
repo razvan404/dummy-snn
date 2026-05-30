@@ -20,8 +20,10 @@ def openmp_flags() -> tuple[list[str], list[str]]:
                     ["-Xpreprocessor", "-fopenmp", f"-I{prefix}/include"],
                     [f"-L{prefix}/lib", "-lomp"],
                 )
+        # Homebrew libomp not found.
         return [], []
     if os.name == "posix":
+        # System libomp (glibc).
         return ["-fopenmp"], ["-lgomp"]
     return [], []
 

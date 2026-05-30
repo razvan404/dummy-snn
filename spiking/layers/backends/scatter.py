@@ -15,7 +15,6 @@ def scatter(
     tau: float = 1.0,
     t_no_spike: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Per-input-event push: scatter each spike's weighted contribution into its receptive field."""
     from spiking_backend import spike_driven_conv_accumulate
 
     return spike_driven_conv_accumulate(

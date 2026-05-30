@@ -7,12 +7,6 @@ from spiking.threshold import ThresholdInitialization
 
 
 class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
-    """Conv IF layer with pluggable analytical inference backends.
-
-    Spike times in, spike times out. Stateless by default; caches
-    ``_spike_times`` only when ``self.training`` (STDP requires B=1).
-    """
-
     num_bins: int = 64
     tau: float = 1.0
     t_no_spike: float = 1.0
@@ -66,7 +60,6 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         return oH, oW
 
     def _unfold_patches(self, input_times: torch.Tensor) -> torch.Tensor:
-        """Unfold to ``(L, dim)`` or ``(B, L, dim)``; pads with +inf so absent inputs don't look like t=0 spikes."""
         has_batch = input_times.dim() == 4
         if not has_batch:
             input_times = input_times.unsqueeze(0)
@@ -86,12 +79,6 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         input_times: torch.Tensor,
         first_spike_only: bool = True,
     ) -> torch.Tensor:
-        """Spike times in, spike times out: ``(B, C, H, W) -> (B, F, oH, oW)``.
-
-        Potentials are not computed here — STDP and threshold adaptation read
-        only spike times. Use ``infer_spike_times_and_potentials_batch`` when
-        you explicitly need cumulative potentials.
-        """
         from spiking.layers.backends import is_differentiable
 
         if input_times.dim() != 4:
@@ -140,7 +127,6 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
 
     @staticmethod
     def _wta_across_filters(spike_times: torch.Tensor) -> torch.Tensor:
-        """Earliest filter wins per ``(b, oh, ow)``; ties broken uniformly at random."""
         min_time = spike_times.amin(dim=1, keepdim=True)
         candidates = (spike_times == min_time) & torch.isfinite(spike_times)
         rand = torch.rand_like(spike_times)
@@ -193,7 +179,6 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
     def simulate_step(
         self, incoming_spikes: torch.Tensor, current_time: float, dt: float
     ) -> torch.Tensor:
-        """One time-frame of step-by-step simulation."""
         if self._oH is None:
             H, W = incoming_spikes.shape[-2], incoming_spikes.shape[-1]
             oH, oW = self._compute_output_size(H, W)
@@ -271,7 +256,6 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
 
     @torch.no_grad()
     def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
-        """Unbatched analytical inference via unfold + base FC."""
         if input_times.dim() == 1:
             return super().infer_spike_times(input_times)
         C, H, W = input_times.shape

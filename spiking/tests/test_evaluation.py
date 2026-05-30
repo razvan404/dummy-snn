@@ -8,7 +8,6 @@ from spiking.threshold import ConstantInitialization, NormalInitialization
 
 
 def make_layer(num_inputs=10, num_outputs=5, avg_threshold=5.0):
-    """Create a minimal IntegrateAndFireLayer for testing."""
     threshold_init = NormalInitialization(
         avg_threshold=avg_threshold, min_threshold=1.0, std_dev=0.5
     )
@@ -21,8 +20,6 @@ def make_layer(num_inputs=10, num_outputs=5, avg_threshold=5.0):
 
 
 class FakeDataset:
-    """Mimics SpikeEncodingDataset: each item is (times, label)."""
-
     def __init__(self, num_samples=5, shape=(2, 4, 4)):
         self.items = []
         for i in range(num_samples):
@@ -38,7 +35,6 @@ class FakeDataset:
 
 
 def make_fake_dataloader(num_samples=5, shape=(2, 4, 4)):
-    """Create a dataloader that yields (times, label) like SpikeEncodingDataset."""
     dataset = FakeDataset(num_samples=num_samples, shape=shape)
     return DataLoader(dataset, batch_size=None, shuffle=False)
 

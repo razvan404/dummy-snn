@@ -9,8 +9,6 @@ from spiking.threshold import ThresholdAdaptation
 
 
 class BaseLearner(ABC):
-    """Orchestrates STDP learning, competition, and threshold adaptation."""
-
     def __init__(
         self,
         layer: SpikingModule,
@@ -36,11 +34,11 @@ class BaseLearner(ABC):
     def _update_weights(
         self, neurons_to_learn: torch.Tensor, pre_spike_times: torch.Tensor
     ) -> float:
-        """Apply learning rule to selected neurons; returns avg |dw|."""
+        """Returns avg |dw|."""
 
     @torch.no_grad()
     def step(self, pre_spike_times: torch.Tensor) -> torch.Tensor:
-        """One learning step; returns 0-dim avg-|dw| tensor (caller may defer host sync)."""
+        """Caller may defer host sync of returned tensor."""
         neurons_to_learn = self._select_neurons().flatten()
         self.neurons_to_learn = neurons_to_learn
         spike_times_now = self._get_spike_times()

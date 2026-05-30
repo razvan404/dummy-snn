@@ -11,9 +11,7 @@ def save_model(model: SpikingModule, path: str):
 
 
 def _fix_buffer_grad(module: SpikingModule) -> None:
-    """In-place ops during training can promote buffer requires_grad to True.
-    After deserialization, restore the invariant: buffers don't require grad.
-    """
+    # In-place ops during training can promote buffer requires_grad; restore invariant.
     for buf in module.buffers():
         buf.requires_grad_(False)
 

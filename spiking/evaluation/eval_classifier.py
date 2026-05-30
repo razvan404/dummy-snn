@@ -11,10 +11,6 @@ def evaluate_classifier(
     y_test: np.ndarray,
     classifier=None,
 ) -> tuple[dict, dict]:
-    """Fit a classifier and return (train_metrics, val_metrics).
-
-    Defaults to ``TorchLinearSVC`` (CPU- or CUDA-accelerated; self-selects).
-    """
     if classifier is None:
         classifier = TorchLinearSVC(C=1.0)
 

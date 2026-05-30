@@ -16,7 +16,6 @@ def differential_base(
     tau: float = 1.0,
     t_no_spike: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """STE per-sample loop; same gradient semantics as ``differential_dense``."""
     B, _, H, W = input_times.shape
     num_filters, _, kH, kW = weights_4d.shape
     oH = (H + 2 * padding - kH) // stride + 1

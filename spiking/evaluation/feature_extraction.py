@@ -10,11 +10,7 @@ def spike_times_to_features(
     spike_times: torch.Tensor,
     t_target: float | None = None,
 ) -> torch.Tensor:
-    """Convert spike times to feature values in [0, 1].
-
-    Without t_target: scaled inversion, clamp((1 - t) / (1 - min_t), 0, 1).
-    With t_target: Falez Eq 10, clamp(1 - (t - t_target) / (1 - t_target), 0, 1).
-    """
+    """Convert spike times to [0, 1] features (with optional target latency)."""
     decoder = TargetRelative(t_target) if t_target is not None else ScaledInversion()
     return decoder.decode(spike_times)
 
@@ -25,11 +21,7 @@ def extract_features(
     dataloader: DataLoader,
     t_target: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Run model inference on a dataloader and return (X, y) numpy arrays.
-
-    Uses batched analytical spike time computation for efficiency.
-    Processes the full dataset in one batch for optimal matmul throughput.
-    """
+    """Run model inference on full dataset in one batch."""
     model.eval()
     full_loader = DataLoader(
         dataloader.dataset, batch_size=len(dataloader.dataset), shuffle=False

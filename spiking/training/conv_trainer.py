@@ -5,8 +5,6 @@ from spiking.layers.sequential import SpikingSequential
 
 
 class ConvUnsupervisedTrainer(BaseUnsupervisedTrainer):
-    """Trainer for convolutional spiking layers; preserves spatial dims."""
-
     def _prepare_input(self, times: torch.Tensor) -> torch.Tensor:
         return times.to(self.device)
 

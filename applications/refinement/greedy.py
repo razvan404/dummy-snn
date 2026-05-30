@@ -1,20 +1,3 @@
-"""Multi-pass greedy threshold optimization from precomputed feature cache.
-
-Reads the per-neuron feature cache (feature_cache.py) and runs
-coordinate descent to maximize **training accuracy**.
-
-Classifier backends:
-  - ``ridge``: Woodbury-accelerated Ridge (~1 ms/eval, ~5 min/pass)
-  - ``svc``: GPU Newton-IRLS LinearSVC with warm-start (~250 ms/eval, ~18 min/pass)
-
-Algorithm per pass:
-  For each neuron (in specified order):
-    1. Sweep all cached levels -> find globally best level
-    2. Move ONE step (+-5%) toward that level (not jump)
-    3. Verify the step improves train accuracy
-    4. If yes, apply via column swap
-"""
-
 import argparse
 import json
 import logging
@@ -56,7 +39,6 @@ def build_features_from_levels(
     levels: np.ndarray,
     pool_dim: int,
 ) -> np.ndarray:
-    """Build full feature matrix from cache given per-neuron level indices."""
     F = cache_data.shape[0]
     N = cache_data.shape[2]
     features = np.empty((N, F * pool_dim), dtype=np.float32)
@@ -64,11 +46,6 @@ def build_features_from_levels(
         col_start = f * pool_dim
         features[:, col_start : col_start + pool_dim] = cache_data[f, levels[f]]
     return features
-
-
-# ======================================================================
-# Ridge evaluation (Woodbury-accelerated, evaluates on train)
-# ======================================================================
 
 
 def _eval_level_ridge(
@@ -79,7 +56,6 @@ def _eval_level_ridge(
     col_indices: list[int],
     y_train: np.ndarray,
 ) -> float:
-    """Evaluate train accuracy for one neuron at one level via Woodbury."""
     xp = clf._xp
     col_idx = np.asarray(col_indices)
     k = len(col_idx)
@@ -112,7 +88,6 @@ def _eval_level_ridge(
     X_mean_new[col_idx] = new_mean
     intercept_new = clf._Y_mean - X_mean_new @ w_new
 
-    # Predict on train features (patch changed columns temporarily)
     X_train_dev = clf._to_xp(clf._X_train_base)
     old_cols = X_train_dev[:, col_idx].copy()
     X_train_dev[:, col_idx] = clf._to_xp(new_train_cols)
@@ -123,22 +98,7 @@ def _eval_level_ridge(
     return float((y_pred == y_train).mean())
 
 
-# ======================================================================
-# SVC evaluation (GPU warm-start Newton-IRLS, evaluates on train)
-# ======================================================================
-
-
 def build_canonical_map(train_cache: np.ndarray) -> np.ndarray:
-    """Map each (neuron, level) to the smallest level with identical features.
-
-    Spike-time features are step functions in threshold: many adjacent levels
-    have bit-identical features. Deduplicating these saves SVC evaluations
-    (~1.6x speedup on CIFAR-10).
-
-    :returns: int32 array of shape (num_filters, num_fracs) where
-        ``canonical[f, l]`` is the smallest level with features identical
-        to ``train_cache[f, l]``.
-    """
     F, L, N, P = train_cache.shape
     canonical = np.zeros((F, L), dtype=np.int32)
     for f in range(F):
@@ -160,13 +120,6 @@ def _eval_level_svc(
     canonical_map: np.ndarray | None = None,
     eval_cache: dict | None = None,
 ) -> float:
-    """Evaluate train accuracy for one neuron at one level.
-
-    Uses full warm-start Newton-IRLS (~250ms). If ``canonical_map`` and
-    ``eval_cache`` are provided, deduplicates identical-feature levels:
-    first eval at a canonical level pays the SVC cost, later evals hit
-    the cache for free.
-    """
     if canonical_map is not None and eval_cache is not None:
         canonical_level = int(canonical_map[neuron_idx, candidate_level])
         key = (neuron_idx, canonical_level)
@@ -179,11 +132,6 @@ def _eval_level_svc(
 
     new_train_cols = cache_data_train_gpu[neuron_idx, candidate_level]
     return clf.eval_swapped_train_acc(col_indices, new_train_cols, y_train_gpu)
-
-
-# ======================================================================
-# Greedy pass (dispatches to Ridge or SVC)
-# ======================================================================
 
 
 def greedy_pass(
@@ -204,12 +152,6 @@ def greedy_pass(
     y_train_gpu: torch.Tensor | None = None,
     canonical_map: np.ndarray | None = None,
 ) -> dict:
-    """One pass of greedy coordinate descent.
-
-    Both Ridge and SVC optimize **training accuracy**. When ``canonical_map``
-    is provided, SVC evaluations are deduplicated across levels with
-    identical features.
-    """
     num_fracs = len(fractions)
     n_changes = 0
     improvements = np.zeros(len(neuron_order), dtype=np.float32)
@@ -234,8 +176,6 @@ def greedy_pass(
             col_indices_t = torch.tensor(
                 col_indices_list, device=cache_data_train_gpu.device
             )
-        # Per-neuron eval cache: maps canonical level -> SVC train accuracy.
-        # Reset each neuron because apply_swap changes the feature matrix.
         eval_cache: dict = {}
 
         best_acc = current_acc
@@ -245,7 +185,6 @@ def greedy_pass(
         coarse_levels = list(range(0, num_fracs, coarse_stride))
         if coarse_levels[-1] != num_fracs - 1:
             coarse_levels.append(num_fracs - 1)
-
         coarse_best_level = current_level
         coarse_best_acc = current_acc
         for candidate_level in coarse_levels:
@@ -279,7 +218,6 @@ def greedy_pass(
                 coarse_best_acc = acc
                 coarse_best_level = candidate_level
 
-        # Phase 2: fine sweep around coarse winner
         if coarse_best_level != current_level:
             fine_lo = max(0, coarse_best_level - coarse_stride + 1)
             fine_hi = min(num_fracs - 1, coarse_best_level + coarse_stride - 1)
@@ -317,7 +255,6 @@ def greedy_pass(
                 best_acc = coarse_best_acc
                 best_level = coarse_best_level
 
-        # Move one step toward the global best
         if best_level != current_level:
             direction = 1 if best_level > current_level else -1
             target_level = current_level + direction
@@ -398,7 +335,6 @@ def plot_passes(
     ordering: str,
     output_path: str,
 ) -> None:
-    """Plot multi-pass convergence with per-neuron training curves."""
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
     passes = range(1, len(history) + 1)

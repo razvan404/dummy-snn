@@ -11,16 +11,10 @@ from .cifar10_patches import Cifar10PatchDataset
 
 
 def _cache_path(root_dir: str, name: str, split: str) -> str:
-    """Return cache file path for DoG-encoded spike times."""
     return f"{root_dir}/{name}_cache/{split}_dog.pt"
 
 
 def create_dataset(name: str, root_dir: str = "data") -> tuple[DataLoader, DataLoader]:
-    """Load train and test datasets by name. Returns (train_loader, test_loader).
-
-    DoG-encoded spike times are cached to disk for fast subsequent runs.
-    Access the dataset's native image shape via train_loader.dataset.image_shape.
-    """
     if name == "mnist_subset":
         train_dataset = MnistSubsetDataset(
             f"{root_dir}/mnist-subset", "train", image_shape=(16, 16),

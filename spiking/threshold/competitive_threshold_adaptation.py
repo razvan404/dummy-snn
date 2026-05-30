@@ -30,7 +30,6 @@ class CompetitiveThresholdAdaptation(ThresholdAdaptation):
         losers_mask = torch.ones(N, dtype=torch.bool, device=current_thresholds.device)
         losers_mask[winners_neurons] = False
 
-        # Winner gets +eta_th, losers get -eta_th/|losers|
         threshold_updates = torch.zeros_like(current_thresholds)
         if len(winners_neurons) > 0:
             threshold_updates[winners_neurons] = self.learning_rate

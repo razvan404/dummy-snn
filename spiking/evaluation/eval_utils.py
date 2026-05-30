@@ -8,7 +8,6 @@ from sklearn.metrics import (
 
 
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
-    """Compute classification metrics. Pure computation, no side effects."""
     return {
         "accuracy": accuracy_score(y_true, y_pred),
         "precision": precision_score(y_true, y_pred, average="macro"),

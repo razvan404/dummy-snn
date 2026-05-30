@@ -178,7 +178,6 @@ class TestPatchExtraction:
 
 class TestMnistDataset:
     def _make_fake_mnist_data(self):
-        """Return fake (data, targets) tensors matching torchvision MNIST format."""
         data = torch.randint(0, 256, (10, 28, 28), dtype=torch.uint8)
         targets = torch.randint(0, 10, (10,))
         return data, targets
@@ -259,7 +258,6 @@ class TestFashionMnistDataset:
 
 class TestCifar10Dataset:
     def _make_fake_cifar_data(self):
-        # CIFAR-10 data is numpy array (N, 32, 32, 3)
         import numpy as np
 
         data = np.random.randint(0, 256, (5, 32, 32, 3), dtype=np.uint8)
@@ -310,7 +308,6 @@ class TestCifar10Dataset:
 
 class TestFer2013Dataset:
     def _make_fake_kaggle_dir(self, tmp_path, split="train", n_per_class=2):
-        """Create fake kagglehub directory with tiny JPEG images per class."""
         import numpy as np
         from PIL import Image
 
