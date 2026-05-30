@@ -47,6 +47,11 @@ exclude = ["benchmarks*", "scripts*", "logs*", "data*", "checkpoints*"]
 [tool.setuptools.package-data]
 spiking_backend = ["csrc/*.cpp", "csrc/*.cu", "csrc/*.h"]
 
+[tool.pytest.ini_options]
+# archive/ imports deleted modules and breaks collection.
+testpaths = ["spiking/tests", "applications/tests"]
+norecursedirs = ["archive", ".venv", "build", "logs", "data", "torch_extensions"]
+
 [tool.black]
 target-version = ["py310"]
 line-length = 88

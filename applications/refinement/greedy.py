@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GreedyConfig:
     cache_path: str = ""
-    classifier: str = "ridge"
+    classifier: str = "svc"
     num_passes: int = 5
     ordering: str = "descending_importance"
     alpha: float = 1.0
@@ -423,8 +423,9 @@ def main() -> None:
     parser.add_argument(
         "--classifier",
         choices=["ridge", "svc"],
-        default="ridge",
-        help="Classifier backend: ridge (Woodbury) or svc (GPU Newton-IRLS)",
+        default="svc",
+        help="Classifier backend: svc (GPU Newton-IRLS, current default) or "
+        "ridge (Woodbury; historical/comparison only)",
     )
     parser.add_argument("--num-passes", type=int, default=5)
     parser.add_argument(

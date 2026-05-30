@@ -1,18 +1,31 @@
+import shutil
+
 import torch
 import pytest
 from unittest.mock import patch, MagicMock
 import numpy as np
 
+from applications.datasets import cifar10_whitened
 from applications.datasets.cifar10_whitened import (
     Cifar10WhitenedDataset,
     create_cifar10_whitened,
 )
 
 
-def make_fake_cifar_data(n=20):
-    data = np.random.randint(0, 256, (n, 32, 32, 3), dtype=np.uint8)
-    targets = list(np.random.randint(0, 10, n))
+def make_fake_cifar_data(n=20, seed=0):
+    rng = np.random.default_rng(seed)
+    data = rng.integers(0, 256, (n, 32, 32, 3), dtype=np.uint8)
+    targets = list(rng.integers(0, 10, n))
     return data, targets
+
+
+@pytest.fixture(autouse=True)
+def isolate_whitening_cache(tmp_path, monkeypatch):
+    # Per-test cache dir: avoids cross-run cache reuse that made tests order-dependent.
+    cache_dir = tmp_path / "wcache"
+    monkeypatch.setattr(cifar10_whitened, "_DEFAULT_CACHE_SUBDIR", str(cache_dir))
+    yield
+    shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 @pytest.fixture

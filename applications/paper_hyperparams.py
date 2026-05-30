@@ -67,7 +67,7 @@ class Cifar10Hyperparams:
     threshold_std: float = 0.1
     min_threshold: float = 1.0
     threshold_lr: float = 1.0
-    target_timestamp: float = 0.97
+    target_timestamp: float = 0.70
 
     # Training
     annealing: float = 0.95
@@ -79,7 +79,7 @@ class Cifar10Hyperparams:
 @dataclass(frozen=True)
 class FashionMnistHyperparams(MnistHyperparams):
     num_filters: int = 256
-    target_timestamp: float = 0.9
+    target_timestamp: float = 0.85
 
 
 MNIST = MnistHyperparams()

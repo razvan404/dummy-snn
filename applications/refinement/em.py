@@ -230,6 +230,10 @@ def main() -> None:
 
     offsets = np.full(F_n, zero_idx, dtype=np.int64)
     history: list[dict] = []
+    # Headline is train-best (no peeking); best_test is a test-peeking oracle only.
+    best_train = -1.0
+    best_train_test = -1.0
+    best_train_offsets = offsets.copy()
     best_test = -1.0
     best_test_offsets = offsets.copy()
 
@@ -291,6 +295,10 @@ def main() -> None:
                 "time_s": iter_time,
             }
         )
+        if train_acc > best_train:
+            best_train = train_acc
+            best_train_test = test_acc
+            best_train_offsets = offsets.copy()
         if test_acc > best_test:
             best_test = test_acc
             best_test_offsets = offsets.copy()
@@ -321,8 +329,12 @@ def main() -> None:
         f"Δtrain={final_train - base['train']:+.4f}  Δtest={final_test - base['test']:+.4f}"
     )
     print(
+        f"Train-best iter:   train={best_train:.4f}  test={best_train_test:.4f}  "
+        f"Δtest_vs_baseline={best_train_test - base['test']:+.4f}  [HEADLINE, no peeking]"
+    )
+    print(
         f"Best-test iter:    test={best_test:.4f}  "
-        f"Δtest_vs_baseline={best_test - base['test']:+.4f}"
+        f"Δtest_vs_baseline={best_test - base['test']:+.4f}  [oracle, test peeking]"
     )
 
     with open(out_dir / "results.json", "w") as f:
@@ -333,11 +345,13 @@ def main() -> None:
                 "t_obj": t_obj,
                 "baseline": {"train": base["train"], "test": base["test"]},
                 "final": {"train": final_train, "test": final_test},
+                "train_best": {"train": best_train, "test": best_train_test},
                 "best_test": best_test,
                 "n_iterations": len(history),
                 "history": history,
                 "final_offsets": offsets.tolist(),
                 "final_fractions": fractions[offsets].tolist(),
+                "train_best_offsets": best_train_offsets.tolist(),
                 "best_test_offsets": best_test_offsets.tolist(),
             },
             f,
