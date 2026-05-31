@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from applications.common import set_seed
+from applications.pipeline import FeatureCache
 from applications.refinement.filter_ordering import ORDERINGS, get_filter_order
 from spiking.evaluation.ridge_column_swap import RidgeColumnSwap
 
@@ -471,17 +472,17 @@ def main() -> None:
 
     # Load cache
     logger.info("Loading cache from %s", config.cache_path)
-    cache = torch.load(config.cache_path, weights_only=False)
-    train_cache = cache["train_cache"]
-    test_cache = cache["test_cache"]
-    y_train = cache["y_train"]
-    y_test = cache["y_test"]
-    original_thresholds = cache["original_thresholds"]
-    fractions = cache["perturbation_fractions"]
-    pool_dim = cache["pool_size"] ** 2
+    fc = FeatureCache.load(config.cache_path)
+    train_cache = fc.train_cache
+    test_cache = fc.test_cache
+    y_train = fc.y_train
+    y_test = fc.y_test
+    original_thresholds = fc.original_thresholds
+    fractions = fc.perturbation_fractions
+    pool_dim = fc.pool_size**2
 
     num_filters, num_fracs, N_train, _ = train_cache.shape
-    zero_idx = fractions.index(0.0)
+    zero_idx = fc.zero_index
     logger.info(
         "Cache: %d filters, %d levels, %d train, %d test",
         num_filters,

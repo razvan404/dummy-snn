@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from applications.common import set_seed
 from applications.paper_hyperparams import get_paper_hyperparams
+from applications.pipeline.datasets import dataset_names, load_train_images
 from spiking import (
     BiologicalSTDP,
     ConvIntegrateAndFireLayer,
@@ -168,72 +169,27 @@ def _extract_random_patches(images: torch.Tensor, kernel_size: int) -> torch.Ten
 def _load_training_images(
     dataset: str, processed_dir: str | None, num_bins: int = 64
 ) -> torch.Tensor:
-    ...
-    if dataset == "cifar10" and processed_dir is None:
-        from applications.datasets import Cifar10WhitenedDataset
-
-        ds = Cifar10WhitenedDataset("data", "train", num_bins=num_bins)
-        return ds.all_times
-    if dataset == "fashion_mnist" and processed_dir is None:
-        from applications.datasets import FashionMnistDataset
-
-        ds = FashionMnistDataset(
-            "data",
-            "train",
-            cache_path="data/fashion_mnist_cache/train_dog.pt",
-            num_bins=num_bins,
-        )
-        return ds.all_times
     if processed_dir is None:
-        processed_dir = f"data/processed-{dataset}"
+        return load_train_images(dataset, num_bins)
     train_data = torch.load(f"{processed_dir}/train.pt", weights_only=True)
     return train_data["images"]
 
 
-def train_model(
-    *,
-    dataset: str,
-    seed: int,
-    t_obj: float | None = None,
-    num_filters: int | None = None,
-    num_epochs: int | None = None,
-    processed_dir: str | None = None,
-    output_dir: str,
-    params_override: dict | None = None,
-) -> dict:
-    ...
-    params = get_paper_hyperparams(dataset)
-    if params_override:
-        params.update(params_override)
-    if t_obj is not None:
-        params["target_timestamp"] = t_obj
-    if num_filters is not None:
-        params["num_filters"] = num_filters
-    if num_epochs is not None:
-        params["num_epochs"] = num_epochs
+def _build_and_train_layer(train_images: torch.Tensor, params: dict):
+    """Train one conv-IF layer by STDP on random patches of `train_images`.
 
-    set_seed(seed)
+    The reusable training core: works on raw encoded images (layer 1) or on a frozen
+    prefix's featurized spike-time maps (layer 2). Caller is responsible for seeding.
+    """
     nf = params["num_filters"]
     ne = params["num_epochs"]
-    tt = params["target_timestamp"]
-    stdp_variant = params["stdp_variant"]
-
-    logger.info(
-        "Training: %s, %s STDP, %d filters, t_obj=%.2f, %d epochs, seed=%d",
-        dataset,
-        stdp_variant,
-        nf,
-        tt,
-        ne,
-        seed,
-    )
-
-    logger.info("Loading training data for %s...", dataset)
-    all_images = _load_training_images(dataset, processed_dir, params["num_bins"])
-    N = len(all_images)
-    in_channels = all_images.shape[1]
+    in_channels = train_images.shape[1]
     ksize = params["kernel_size"]
-    logger.info("  %d images, %d channels, kernel=%d", N, in_channels, ksize)
+    logger.info(
+        "  layer: %d filters, %s STDP, %d ch, kernel=%d, t_obj=%.2f, %d epochs, %d images",
+        nf, params["stdp_variant"], in_channels, ksize,
+        params["target_timestamp"], ne, len(train_images),
+    )
 
     init = NormalInitialization(
         avg_threshold=params["threshold_avg"],
@@ -252,7 +208,7 @@ def train_model(
     torch.nn.init.uniform_(layer.weights, a=params["w_min"], b=params["w_max"])
     layer.num_bins = params["num_bins"]
 
-    stdp = _create_stdp(stdp_variant, params)
+    stdp = _create_stdp(params["stdp_variant"], params)
     adaptation = _create_threshold_adaptation(params)
     learner = ConvLearner(
         layer, stdp, competition=WinnerTakesAll(), threshold_adaptation=adaptation
@@ -271,6 +227,7 @@ def train_model(
     }
 
     dev = layer.weights.device
+    N = len(train_images)
     neuron_wins = torch.zeros(nf, dtype=torch.long, device=dev)
     total_steps = N * ne
     log_last_n = 10_000
@@ -279,7 +236,7 @@ def train_model(
     global_step = 0
 
     for epoch in tqdm(range(ne), desc="Training", unit="epoch"):
-        patches = _extract_random_patches(all_images, ksize)
+        patches = _extract_random_patches(train_images, ksize)
         perm = torch.randperm(N)
         layer.train()
         epoch_dws = torch.empty(N, device=dev)
@@ -315,7 +272,11 @@ def train_model(
     training_logs["neuron_wins"] = neuron_wins.cpu()
     training_logs["last10k_winners"] = last10k_winners.cpu()
     training_logs["last10k_spike_times"] = last10k_spike_times.cpu()
+    return layer, training_logs
 
+
+def _save_run(layer, training_logs, params, dataset, seed, processed_dir, output_dir):
+    nf = params["num_filters"]
     os.makedirs(output_dir, exist_ok=True)
     save_model(layer, f"{output_dir}/model.pth")
     torch.save(training_logs, f"{output_dir}/training_logs.pt")
@@ -333,6 +294,42 @@ def train_model(
         json.dump(setup_info, f, indent=4)
 
     logger.info("Saved model and logs to %s", output_dir)
+    return setup_info
+
+
+def train_model(
+    *,
+    dataset: str,
+    seed: int,
+    t_obj: float | None = None,
+    num_filters: int | None = None,
+    num_epochs: int | None = None,
+    processed_dir: str | None = None,
+    output_dir: str,
+    params_override: dict | None = None,
+) -> dict:
+    params = get_paper_hyperparams(dataset)
+    if params_override:
+        params.update(params_override)
+    if t_obj is not None:
+        params["target_timestamp"] = t_obj
+    if num_filters is not None:
+        params["num_filters"] = num_filters
+    if num_epochs is not None:
+        params["num_epochs"] = num_epochs
+
+    set_seed(seed)
+    logger.info(
+        "Training: %s, %s STDP, %d filters, t_obj=%.2f, %d epochs, seed=%d",
+        dataset, params["stdp_variant"], params["num_filters"],
+        params["target_timestamp"], params["num_epochs"], seed,
+    )
+    logger.info("Loading training data for %s...", dataset)
+    all_images = _load_training_images(dataset, processed_dir, params["num_bins"])
+    layer, training_logs = _build_and_train_layer(all_images, params)
+    setup_info = _save_run(
+        layer, training_logs, params, dataset, seed, processed_dir, output_dir
+    )
     return {**setup_info, "training_logs": training_logs}
 
 
@@ -344,7 +341,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "dataset",
         type=str,
-        choices=["mnist", "cifar10", "fashion_mnist"],
+        choices=dataset_names(),
         help="Dataset name",
     )
     parser.add_argument("--num-filters", type=int, default=None)

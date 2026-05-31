@@ -9,12 +9,26 @@ import torch
 from tqdm import tqdm
 
 from applications.common import load_split_data, resolve_params
+from applications.pipeline.datasets import dataset_names
 from spiking.evaluation import evaluate_classifier
 from spiking.evaluation.conv_feature_extraction import sum_pool_features
 from spiking.evaluation.feature_extraction import spike_times_to_features
 from spiking.utils.checkpoints import load_model
 
 logger = logging.getLogger(__name__)
+
+
+def output_filters(model) -> int:
+    """Number of filters of the model's output layer — works for a single conv-IF layer
+    or a SpikingSequential stack (the last layer carrying a num_filters)."""
+    from spiking.layers import SpikingSequential
+
+    if isinstance(model, SpikingSequential):
+        for layer in reversed(model.layers):
+            if getattr(layer, "num_filters", None):
+                return layer.num_filters
+        raise ValueError("no layer with num_filters in the stack")
+    return model.num_filters
 
 
 @torch.no_grad()
@@ -29,7 +43,7 @@ def _extract_features(
 ) -> tuple[np.ndarray, np.ndarray]:
     layer.eval()
     layer.to(device)
-    flat_dim = layer.num_filters * pool_size * pool_size
+    flat_dim = output_filters(layer) * pool_size * pool_size
     X = np.empty((len(images), flat_dim), dtype=np.float32)
 
     for start in tqdm(
@@ -57,17 +71,31 @@ def main() -> None:
         "--dataset",
         type=str,
         default="cifar10",
-        choices=["mnist", "cifar10", "fashion_mnist"],
+        choices=dataset_names(),
     )
     parser.add_argument("--num-filters", type=int, default=None)
     parser.add_argument("--t-obj", type=float, default=None)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument(
+        "--layer2-filters", type=int, default=None,
+        help="If set, evaluate the 2-layer stack whose L1 is (--num-filters, --t-obj).",
+    )
+    parser.add_argument("--layer2-tobj", type=float, default=None)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--chunk-size", type=int, default=2048)
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
-    _, _, model_dir = resolve_params(args)
+    nf, t_obj, model_dir = resolve_params(args)
+    if args.layer2_filters is not None:
+        from applications.pipeline import LayerSpec, RunSpec
+
+        spec = RunSpec(
+            args.dataset,
+            args.seed,
+            (LayerSpec(nf, t_obj), LayerSpec(args.layer2_filters, args.layer2_tobj)),
+        )
+        model_dir = str(spec.model_dir)
 
     if not os.path.exists(f"{model_dir}/model.pth"):
         logger.error("No model at %s — run train.py first", model_dir)

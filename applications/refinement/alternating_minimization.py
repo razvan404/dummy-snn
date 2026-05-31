@@ -3,13 +3,16 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from applications.common import resolve_model_dir, set_seed
+from applications.common import set_seed
+from applications.pipeline import FeatureCache, RunSpec
+from applications.pipeline.datasets import dataset_names
 from spiking.evaluation.torch_logistic import TorchLogisticRegression
 from spiking.evaluation.torch_svc import TorchLinearSVC
 
@@ -143,11 +146,120 @@ def find_best_offsets_quadratic(
     return new_offsets
 
 
+@dataclass
+class AMTrajectory:
+    history: list[dict]  # per-iter: iteration, train, test, n_changed, median_frac, time_s
+    final_offsets: np.ndarray  # last committed offsets
+    train_best_offsets: np.ndarray  # HEADLINE iterate (no peeking), ADR 0001
+    best_test_offsets: np.ndarray  # test-peeking oracle only
+    best_train: float
+    best_train_test: float
+    best_test: float
+
+
+def run_alternating_minimization(
+    train_cache: np.ndarray,
+    y_train: np.ndarray,
+    fractions: np.ndarray,
+    *,
+    test_cache: np.ndarray | None = None,
+    y_test: np.ndarray | None = None,
+    classifier: str = "logistic",
+    mode: str = "linear",
+    max_step: int = 2,
+    max_iter: int = 15,
+    bootstrap: int = 0,
+    bootstrap_rng_seed: int = 42,
+    verbose: bool = False,
+) -> AMTrajectory:
+    """Trust-region alternating minimization over per-neuron threshold offsets.
+
+    The reusable headline algorithm, decoupled from CLI/IO/plotting. Per iteration:
+    fit the surrogate read-out, take a trust-region first-order θ-step (Jacobi over all
+    neurons), log accuracy. Reports the train-best iterate (ADR 0001); best_test is a
+    test-peeking oracle. test_cache/y_test are optional (only used to log test accuracy).
+    """
+    fractions = np.asarray(fractions, dtype=np.float64)
+    F_n = train_cache.shape[0]
+    zero_idx = int(np.argmin(np.abs(fractions)))
+    offsets = np.full(F_n, zero_idx, dtype=np.int64)
+    has_test = test_cache is not None and y_test is not None
+
+    history: list[dict] = []
+    best_train = best_train_test = best_test = -1.0
+    best_train_offsets = best_test_offsets = offsets.copy()
+
+    for it in range(max_iter):
+        t_iter = time.time()
+        X_tr = build_X(train_cache, offsets)
+        clf = make_classifier(classifier)
+        clf.fit(X_tr, y_train)
+
+        # Headline accuracy is always TorchLinearSVC; reuse it if it IS the surrogate.
+        eval_clf = clf if classifier == "svc" else TorchLinearSVC(C=1.0).fit(X_tr, y_train)
+        train_acc = float((eval_clf.predict(X_tr) == y_train).mean())
+        if has_test:
+            test_acc = float((eval_clf.predict(build_X(test_cache, offsets)) == y_test).mean())
+        else:
+            test_acc = float("nan")
+
+        if mode == "linear":
+            if bootstrap > 0:
+                grad_raw = bootstrap_averaged_gradient(
+                    offsets, X_tr, y_train, classifier,
+                    n_bootstrap=bootstrap,
+                    rng=np.random.default_rng(bootstrap_rng_seed + it),
+                )
+            else:
+                grad_raw = compute_raw_feature_gradient(clf)
+            new_offsets = find_best_offsets_linear(
+                train_cache, grad_raw, current_offsets=offsets, max_step=max_step
+            )
+        else:
+            new_offsets = find_best_offsets_quadratic(clf, train_cache, offsets, max_step=max_step)
+        n_changed = int((new_offsets != offsets).sum())
+
+        history.append({
+            "iteration": it,
+            "train": train_acc,
+            "test": test_acc,
+            "n_changed": n_changed,
+            "median_frac": float(np.median(fractions[offsets])),
+            "time_s": time.time() - t_iter,
+        })
+        if train_acc > best_train:
+            best_train, best_train_test = train_acc, test_acc
+            best_train_offsets = offsets.copy()
+        if has_test and test_acc > best_test:
+            best_test = test_acc
+            best_test_offsets = offsets.copy()
+
+        if verbose:
+            print(
+                f"  iter {it:2d}  train={train_acc:.4f}  test={test_acc:.4f}  "
+                f"n_changed={n_changed:4d}  median_f={np.median(fractions[offsets]):+.3f}"
+            )
+
+        if n_changed == 0:
+            if verbose:
+                print("  converged")
+            break
+        offsets = new_offsets
+
+    return AMTrajectory(
+        history=history,
+        final_offsets=offsets,
+        train_best_offsets=best_train_offsets,
+        best_test_offsets=best_test_offsets,
+        best_train=best_train,
+        best_train_test=best_train_test,
+        best_test=best_test,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--dataset", default="fashion_mnist", choices=["fashion_mnist", "cifar10"]
-    )
+    parser.add_argument("--dataset", default="fashion_mnist", choices=dataset_names())
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--num-filters", type=int, default=256)
     parser.add_argument("--t-obj", type=float, default=None)
@@ -195,124 +307,42 @@ def main() -> None:
     t_obj_default = {"fashion_mnist": 0.85, "cifar10": 0.70}[args.dataset]
     t_obj = args.t_obj if args.t_obj is not None else t_obj_default
 
-    project_root = Path(__file__).resolve().parents[2]
-    model_dir = Path(
-        resolve_model_dir(args.dataset, args.num_filters, t_obj, args.seed)
-    )
-    cache_path = model_dir / args.cache_name
+    spec = RunSpec.single(args.dataset, args.num_filters, t_obj, args.seed)
+    cache_path = spec.model_dir / args.cache_name
     variant_tag = f"{args.classifier}_{args.mode}"
     if args.max_step > 0:
         variant_tag += f"_step{args.max_step}"
     if args.bootstrap > 0:
         variant_tag += f"_boot{args.bootstrap}"
-    out_dir = (
-        project_root
-        / "logs"
-        / "snn_weight_analysis"
-        / args.out_name
-        / variant_tag
-        / args.dataset
-        / f"seed_{args.seed}"
-    )
+    out_dir = spec.refinement_dir(args.out_name, variant_tag)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"[{args.dataset} seed={args.seed} t_obj={t_obj}]  out={out_dir}")
     print(f"  cache = {cache_path}")
 
-    cache = torch.load(cache_path, map_location="cpu", weights_only=False)
-    train_cache = cache["train_cache"]
-    test_cache = cache["test_cache"]
-    y_train = cache["y_train"]
-    y_test = cache["y_test"]
-    fractions = np.asarray(cache["perturbation_fractions"], dtype=np.float64)
-    F_n, num_fracs, N_tr, pool_dim = train_cache.shape
-    zero_idx = int(np.argmin(np.abs(fractions)))
+    fc = FeatureCache.load(cache_path)
+    train_cache, test_cache = fc.train_cache, fc.test_cache
+    y_train, y_test = fc.y_train, fc.y_test
+    fractions = np.asarray(fc.perturbation_fractions, dtype=np.float64)
 
-    offsets = np.full(F_n, zero_idx, dtype=np.int64)
-    history: list[dict] = []
-    # Headline is train-best (no peeking); best_test is a test-peeking oracle only.
-    best_train = -1.0
-    best_train_test = -1.0
-    best_train_offsets = offsets.copy()
-    best_test = -1.0
-    best_test_offsets = offsets.copy()
-
-    for it in range(args.max_iter):
-        t_iter = time.time()
-        X_tr = build_X(train_cache, offsets)
-        X_te = build_X(test_cache, offsets)
-
-        # Surrogate classifier for the alternating-minimization step (gradient/curvature source)
-        clf = make_classifier(args.classifier)
-        clf.fit(X_tr, y_train)
-
-        # Headline accuracy is always reported via TorchLinearSVC. If the
-        # surrogate IS the SVC, reuse it; otherwise refit a separate SVC
-        # only for the accuracy numbers.
-        if args.classifier == "svc":
-            eval_clf = clf
-        else:
-            eval_clf = TorchLinearSVC(C=1.0)
-            eval_clf.fit(X_tr, y_train)
-        train_acc = float((eval_clf.predict(X_tr) == y_train).mean())
-        test_acc = float((eval_clf.predict(X_te) == y_test).mean())
-
-        if args.mode == "linear":
-            if args.bootstrap > 0:
-                grad_raw = bootstrap_averaged_gradient(
-                    offsets,
-                    X_tr,
-                    y_train,
-                    args.classifier,
-                    n_bootstrap=args.bootstrap,
-                    rng=np.random.default_rng(args.bootstrap_rng_seed + it),
-                )
-            else:
-                grad_raw = compute_raw_feature_gradient(clf)
-            new_offsets = find_best_offsets_linear(
-                train_cache,
-                grad_raw,
-                current_offsets=offsets,
-                max_step=args.max_step,
-            )
-        else:
-            new_offsets = find_best_offsets_quadratic(
-                clf,
-                train_cache,
-                offsets,
-                max_step=args.max_step,
-            )
-        n_changed = int((new_offsets != offsets).sum())
-
-        iter_time = time.time() - t_iter
-        history.append(
-            {
-                "iteration": it,
-                "train": train_acc,
-                "test": test_acc,
-                "n_changed": n_changed,
-                "median_frac": float(np.median(fractions[offsets])),
-                "time_s": iter_time,
-            }
-        )
-        if train_acc > best_train:
-            best_train = train_acc
-            best_train_test = test_acc
-            best_train_offsets = offsets.copy()
-        if test_acc > best_test:
-            best_test = test_acc
-            best_test_offsets = offsets.copy()
-
-        print(
-            f"  iter {it:2d}  train={train_acc:.4f}  test={test_acc:.4f}  "
-            f"n_changed={n_changed:4d}  median_f={np.median(fractions[offsets]):+.3f}  "
-            f"({iter_time:.1f}s)"
-        )
-
-        if n_changed == 0:
-            print("  converged")
-            break
-        offsets = new_offsets
+    traj = run_alternating_minimization(
+        train_cache,
+        y_train,
+        fractions,
+        test_cache=test_cache,
+        y_test=y_test,
+        classifier=args.classifier,
+        mode=args.mode,
+        max_step=args.max_step,
+        max_iter=args.max_iter,
+        bootstrap=args.bootstrap,
+        bootstrap_rng_seed=args.bootstrap_rng_seed,
+        verbose=True,
+    )
+    history = traj.history
+    offsets = traj.final_offsets
+    best_train, best_train_test, best_test = traj.best_train, traj.best_train_test, traj.best_test
+    best_train_offsets, best_test_offsets = traj.train_best_offsets, traj.best_test_offsets
 
     # Final eval at final offsets (re-fit for stability)
     X_tr = build_X(train_cache, offsets)

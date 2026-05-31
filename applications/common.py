@@ -5,11 +5,22 @@ import re
 import numpy as np
 import torch
 
-from spiking.evaluation import extract_features, evaluate_classifier
+from applications.pipeline.datasets import load_split_data  # re-exported
+from applications.pipeline.layout import RunSpec
+from spiking.evaluation import evaluate_classifier, extract_features
+
+__all__ = [
+    "set_seed",
+    "resolve_model_dir",
+    "resolve_params",
+    "load_split_data",
+    "evaluate_model",
+    "aggregate_metrics",
+    "merge_seed_results",
+]
 
 
 def set_seed(seed: int):
-    """Set numpy + torch + cuda seeds for reproducibility."""
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -17,10 +28,7 @@ def set_seed(seed: int):
 
 
 def resolve_model_dir(dataset: str, num_filters: int, t_obj: float, seed: int) -> str:
-    if dataset == "cifar10":
-        base = "cifar10_whitened"
-        return f"logs/{base}/sweep/nf_{num_filters}/tobj_{t_obj:.2f}/seed_{seed}"
-    return f"logs/{dataset}/nf_{num_filters}/tobj_{t_obj:.2f}/seed_{seed}"
+    return str(RunSpec.single(dataset, num_filters, t_obj, seed).model_dir)
 
 
 def resolve_params(args) -> tuple[int, float, str]:
@@ -32,82 +40,14 @@ def resolve_params(args) -> tuple[int, float, str]:
     return nf, t_obj, resolve_model_dir(args.dataset, nf, t_obj, args.seed)
 
 
-def load_split_data(dataset: str, num_bins: int | None = None) -> tuple[dict, dict]:
-    if num_bins is None and dataset in ("cifar10", "fashion_mnist"):
-        from applications.paper_hyperparams import get_paper_hyperparams
-
-        num_bins = get_paper_hyperparams(dataset).get("num_bins", 64)
-    if dataset == "cifar10":
-        from applications.datasets import Cifar10WhitenedDataset
-
-        train_ds = Cifar10WhitenedDataset("data", "train", num_bins=num_bins)
-        test_ds = Cifar10WhitenedDataset(
-            "data",
-            "test",
-            num_bins=num_bins,
-            kernels=train_ds.kernels,
-            mean=train_ds.mean,
-        )
-        return (
-            {"images": train_ds.all_times, "labels": train_ds.outputs},
-            {"images": test_ds.all_times, "labels": test_ds.outputs},
-        )
-    if dataset == "fashion_mnist":
-        from applications.datasets import FashionMnistDataset
-
-        train_ds = FashionMnistDataset(
-            "data",
-            "train",
-            cache_path="data/fashion_mnist_cache/train_dog.pt",
-            num_bins=num_bins,
-        )
-        test_ds = FashionMnistDataset(
-            "data",
-            "test",
-            cache_path="data/fashion_mnist_cache/test_dog.pt",
-            num_bins=num_bins,
-        )
-        return (
-            {"images": train_ds.all_times, "labels": train_ds.outputs},
-            {"images": test_ds.all_times, "labels": test_ds.outputs},
-        )
-    processed_dir = f"data/processed-{dataset}"
-    return (
-        torch.load(f"{processed_dir}/train.pt", weights_only=True),
-        torch.load(f"{processed_dir}/test.pt", weights_only=True),
-    )
-
-
-def create_dataloaders(dataset: str):
-    ...
-    if dataset == "cifar10":
-        from applications.datasets import Cifar10WhitenedDataset
-        from torch.utils.data import DataLoader
-
-        train_ds = Cifar10WhitenedDataset("data", "train")
-        val_ds = Cifar10WhitenedDataset(
-            "data", "test", kernels=train_ds.kernels, mean=train_ds.mean
-        )
-        return (
-            DataLoader(train_ds, batch_size=None, shuffle=False),
-            DataLoader(val_ds, batch_size=None, shuffle=False),
-        )
-    from applications.datasets import create_dataset
-
-    return create_dataset(dataset)
-
-
 def evaluate_model(model, train_loader, val_loader, t_target=None):
     model = model.cpu()
-
     X_train, y_train = extract_features(model, train_loader, t_target)
     X_test, y_test = extract_features(model, val_loader, t_target)
-
     return evaluate_classifier(X_train, y_train, X_test, y_test)
 
 
 def aggregate_metrics(all_metrics: list[dict]) -> dict:
-    ...
     splits = all_metrics[0].keys()
     metric_keys = all_metrics[0][next(iter(splits))].keys()
 
@@ -139,7 +79,6 @@ def merge_seed_results(directory: str):
             all_metrics.append(json.load(f))
         seeds.append(seed_num)
 
-    # Build merged: {"seeds": [...], "train": {"accuracy": [...], ...}, ...}
     splits = all_metrics[0].keys()
     metric_keys = all_metrics[0][next(iter(splits))].keys()
     merged = {"seeds": seeds}

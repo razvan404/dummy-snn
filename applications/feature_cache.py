@@ -9,6 +9,8 @@ import torch
 import torch.nn.functional as F
 
 from applications.common import load_split_data, resolve_model_dir, set_seed
+from applications.pipeline import FeatureCache, RunSpec
+from applications.pipeline.datasets import dataset_names
 from spiking.evaluation.conv_feature_extraction import sum_pool_features
 from spiking.evaluation.feature_extraction import spike_times_to_features
 from spiking.utils.checkpoints import load_model
@@ -139,9 +141,7 @@ def compute_feature_cache(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Precompute per-neuron feature cache")
-    parser.add_argument(
-        "--dataset", default="cifar10", choices=["cifar10", "fashion_mnist"]
-    )
+    parser.add_argument("--dataset", default="cifar10", choices=dataset_names())
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--num-filters", type=int, default=256)
     parser.add_argument("--t-obj", type=float, default=0.7)
@@ -226,27 +226,23 @@ def main() -> None:
     logger.info("Test cache: %.1fs, shape %s", time.time() - t0, test_cache.shape)
 
     # Save
-    cache_path = (
-        f"{model_dir}/feature_cache_step{args.step_size}_drift{args.max_drift}.pt"
+    cache_path = str(
+        RunSpec.single(args.dataset, args.num_filters, args.t_obj, args.seed).cache_path(
+            args.step_size, args.max_drift
+        )
     )
-    import pickle
-
-    torch.save(
-        {
-            "train_cache": train_cache,  # (F, num_fracs, N_train, pool_dim)
-            "test_cache": test_cache,  # (F, num_fracs, N_test, pool_dim)
-            "y_train": y_train,
-            "y_test": y_test,
-            "original_thresholds": original_thresholds.numpy(),
-            "perturbation_fractions": fractions,
-            "step_size": args.step_size,
-            "max_drift": args.max_drift,
-            "pool_size": args.pool_size,
-            "t_target": t_target,
-        },
-        cache_path,
-        pickle_protocol=pickle.HIGHEST_PROTOCOL,
-    )
+    FeatureCache(
+        train_cache=train_cache,  # (F, num_fracs, N_train, pool_dim)
+        test_cache=test_cache,  # (F, num_fracs, N_test, pool_dim)
+        y_train=y_train,
+        y_test=y_test,
+        original_thresholds=original_thresholds.numpy(),
+        perturbation_fractions=fractions,
+        step_size=args.step_size,
+        max_drift=args.max_drift,
+        pool_size=args.pool_size,
+        t_target=t_target,
+    ).save(cache_path)
 
     size_gb = os.path.getsize(cache_path) / 1e9
     logger.info("Saved cache to %s (%.2f GB)", cache_path, size_gb)
