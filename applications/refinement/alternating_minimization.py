@@ -188,7 +188,7 @@ def main() -> None:
         "accuracy is always reported via TorchLinearSVC regardless.",
     )
     parser.add_argument("--cache-name", default="feature_cache_step0.05_drift0.75.pt")
-    parser.add_argument("--out-name", default="em_alternation")
+    parser.add_argument("--out-name", default="alternating_minimization")
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -242,7 +242,7 @@ def main() -> None:
         X_tr = build_X(train_cache, offsets)
         X_te = build_X(test_cache, offsets)
 
-        # Surrogate classifier for the EM step (gradient/curvature source)
+        # Surrogate classifier for the alternating-minimization step (gradient/curvature source)
         clf = make_classifier(args.classifier)
         clf.fit(X_tr, y_train)
 
@@ -367,7 +367,7 @@ def main() -> None:
     axes[0].set_ylabel("accuracy")
     axes[0].legend()
     axes[0].set_title(
-        f"EM-alternation | {args.dataset} seed={args.seed}  "
+        f"Alternating-minimization | {args.dataset} seed={args.seed}  "
         f"Δtest={final_test - base['test']:+.4f} (best={best_test - base['test']:+.4f})"
     )
 

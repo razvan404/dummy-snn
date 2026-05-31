@@ -13,7 +13,7 @@ def main() -> None:
     parser.add_argument(
         "--variant",
         default="logistic_linear",
-        help="Sub-directory under em_alternation/ to aggregate.",
+        help="Sub-directory under alternating_minimization/ to aggregate.",
     )
     parser.add_argument("--datasets", nargs="+", default=["fashion_mnist", "cifar10"])
     parser.add_argument(
@@ -23,7 +23,7 @@ def main() -> None:
 
     project_root = Path(__file__).resolve().parents[1]
     base = (
-        project_root / "logs" / "snn_weight_analysis" / "em_alternation" / args.variant
+        project_root / "logs" / "snn_weight_analysis" / "alternating_minimization" / args.variant
     )
 
     print(f"Variant: {args.variant}")
@@ -162,7 +162,7 @@ def main() -> None:
             f"{agg['dtest_trainbest']['mean'] * 100:+.2f} ± {agg['dtest_trainbest']['std'] * 100:.2f} pp"
         )
         ax.legend(fontsize=8)
-    fig.suptitle(f"EM {args.variant} — across 8 seeds")
+    fig.suptitle(f"Alternating minimization: {args.variant}")
     fig.tight_layout()
     fig.savefig(base / "summary_across_seeds.png", dpi=140, bbox_inches="tight")
     plt.close(fig)
