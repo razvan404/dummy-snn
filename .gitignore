@@ -182,9 +182,6 @@ cython_debug/
 # MacOS
 .DS_Store
 
-CONTEXT.md
-docs/
-AGENTS.md
-scratch/
+
 
 

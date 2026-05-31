@@ -44,7 +44,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["spikinn*", "spikinn_backend*"]
-exclude = ["benchmarks*", "scripts*", "logs*", "data*", "checkpoints*", "threshold_tuning_research*"]
+exclude = ["benchmarks*", "scripts*", "logs*", "data*", "checkpoints*"]
 
 
 [tool.setuptools.package-data]
@@ -52,7 +52,7 @@ spikinn_backend = ["csrc/*.cpp", "csrc/*.cu", "csrc/*.h"]
 
 [tool.pytest.ini_options]
 # archive/ imports deleted modules and breaks collection.
-testpaths = ["spikinn/tests", "threshold_tuning_research/tests"]
+testpaths = ["spikinn/tests"]
 norecursedirs = ["archive", ".venv", "build", "logs", "data", "torch_extensions"]
 
 [tool.black]
