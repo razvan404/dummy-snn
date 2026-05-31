@@ -1,0 +1,39 @@
+import torch
+import torch.nn as nn
+
+from spikinn.spikinn_module import SpikinnModule
+
+
+class SpikinnSequential(SpikinnModule):
+    def __init__(self, *layers: SpikinnModule):
+        assert len(layers) >= 1
+        super().__init__(
+            num_inputs=layers[0].num_inputs,
+            num_outputs=layers[-1].num_outputs,
+        )
+        self.layers = nn.ModuleList(layers)
+
+    @property
+    def spike_times(self):
+        return self.layers[-1].spike_times
+
+    def simulate_step(self, incoming_spikes: torch.Tensor, current_time: float, dt: float):
+        for layer in self.layers:
+            incoming_spikes = layer.simulate_step(incoming_spikes, current_time, dt)
+        return incoming_spikes
+
+    def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
+        times = input_times
+        for layer in self.layers:
+            times = layer.infer_spike_times(times)
+        return times
+
+    def infer_spike_times_batch(self, input_times: torch.Tensor) -> torch.Tensor:
+        times = input_times
+        for layer in self.layers:
+            times = layer.infer_spike_times_batch(times)
+        return times
+
+    def reset(self):
+        for layer in self.layers:
+            layer.reset()

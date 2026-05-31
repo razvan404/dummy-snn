@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "dummy-snn"
+name = "spikinn"
 version = "0.1.0"
 description = "Unsupervised convolutional spiking neural networks with STDP"
+
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.1",
@@ -42,15 +43,16 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["spiking*", "spiking_backend*", "applications*"]
-exclude = ["benchmarks*", "scripts*", "logs*", "data*", "checkpoints*"]
+include = ["spikinn*", "spiking_backend*"]
+exclude = ["benchmarks*", "scripts*", "logs*", "data*", "checkpoints*", "threshold_tuning_research*"]
+
 
 [tool.setuptools.package-data]
 spiking_backend = ["csrc/*.cpp", "csrc/*.cu", "csrc/*.h"]
 
 [tool.pytest.ini_options]
 # archive/ imports deleted modules and breaks collection.
-testpaths = ["spiking/tests", "applications/tests"]
+testpaths = ["spikinn/tests", "threshold_tuning_research/tests"]
 norecursedirs = ["archive", ".venv", "build", "logs", "data", "torch_extensions"]
 
 [tool.black]

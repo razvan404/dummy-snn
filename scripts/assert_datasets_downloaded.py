@@ -1,6 +1,6 @@
 import sys
 
-from applications.datasets import create_dataset
+from threshold_tuning_research.datasets import create_dataset
 
 DATASETS = ["mnist", "fashion_mnist", "cifar10", "mnist_subset"]
 

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "spiking_backend"
 version = "0.1.0"
-description = "C++/CUDA extension backend for spiking neural networks"
+description = "C++/CUDA extension backend for spikinn neural networks"
 requires-python = ">=3.11"
 dependencies = [
     "torch>=2.5",
