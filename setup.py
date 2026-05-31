@@ -8,8 +8,6 @@ from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtensio
 
 _HERE = Path(__file__).parent
 
-# Direct file load — going through ``spikinn_backend.__init__`` would trigger
-# the JIT build path while we're still setting up the AOT build.
 _BF_SPEC = importlib.util.spec_from_file_location(
     "_build_flags", _HERE / "spikinn_backend" / "_build_flags.py",
 )
