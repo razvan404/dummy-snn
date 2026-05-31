@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64", "wheel", "torch>=2.5", "ninja"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spiking_backend"
+version = "0.1.0"
+description = "C++/CUDA extension backend for spiking neural networks"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.5",
+    "ninja",
+]
+
+[tool.setuptools]
+packages = ["spiking_backend"]
+package-dir = {"spiking_backend" = "."}
+
+[tool.setuptools.package-data]
+spiking_backend = ["csrc/*.cpp", "csrc/*.cu", "csrc/*.h"]
