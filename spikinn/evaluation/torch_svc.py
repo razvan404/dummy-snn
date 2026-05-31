@@ -13,6 +13,7 @@ class TorchLinearSVC(ColumnSwapClassifier):
         C: float = 1.0,
         max_iter: int = 30,
         warm_max_iter: int = 5,
+        eval_warm_max_iter: int | None = None,
         active_tol: int = 10,
         gnorm_tol: float = 1e-2,
         standardize: bool = True,
@@ -24,6 +25,7 @@ class TorchLinearSVC(ColumnSwapClassifier):
         self._C = C
         self._max_iter = max_iter
         self._warm_max_iter = warm_max_iter
+        self._eval_warm_max_iter = eval_warm_max_iter if eval_warm_max_iter is not None else warm_max_iter
         self._active_tol = active_tol
         self._gnorm_tol = gnorm_tol
         self._standardize = standardize  # per-column min-max to [0, 1] (Falez 2020)
@@ -34,6 +36,7 @@ class TorchLinearSVC(ColumnSwapClassifier):
         Xa: torch.Tensor,
         Y: torch.Tensor,
         W_init: torch.Tensor | None = None,
+        max_iter: int | None = None,
     ) -> torch.Tensor:
         da = Xa.shape[1]
         d = da - 1
@@ -42,7 +45,8 @@ class TorchLinearSVC(ColumnSwapClassifier):
 
         warm = W_init is not None
         W = W_init.clone() if warm else torch.zeros(da, K, device=Xa.device)
-        max_iter = self._warm_max_iter if warm else self._max_iter
+        if max_iter is None:
+            max_iter = self._warm_max_iter if warm else self._max_iter
         active_tol = 0 if warm else self._active_tol
 
         I_diag = torch.eye(da, device=Xa.device)
@@ -72,8 +76,8 @@ class TorchLinearSVC(ColumnSwapClassifier):
 
             H_batch = I_diag.unsqueeze(0).expand(K, -1, -1).clone()
             for k in range(K):
-                XaW = Xa * active_float[:, k].unsqueeze(1)
-                H_batch[k] += 2.0 * C * (XaW.T @ Xa)
+                Xa_active = Xa * active_float[:, k].unsqueeze(1)
+                H_batch[k] += 2.0 * C * (Xa_active.T @ Xa)
 
             rhs = -G.T.unsqueeze(2)
             try:
@@ -230,7 +234,7 @@ class TorchLinearSVC(ColumnSwapClassifier):
         self._X_t[:, col_indices] = new_scaled
         self._Xa[:, col_indices] = new_scaled
 
-        Wa_new = self._solve_l2svm(self._Xa, self._Y, W_init=self._Wa)
+        Wa_new = self._solve_l2svm(self._Xa, self._Y, W_init=self._Wa, max_iter=self._eval_warm_max_iter)
 
         with torch.no_grad():
             preds = (self._Xa @ Wa_new).argmax(dim=1)
