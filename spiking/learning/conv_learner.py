@@ -27,6 +27,23 @@ class ConvLearner(BaseLearner):
         win_spike_times = self.layer.spike_times[neurons_to_learn].flatten(1)
         win_weights = self.layer.weights[neurons_to_learn]
 
+        if n_win == 1 and L == 1:
+            if win_spike_times.dim() >= 2:
+                has_spike = torch.isfinite(win_spike_times[0, 0])
+            else:
+                has_spike = torch.isfinite(win_spike_times[0])
+            if not has_spike:
+                return zero
+            updated = self.learning_mechanism.update_weights(
+                win_weights,
+                patches,
+                win_spike_times,
+            )
+            deltas = updated - win_weights
+            if self.layer.training:
+                self.layer.weights.data[neurons_to_learn] = updated
+            return torch.abs(deltas).mean()
+
         spiked_mask = torch.isfinite(win_spike_times)
         n_spiked = spiked_mask.sum(dim=1)
         has_spikes = n_spiked > 0

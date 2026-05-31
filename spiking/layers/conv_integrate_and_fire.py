@@ -61,6 +61,11 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
 
     def _unfold_patches(self, input_times: torch.Tensor) -> torch.Tensor:
         has_batch = input_times.dim() == 4
+        if self.padding == 0 and input_times.shape[-2:] == (self.kernel_size, self.kernel_size):
+            if has_batch:
+                return input_times.reshape(input_times.shape[0], -1).unsqueeze(1)
+            return input_times.flatten().unsqueeze(0)
+
         if not has_batch:
             input_times = input_times.unsqueeze(0)
         if self.padding > 0:
@@ -73,6 +78,7 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         )
         patches = patches.permute(0, 2, 1)
         return patches if has_batch else patches.squeeze(0)
+
 
     def forward(
         self,
