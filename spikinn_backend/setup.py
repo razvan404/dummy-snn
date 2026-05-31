@@ -23,13 +23,13 @@ def _build_extension():
     ld = _bf.link_flags()
     if use_cuda:
         return CUDAExtension(
-            name="spiking_backend._ext",
+            name="spikinn_backend._ext",
             sources=srcs,
             extra_compile_args={"cxx": cxx, "nvcc": _bf.NVCC_FLAGS},
             extra_link_args=ld,
         )
     return CppExtension(
-        name="spiking_backend._ext",
+        name="spikinn_backend._ext",
         sources=srcs,
         extra_compile_args=cxx,
         extra_link_args=ld,
@@ -37,10 +37,10 @@ def _build_extension():
 
 
 setup(
-    name="spiking_backend",
+    name="spikinn_backend",
     version="0.1.0",
-    packages=["spiking_backend"],
-    package_dir={"spiking_backend": "."},
+    packages=["spikinn_backend"],
+    package_dir={"spikinn_backend": "."},
     ext_modules=[_build_extension()],
     cmdclass={"build_ext": BuildExtension},
 )

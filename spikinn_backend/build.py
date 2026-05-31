@@ -17,7 +17,7 @@ def load_backend() -> Any | None:
     use_cuda = detect_cuda()
     try:
         return load(
-            name="spiking_backend_ext",
+            name="spikinn_backend_ext",
             sources=sources(use_cuda=use_cuda),
             extra_cflags=cxx_flags(use_cuda=use_cuda),
             extra_ldflags=link_flags(),
@@ -26,5 +26,5 @@ def load_backend() -> Any | None:
             verbose=False,
         )
     except Exception as exc:
-        logger.warning("spiking_backend extension failed to build: %s", exc)
+        logger.warning("spikinn_backend extension failed to build: %s", exc)
         return None

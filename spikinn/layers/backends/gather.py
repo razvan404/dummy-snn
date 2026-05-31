@@ -19,7 +19,7 @@ def gather(
     tau: float = 1.0,
     t_no_spike: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    from spiking_backend import first_spike_times
+    from spikinn_backend import first_spike_times
 
     out = first_spike_times(
         input_times, weights_4d, thresholds,

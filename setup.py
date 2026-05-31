@@ -8,10 +8,10 @@ from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtensio
 
 _HERE = Path(__file__).parent
 
-# Direct file load — going through ``spiking_backend.__init__`` would trigger
+# Direct file load — going through ``spikinn_backend.__init__`` would trigger
 # the JIT build path while we're still setting up the AOT build.
 _BF_SPEC = importlib.util.spec_from_file_location(
-    "_build_flags", _HERE / "spiking_backend" / "_build_flags.py",
+    "_build_flags", _HERE / "spikinn_backend" / "_build_flags.py",
 )
 _bf = importlib.util.module_from_spec(_BF_SPEC)
 _BF_SPEC.loader.exec_module(_bf)
@@ -24,13 +24,13 @@ def _build_extension():
     ld = _bf.link_flags()
     if use_cuda:
         return CUDAExtension(
-            name="spiking_backend._ext",
+            name="spikinn_backend._ext",
             sources=srcs,
             extra_compile_args={"cxx": cxx, "nvcc": _bf.NVCC_FLAGS},
             extra_link_args=ld,
         )
     return CppExtension(
-        name="spiking_backend._ext",
+        name="spikinn_backend._ext",
         sources=srcs,
         extra_compile_args=cxx,
         extra_link_args=ld,

@@ -7,8 +7,8 @@ import torch.nn.functional as F
 from spikinn.tests.multi_threshold_reference import multi_threshold_conv_accumulate
 from spikinn.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 from spikinn.threshold.normal_initialization import NormalInitialization
-import spiking_backend
-from spiking_backend.reference import (
+import spikinn_backend
+from spikinn_backend.reference import (
     first_spike_times_gather,
     first_spike_times_gather_multi_threshold,
 )
@@ -162,7 +162,7 @@ def test_gather_first_spike_matches_dense(
     layer = _make_layer(padding=padding)
     times = _make_inputs(seed=seed, num_bins=num_bins)
     dense_st, _ = layer._conv2d_accumulate(times)
-    gather_st = spiking_backend.first_spike_times(
+    gather_st = spikinn_backend.first_spike_times(
         times,
         layer.weights_4d,
         layer.thresholds,
@@ -198,7 +198,7 @@ def test_gather_reference_matches_compiled_cpu(seed: int, num_bins: int) -> None
         stride=layer.stride,
         padding=layer.padding,
     )
-    compiled = spiking_backend.first_spike_times(
+    compiled = spikinn_backend.first_spike_times(
         times,
         layer.weights_4d,
         layer.thresholds,
@@ -228,7 +228,7 @@ def test_gather_multi_threshold_cpu(seed: int, num_bins: int) -> None:
         stride=layer.stride,
         padding=layer.padding,
     )
-    compiled = spiking_backend.first_spike_times_multi_threshold(
+    compiled = spikinn_backend.first_spike_times_multi_threshold(
         times,
         layer.weights_4d,
         thresholds_2d,
@@ -245,7 +245,7 @@ def test_gather_multi_threshold_cpu(seed: int, num_bins: int) -> None:
 def test_gather_wta_keeps_one_filter_per_position() -> None:
     layer = _make_layer()
     times = _make_inputs(seed=2, num_bins=16)
-    out = spiking_backend.first_spike_times(
+    out = spikinn_backend.first_spike_times(
         times,
         layer.weights_4d,
         layer.thresholds,
@@ -261,7 +261,7 @@ def test_gather_wta_keeps_one_filter_per_position() -> None:
 def test_gather_wta_keeps_earliest_filter() -> None:
     layer = _make_layer()
     times = _make_inputs(seed=3, num_bins=16)
-    base = spiking_backend.first_spike_times(
+    base = spikinn_backend.first_spike_times(
         times,
         layer.weights_4d,
         layer.thresholds,
@@ -269,7 +269,7 @@ def test_gather_wta_keeps_earliest_filter() -> None:
         stride=layer.stride,
         padding=layer.padding,
     )
-    wta = spiking_backend.first_spike_times(
+    wta = spikinn_backend.first_spike_times(
         times,
         layer.weights_4d,
         layer.thresholds,
@@ -292,7 +292,7 @@ def test_gather_cuda_matches_dense(seed: int, num_bins: int) -> None:
     layer = _make_layer().cuda()
     times = _make_inputs(seed=seed, num_bins=num_bins).cuda()
     dense_st, _ = layer._conv2d_accumulate(times)
-    gather_st = spiking_backend.first_spike_times(
+    gather_st = spikinn_backend.first_spike_times(
         times,
         layer.weights_4d,
         layer.thresholds,
@@ -330,7 +330,7 @@ def test_gather_cuda_multi_threshold(seed: int) -> None:
         padding=layer.padding,
         device="cuda",
     )
-    gather = spiking_backend.first_spike_times_multi_threshold(
+    gather = spikinn_backend.first_spike_times_multi_threshold(
         times,
         layer.weights_4d,
         thresholds_2d,
@@ -361,7 +361,7 @@ def test_backend_matches_classic_discrete_time_sim(
         padding=layer.padding,
     )
 
-    gather_st = spiking_backend.first_spike_times(
+    gather_st = spikinn_backend.first_spike_times(
         times,
         layer.weights_4d,
         layer.thresholds,
@@ -391,7 +391,7 @@ def test_b1_patch_sized_input(num_bins: int) -> None:
     dense_st, _ = layer._conv2d_accumulate(times)
     assert dense_st.shape == (1, 16, 1, 1)
 
-    gather_st = spiking_backend.first_spike_times(
+    gather_st = spikinn_backend.first_spike_times(
         times, layer.weights_4d, layer.thresholds,
         num_bins=num_bins, stride=layer.stride, padding=layer.padding,
     )
@@ -416,7 +416,7 @@ def test_b1_patch_sized_multi_threshold(num_bins: int) -> None:
         times, layer.weights_4d, thresholds_2d,
         stride=layer.stride, padding=layer.padding, device="cpu",
     )
-    gather = spiking_backend.first_spike_times_multi_threshold(
+    gather = spikinn_backend.first_spike_times_multi_threshold(
         times, layer.weights_4d, thresholds_2d,
         num_bins=num_bins, stride=layer.stride, padding=layer.padding,
     )
@@ -433,7 +433,7 @@ def test_gather_stride_handling() -> None:
     layer = _make_layer(stride=2, kernel_size=3, padding=0)
     times = _make_inputs(H=10, W=10, seed=11, num_bins=num_bins)
     dense_st, _ = layer._conv2d_accumulate(times)
-    gather_st = spiking_backend.first_spike_times(
+    gather_st = spikinn_backend.first_spike_times(
         times, layer.weights_4d, layer.thresholds,
         num_bins=num_bins, stride=2, padding=0,
     )

@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "wheel", "torch>=2.5"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "spiking_backend"
+name = "spikinn_backend"
 version = "0.1.0"
 description = "C++/CUDA extension backend for spikinn neural networks"
 requires-python = ">=3.11"
@@ -12,8 +12,8 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["spiking_backend"]
-package-dir = {"spiking_backend" = "."}
+packages = ["spikinn_backend"]
+package-dir = {"spikinn_backend" = "."}
 
 [tool.setuptools.package-data]
-spiking_backend = ["csrc/*.cpp", "csrc/*.cu", "csrc/*.h"]
+spikinn_backend = ["csrc/*.cpp", "csrc/*.cu", "csrc/*.h"]

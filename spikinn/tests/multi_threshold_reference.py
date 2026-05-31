@@ -38,7 +38,7 @@ def multi_threshold_conv_accumulate(
     thresholds_2d = thresholds_2d.to(device)
 
     if backend == "gather":
-        from spiking_backend import first_spike_times_multi_threshold
+        from spikinn_backend import first_spike_times_multi_threshold
 
         return first_spike_times_multi_threshold(
             input_times,

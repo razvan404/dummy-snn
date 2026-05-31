@@ -43,12 +43,12 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["spikinn*", "spiking_backend*"]
+include = ["spikinn*", "spikinn_backend*"]
 exclude = ["benchmarks*", "scripts*", "logs*", "data*", "checkpoints*", "threshold_tuning_research*"]
 
 
 [tool.setuptools.package-data]
-spiking_backend = ["csrc/*.cpp", "csrc/*.cu", "csrc/*.h"]
+spikinn_backend = ["csrc/*.cpp", "csrc/*.cu", "csrc/*.h"]
 
 [tool.pytest.ini_options]
 # archive/ imports deleted modules and breaks collection.
