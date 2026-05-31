@@ -155,15 +155,22 @@ def _extract_random_patches(images: torch.Tensor, kernel_size: int) -> torch.Ten
     N, C, H, W = images.shape
     max_row = H - kernel_size
     max_col = W - kernel_size
-    rows = torch.randint(0, max_row + 1, (N,))
-    cols = torch.randint(0, max_col + 1, (N,))
+    rows = torch.randint(0, max_row + 1, (N,), device=images.device)
+    cols = torch.randint(0, max_col + 1, (N,), device=images.device)
+    
+    offsets_y = torch.arange(kernel_size, device=images.device).view(1, kernel_size, 1)
+    offsets_x = torch.arange(kernel_size, device=images.device).view(1, 1, kernel_size)
+    
+    y_coords = rows.view(N, 1, 1) + offsets_y
+    x_coords = cols.view(N, 1, 1) + offsets_x
+    
+    flat_indices = y_coords * W + x_coords
+    flat_indices = flat_indices.unsqueeze(1).expand(-1, C, -1, -1)
+    
+    flat_images = images.view(N, C, H * W)
+    patches = torch.gather(flat_images, 2, flat_indices.reshape(N, C, kernel_size * kernel_size))
+    return patches.view(N, C, kernel_size, kernel_size)
 
-    patches = torch.empty(N, C, kernel_size, kernel_size)
-    for i in range(N):
-        patches[i] = images[
-            i, :, rows[i] : rows[i] + kernel_size, cols[i] : cols[i] + kernel_size
-        ]
-    return patches
 
 
 def _load_training_images(
@@ -240,8 +247,8 @@ def _build_and_train_layer(train_images: torch.Tensor, params: dict, *, device: 
     global_step = 0
 
     for epoch in tqdm(range(ne), desc="Training", unit="epoch"):
-        patches = _extract_random_patches(train_images, ksize)
-        perm = torch.randperm(N)
+        patches = _extract_random_patches(train_images, ksize).to(device)
+        perm = torch.randperm(N, device=device)
         layer.train()
         epoch_dws = torch.empty(N, device=dev)
         for i in range(N):
@@ -311,6 +318,7 @@ def train_model(
     processed_dir: str | None = None,
     output_dir: str,
     params_override: dict | None = None,
+    device: str = "cpu",
 ) -> dict:
     params = get_paper_hyperparams(dataset)
     if params_override:
@@ -330,7 +338,7 @@ def train_model(
     )
     logger.info("Loading training data for %s...", dataset)
     all_images = _load_training_images(dataset, processed_dir, params["num_bins"])
-    layer, training_logs = _build_and_train_layer(all_images, params)
+    layer, training_logs = _build_and_train_layer(all_images, params, device=device)
     setup_info = _save_run(
         layer, training_logs, params, dataset, seed, processed_dir, output_dir
     )
@@ -385,6 +393,12 @@ if __name__ == "__main__":
         help="weight_mean: drive ALL thresholds by the winner's mean weight (Falez Eq 6 style).",
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="Device to train on (cpu or cuda)",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Retrain even if model already exists",
@@ -429,4 +443,5 @@ if __name__ == "__main__":
             processed_dir=args.processed_dir,
             output_dir=output_dir,
             params_override=overrides,
+            device=args.device,
         )

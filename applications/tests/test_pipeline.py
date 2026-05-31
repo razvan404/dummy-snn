@@ -32,8 +32,8 @@ class TestRunSpecLayout:
     def test_tobj_must_strictly_increase(self):
         with pytest.raises(ValueError):
             RunSpec("cifar10", 1, layers=(LayerSpec(256, 0.85), LayerSpec(128, 0.70)))
-        with pytest.raises(ValueError):
-            RunSpec("cifar10", 1, layers=(LayerSpec(256, 0.70), LayerSpec(128, 0.70)))
+        # Equal tobjs are allowed (non-decreasing)
+        RunSpec("cifar10", 1, layers=(LayerSpec(256, 0.70), LayerSpec(128, 0.70)))
 
     def test_cache_path_matches_filename_helper(self):
         spec = RunSpec.single("cifar10", 256, 0.70, 1)

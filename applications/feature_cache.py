@@ -68,27 +68,8 @@ def compute_feature_cache(
         unique_times = inp[finite_mask].unique().sort()[0]
         T = len(unique_times)
 
-        # Store cumulative potential at each time step: (T, B, F, oH, oW)
-        all_potentials = torch.empty(
-            T,
-            B,
-            num_filters,
-            oH,
-            oW,
-            dtype=inp.dtype,
-            device=device,
-        )
+        # --- Combined Phase 1 & 2: Precompute potentials + threshold check on-the-fly ---
         cum = torch.zeros(B, num_filters, oH, oW, dtype=inp.dtype, device=device)
-        for k in range(T):
-            active = (inp == unique_times[k]).float()
-            contrib = F.conv2d(active, w, stride=stride, padding=padding)
-            cum = cum + contrib
-            all_potentials[k] = cum
-
-        # --- Phase 2: Vectorized threshold check (all neurons at once) ---
-        # thresh_levels: (F, num_fracs) on device
-        # all_potentials: (T, B, F, oH, oW)
-        # result: (F, num_fracs, B, oH, oW)
         result = torch.full(
             (num_filters, num_fracs, B, oH, oW),
             float("inf"),
@@ -104,15 +85,19 @@ def compute_feature_cache(
         tv = thresh_levels.view(num_filters, num_fracs, 1, 1, 1)
 
         for k in range(T):
+            active = (inp == unique_times[k]).float()
+            contrib = F.conv2d(active, w, stride=stride, padding=padding)
+            cum = cum + contrib
+
             # pot: (B, F, oH, oW) → (F, 1, B, oH, oW)
-            pot = all_potentials[k].permute(1, 0, 2, 3).unsqueeze(1)
+            pot = cum.permute(1, 0, 2, 3).unsqueeze(1)
             crossed = (pot >= tv) & not_yet
             result[crossed] = unique_times[k]
             not_yet &= ~crossed
             if not not_yet.any():
                 break
 
-        del all_potentials, cum, not_yet
+        del cum, not_yet
 
         # GPU-resident feature reduction + pool, single host transfer per chunk.
         # Treat (F, num_fracs, B) as an outer batch so TargetRelative/ScaledInversion

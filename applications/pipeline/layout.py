@@ -43,8 +43,8 @@ class RunSpec:
         if not self.layers:
             raise ValueError("RunSpec needs at least one LayerSpec")
         tobjs = [lyr.t_obj for lyr in self.layers]
-        if any(b <= a for a, b in zip(tobjs, tobjs[1:])):
-            raise ValueError(f"t_obj must strictly increase up the stack, got {tobjs}")
+        if any(b < a for a, b in zip(tobjs, tobjs[1:])):
+            raise ValueError(f"t_obj must be non-decreasing up the stack, got {tobjs}")
 
     @classmethod
     def single(cls, dataset: str, num_filters: int, t_obj: float, seed: int) -> "RunSpec":

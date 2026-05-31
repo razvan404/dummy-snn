@@ -46,8 +46,9 @@ def main() -> None:
 
     logger.info("Featurizing train set through frozen (L1 + min-pool)...")
     images = load_train_images(args.dataset)
+    feat_device = "cuda" if torch.cuda.is_available() else "cpu"
     maps = featurize_through(
-        SpikingSequential(l1, minpool), images, device=args.device, chunk_size=args.chunk_size
+        SpikingSequential(l1, minpool), images, device=feat_device, chunk_size=args.chunk_size
     )
     logger.info("  layer-1 featurized maps: %s", tuple(maps.shape))
 
@@ -57,7 +58,7 @@ def main() -> None:
     if args.num_epochs is not None:
         params["num_epochs"] = args.num_epochs
 
-    layer2, training_logs = _build_and_train_layer(maps, params)
+    layer2, training_logs = _build_and_train_layer(maps, params, device=args.device)
     model = SpikingSequential(l1, minpool, layer2)
 
     out_dir = spec.model_dir
