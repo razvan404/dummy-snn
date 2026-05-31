@@ -20,6 +20,7 @@ class LayerSpec:
     num_filters: int
     t_obj: float
     kernel_size: int = 5
+    backend: str = "gather"  # analytical-inference backend (gather is fastest on GPU)
 
 
 @dataclass(frozen=True)

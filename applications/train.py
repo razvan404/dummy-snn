@@ -175,11 +175,13 @@ def _load_training_images(
     return train_data["images"]
 
 
-def _build_and_train_layer(train_images: torch.Tensor, params: dict):
+def _build_and_train_layer(train_images: torch.Tensor, params: dict, *, device: str = "cpu"):
     """Train one conv-IF layer by STDP on random patches of `train_images`.
 
     The reusable training core: works on raw encoded images (layer 1) or on a frozen
     prefix's featurized spike-time maps (layer 2). Caller is responsible for seeding.
+    `device` runs the per-sample STDP loop on GPU; backend (default gather) is read from
+    params["backend"].
     """
     nf = params["num_filters"]
     ne = params["num_epochs"]
@@ -204,6 +206,7 @@ def _build_and_train_layer(train_images: torch.Tensor, params: dict):
         padding=params["padding"],
         threshold_initialization=init,
         refractory_period=float("inf"),
+        backend=params.get("backend", "gather"),
     )
     torch.nn.init.uniform_(layer.weights, a=params["w_min"], b=params["w_max"])
     layer.num_bins = params["num_bins"]
@@ -214,7 +217,8 @@ def _build_and_train_layer(train_images: torch.Tensor, params: dict):
         layer, stdp, competition=WinnerTakesAll(), threshold_adaptation=adaptation
     )
     trainer = ConvUnsupervisedTrainer(
-        layer, learner, image_shape=(in_channels, ksize, ksize), early_stopping=True
+        layer, learner, image_shape=(in_channels, ksize, ksize),
+        early_stopping=True, device=device,
     )
 
     training_logs = {
