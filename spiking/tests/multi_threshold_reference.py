@@ -37,17 +37,6 @@ def multi_threshold_conv_accumulate(
     weights_4d = weights_4d.to(device)
     thresholds_2d = thresholds_2d.to(device)
 
-    if backend == "scatter":
-        from spiking_backend import spike_driven_conv_accumulate_multi_threshold
-
-        return spike_driven_conv_accumulate_multi_threshold(
-            input_times,
-            weights_4d,
-            thresholds_2d,
-            stride=stride,
-            padding=padding,
-            num_bins=num_bins,
-        ).cpu()
     if backend == "gather":
         from spiking_backend import first_spike_times_multi_threshold
 
@@ -61,7 +50,7 @@ def multi_threshold_conv_accumulate(
         ).cpu()
     if backend != "dense":
         raise ValueError(
-            f"backend must be 'dense', 'scatter', or 'gather'; got {backend!r}"
+            f"backend must be 'dense' or 'gather'; got {backend!r}"
         )
 
     B, C, H, W = input_times.shape

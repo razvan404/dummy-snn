@@ -33,68 +33,6 @@ def _dispatch(input_times: torch.Tensor, cuda_fn: str, cpu_fn: str):
     return None
 
 
-def spike_driven_conv_accumulate(
-    input_times: torch.Tensor,
-    weights_4d: torch.Tensor,
-    thresholds: torch.Tensor,
-    stride: int = 1,
-    padding: int = 0,
-    num_bins: int = 64,
-    compute_cum_potential: bool = True,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    is_cuda = input_times.device.type == "cuda"
-    fn = _dispatch(
-        input_times,
-        "spike_driven_conv_accumulate_cuda",
-        "spike_driven_conv_accumulate_cpu",
-    )
-    if fn is None:
-        return reference.spike_driven_conv_accumulate(
-            input_times, weights_4d, thresholds, stride=stride, padding=padding
-        )
-    args = [
-        input_times.contiguous(),
-        weights_4d.contiguous(),
-        thresholds.contiguous(),
-        int(stride),
-        int(padding),
-    ]
-    if not is_cuda:
-        args.append(int(num_bins))
-    args.append(bool(compute_cum_potential))
-    return fn(*args)
-
-
-def spike_driven_conv_accumulate_multi_threshold(
-    input_times: torch.Tensor,
-    weights_4d: torch.Tensor,
-    thresholds_2d: torch.Tensor,
-    stride: int = 1,
-    padding: int = 0,
-    num_bins: int = 64,
-) -> torch.Tensor:
-    is_cuda = input_times.device.type == "cuda"
-    fn = _dispatch(
-        input_times,
-        "spike_driven_conv_accumulate_multi_threshold_cuda",
-        "spike_driven_conv_accumulate_multi_threshold_cpu",
-    )
-    if fn is None:
-        return reference.spike_driven_conv_accumulate_multi_threshold(
-            input_times, weights_4d, thresholds_2d, stride=stride, padding=padding
-        )
-    args = [
-        input_times.contiguous(),
-        weights_4d.contiguous(),
-        thresholds_2d.contiguous(),
-        int(stride),
-        int(padding),
-    ]
-    if not is_cuda:
-        args.append(int(num_bins))
-    return fn(*args)
-
-
 def _wta_per_position(spike_times: torch.Tensor) -> torch.Tensor:
     winner_f = spike_times.argmin(dim=1, keepdim=True)
     F_ = spike_times.size(1)
@@ -171,8 +109,6 @@ def first_spike_times_multi_threshold(
 
 
 __all__ = [
-    "spike_driven_conv_accumulate",
-    "spike_driven_conv_accumulate_multi_threshold",
     "first_spike_times",
     "first_spike_times_multi_threshold",
     "is_compiled_available",

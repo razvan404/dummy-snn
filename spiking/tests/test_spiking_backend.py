@@ -11,8 +11,6 @@ import spiking_backend
 from spiking_backend.reference import (
     first_spike_times_gather,
     first_spike_times_gather_multi_threshold,
-    spike_driven_conv_accumulate,
-    spike_driven_conv_accumulate_multi_threshold,
 )
 
 
@@ -91,122 +89,6 @@ def _make_inputs(
     return times
 
 
-@pytest.mark.parametrize("seed", [0, 1, 7])
-@pytest.mark.parametrize("padding", [0, 2])
-@pytest.mark.parametrize("num_bins", [16, 64])
-def test_spike_driven_matches_dense(seed: int, padding: int, num_bins: int) -> None:
-    layer = _make_layer(padding=padding)
-    times = _make_inputs(seed=seed, num_bins=num_bins)
-
-    dense_st, _ = layer._conv2d_accumulate(times)
-    sparse_st, _ = spike_driven_conv_accumulate(
-        times,
-        layer.weights_4d,
-        layer.thresholds,
-        stride=layer.stride,
-        padding=layer.padding,
-    )
-
-    assert dense_st.shape == sparse_st.shape
-    bin_size = 1.0 / num_bins
-    finite = torch.isfinite(dense_st) & torch.isfinite(sparse_st)
-    if finite.any():
-        assert (
-            (dense_st[finite] - sparse_st[finite]).abs().max() <= bin_size + 1e-6
-        )
-    only_dense = torch.isfinite(dense_st) & torch.isinf(sparse_st)
-    only_sparse = torch.isinf(dense_st) & torch.isfinite(sparse_st)
-    disagreement = (only_dense | only_sparse).float().mean().item()
-    assert disagreement < 0.01, f"too many spike/no-spike mismatches: {disagreement}"
-
-
-@pytest.mark.parametrize("seed", [0, 3])
-@pytest.mark.parametrize("num_bins", [16, 64])
-def test_multi_threshold_matches_existing(seed: int, num_bins: int) -> None:
-    layer = _make_layer()
-    times = _make_inputs(seed=seed, num_bins=num_bins)
-
-    # Build a (K, F) threshold matrix matching the perturbation pattern.
-    base = layer.thresholds
-    fracs = torch.tensor([-0.5, -0.25, 0.0, 0.25])  # K=4
-    thresholds_2d = base.unsqueeze(0) * (1 + fracs.unsqueeze(1))  # (K, F)
-
-    dense = multi_threshold_conv_accumulate(
-        times,
-        layer.weights_4d,
-        thresholds_2d,
-        stride=layer.stride,
-        padding=layer.padding,
-        device="cpu",
-    )
-    sparse = spike_driven_conv_accumulate_multi_threshold(
-        times,
-        layer.weights_4d,
-        thresholds_2d,
-        stride=layer.stride,
-        padding=layer.padding,
-    )
-
-    assert dense.shape == sparse.shape
-    bin_size = 1.0 / num_bins
-    finite = torch.isfinite(dense) & torch.isfinite(sparse)
-    if finite.any():
-        assert (dense[finite] - sparse[finite]).abs().max() <= bin_size + 1e-6
-
-
-def test_no_finite_inputs_returns_inf() -> None:
-    layer = _make_layer()
-    times = torch.full((1, 6, 12, 12), float("inf"))
-    st, pot = spike_driven_conv_accumulate(
-        times, layer.weights_4d, layer.thresholds, stride=1, padding=0
-    )
-    assert torch.isinf(st).all()
-    assert (pot == 0).all()
-
-
-@pytest.mark.parametrize("seed", [0, 1])
-@pytest.mark.parametrize("num_bins", [16, 64])
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-def test_cuda_matches_dense(seed: int, num_bins: int) -> None:
-    layer = _make_layer().cuda()
-    times = _make_inputs(seed=seed, num_bins=num_bins).cuda()
-    dense_st, _ = layer._conv2d_accumulate(times)
-    sparse_st, _ = spike_driven_conv_accumulate(
-        times, layer.weights_4d, layer.thresholds, stride=layer.stride, padding=layer.padding
-    )
-    assert dense_st.shape == sparse_st.shape
-    bin_size = 1.0 / num_bins
-    finite = torch.isfinite(dense_st) & torch.isfinite(sparse_st)
-    if finite.any():
-        assert (dense_st[finite] - sparse_st[finite]).abs().max() <= bin_size + 1e-6
-    only_dense = torch.isfinite(dense_st) & torch.isinf(sparse_st)
-    only_sparse = torch.isinf(dense_st) & torch.isfinite(sparse_st)
-    disagreement = (only_dense | only_sparse).float().mean().item()
-    assert disagreement < 0.01
-
-
-@pytest.mark.parametrize("seed", [0, 3])
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-def test_cuda_multi_threshold(seed: int) -> None:
-    layer = _make_layer().cuda()
-    times = _make_inputs(seed=seed, num_bins=16).cuda()
-    fracs = torch.tensor([-0.5, -0.25, 0.0, 0.25], device="cuda")
-    thresholds_2d = layer.thresholds.unsqueeze(0) * (1 + fracs.unsqueeze(1))
-    dense = multi_threshold_conv_accumulate(
-        times, layer.weights_4d, thresholds_2d,
-        stride=layer.stride, padding=layer.padding, device="cuda"
-    )
-    sparse = spike_driven_conv_accumulate_multi_threshold(
-        times, layer.weights_4d, thresholds_2d, stride=layer.stride, padding=layer.padding
-    )
-    sparse = sparse.cpu()
-    assert dense.shape == sparse.shape
-    bin_size = 1.0 / 16
-    finite = torch.isfinite(dense) & torch.isfinite(sparse)
-    if finite.any():
-        assert (dense[finite] - sparse[finite]).abs().max() <= bin_size + 1e-6
-
-
 def test_layer_backend_flag() -> None:
     layer = _make_layer()
     times = _make_inputs(seed=0, num_bins=16)
@@ -215,15 +97,12 @@ def test_layer_backend_flag() -> None:
     layer._backend = "dense"
     dense_st, _ = layer._conv2d_accumulate(times)
 
-    for backend in ("scatter", "gather"):
-        layer._backend = backend
-        backend_st, _ = layer._conv2d_accumulate(times)
-        assert dense_st.shape == backend_st.shape, backend
-        finite = torch.isfinite(dense_st) & torch.isfinite(backend_st)
-        if finite.any():
-            assert (
-                (dense_st[finite] - backend_st[finite]).abs().max() <= bin_tol
-            ), backend
+    layer._backend = "gather"
+    gather_st, _ = layer._conv2d_accumulate(times)
+    assert dense_st.shape == gather_st.shape
+    finite = torch.isfinite(dense_st) & torch.isfinite(gather_st)
+    if finite.any():
+        assert (dense_st[finite] - gather_st[finite]).abs().max() <= bin_tol
 
 
 def test_layer_backend_default_is_gather() -> None:
@@ -241,10 +120,6 @@ def test_layer_gather_returns_cum_potential_when_requested() -> None:
 
     _, pot_gather = layer._conv2d_accumulate(times, with_cum_potential=True)
     assert pot_gather.shape == (times.shape[0], 16, 8, 8)
-
-    layer._backend = "scatter"
-    _, pot_scatter = layer._conv2d_accumulate(times, with_cum_potential=True)
-    assert torch.allclose(pot_gather, pot_scatter, rtol=1e-4, atol=1e-4)
 
 
 def test_layer_backend_invalid_name_raises() -> None:
@@ -266,9 +141,9 @@ def test_layer_constructor_accepts_backend() -> None:
     explicit = ConvIntegrateAndFireLayer(
         in_channels=2, num_filters=4, kernel_size=3,
         threshold_initialization=init, refractory_period=float("inf"),
-        backend="scatter",
+        backend="dense",
     )
-    assert explicit._backend == "scatter"
+    assert explicit._backend == "dense"
 
     with pytest.raises(ValueError, match="unknown backend"):
         ConvIntegrateAndFireLayer(
@@ -494,97 +369,23 @@ def test_backend_matches_classic_discrete_time_sim(
         stride=layer.stride,
         padding=layer.padding,
     )
-    scatter_st, _ = spiking_backend.spike_driven_conv_accumulate(
-        times,
-        layer.weights_4d,
-        layer.thresholds,
-        stride=layer.stride,
-        padding=layer.padding,
-    )
 
-    bin_size = 1.0 / num_bins
     finite_g = torch.isfinite(classic_st) & torch.isfinite(gather_st)
     if finite_g.any():
         assert (
             (classic_st[finite_g] - gather_st[finite_g]).abs().max() <= 1e-6
         ), "gather path drifted from classic discrete-time simulation"
 
-    finite_s = torch.isfinite(classic_st) & torch.isfinite(scatter_st)
-    if finite_s.any():
-        assert (
-            (classic_st[finite_s] - scatter_st[finite_s]).abs().max()
-            <= bin_size + 1e-6
-        )
-
-    for name, backend_st in [("gather", gather_st), ("scatter", scatter_st)]:
-        only_classic = torch.isfinite(classic_st) & torch.isinf(backend_st)
-        only_backend = torch.isinf(classic_st) & torch.isfinite(backend_st)
-        disagreement = (only_classic | only_backend).float().mean().item()
-        assert disagreement < 0.02, (
-            f"{name}: too many spike/no-spike mismatches vs classic sim: "
-            f"{disagreement}"
-        )
-
-
-@pytest.mark.parametrize("seed", [0, 1, 4])
-@pytest.mark.parametrize("padding", [0, 2])
-def test_scatter_skip_spiked_matches_full(
-    seed: int, padding: int
-) -> None:
-    layer = _make_layer(padding=padding)
-    times = _make_inputs(seed=seed, num_bins=64)
-
-    default_st, _ = spiking_backend.spike_driven_conv_accumulate(
-        times,
-        layer.weights_4d,
-        layer.thresholds,
-        stride=layer.stride,
-        padding=layer.padding,
+    only_classic = torch.isfinite(classic_st) & torch.isinf(gather_st)
+    only_gather = torch.isinf(classic_st) & torch.isfinite(gather_st)
+    disagreement = (only_classic | only_gather).float().mean().item()
+    assert disagreement < 0.02, (
+        f"gather: too many spike/no-spike mismatches vs classic sim: {disagreement}"
     )
-    fast_st, _ = spiking_backend.spike_driven_conv_accumulate(
-        times,
-        layer.weights_4d,
-        layer.thresholds,
-        stride=layer.stride,
-        padding=layer.padding,
-        compute_cum_potential=False,
-    )
-    assert default_st.shape == fast_st.shape
-    assert torch.equal(default_st, fast_st), (
-        "fast mode produced different spike_times than default mode"
-    )
-
-
-@pytest.mark.parametrize("seed", [0, 2])
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-def test_scatter_skip_spiked_cuda_matches_full(seed: int) -> None:
-    layer = _make_layer().cuda()
-    times = _make_inputs(seed=seed, num_bins=64).cuda()
-    default_st, _ = spiking_backend.spike_driven_conv_accumulate(
-        times, layer.weights_4d, layer.thresholds,
-        stride=layer.stride, padding=layer.padding,
-    )
-    fast_st, _ = spiking_backend.spike_driven_conv_accumulate(
-        times, layer.weights_4d, layer.thresholds,
-        stride=layer.stride, padding=layer.padding,
-        compute_cum_potential=False,
-    )
-    bin_size = 1.0 / 64
-    finite = torch.isfinite(default_st) & torch.isfinite(fast_st)
-    if finite.any():
-        assert (
-            (default_st[finite] - fast_st[finite]).abs().max()
-            <= bin_size + 1e-6
-        )
-    only_default = torch.isfinite(default_st) & torch.isinf(fast_st)
-    only_fast = torch.isinf(default_st) & torch.isfinite(fast_st)
-    disagreement = (only_default | only_fast).float().mean().item()
-    assert disagreement < 0.02
 
 
 @pytest.mark.parametrize("num_bins", [16, 64])
-@pytest.mark.parametrize("compute_cum_potential", [True, False])
-def test_b1_patch_sized_input(num_bins: int, compute_cum_potential: bool) -> None:
+def test_b1_patch_sized_input(num_bins: int) -> None:
     layer = _make_layer(kernel_size=5, padding=0)
     times = _make_inputs(batch=1, H=5, W=5, seed=0, num_bins=num_bins)
     dense_st, _ = layer._conv2d_accumulate(times)
@@ -594,21 +395,14 @@ def test_b1_patch_sized_input(num_bins: int, compute_cum_potential: bool) -> Non
         times, layer.weights_4d, layer.thresholds,
         num_bins=num_bins, stride=layer.stride, padding=layer.padding,
     )
-    scatter_st, _ = spiking_backend.spike_driven_conv_accumulate(
-        times, layer.weights_4d, layer.thresholds,
-        stride=layer.stride, padding=layer.padding,
-        compute_cum_potential=compute_cum_potential,
-    )
     assert gather_st.shape == (1, 16, 1, 1)
-    assert scatter_st.shape == (1, 16, 1, 1)
 
     bin_size = 1.0 / num_bins
-    for name, st in [("gather", gather_st), ("scatter", scatter_st)]:
-        finite = torch.isfinite(dense_st) & torch.isfinite(st)
-        if finite.any():
-            assert (
-                (dense_st[finite] - st[finite]).abs().max() <= bin_size + 1e-6
-            ), f"{name} disagreed with dense at patch-sized input"
+    finite = torch.isfinite(dense_st) & torch.isfinite(gather_st)
+    if finite.any():
+        assert (
+            (dense_st[finite] - gather_st[finite]).abs().max() <= bin_size + 1e-6
+        ), "gather disagreed with dense at patch-sized input"
 
 
 @pytest.mark.parametrize("num_bins", [16, 64])
@@ -626,30 +420,25 @@ def test_b1_patch_sized_multi_threshold(num_bins: int) -> None:
         times, layer.weights_4d, thresholds_2d,
         num_bins=num_bins, stride=layer.stride, padding=layer.padding,
     )
-    scatter = spiking_backend.spike_driven_conv_accumulate_multi_threshold(
-        times, layer.weights_4d, thresholds_2d,
-        stride=layer.stride, padding=layer.padding,
-    )
     assert gather.shape == (4, 1, 16, 1, 1)
-    assert scatter.shape == (4, 1, 16, 1, 1)
 
     bin_size = 1.0 / num_bins
-    for name, st in [("gather", gather), ("scatter", scatter)]:
-        finite = torch.isfinite(dense) & torch.isfinite(st)
-        if finite.any():
-            assert (dense[finite] - st[finite]).abs().max() <= bin_size + 1e-6, name
+    finite = torch.isfinite(dense) & torch.isfinite(gather)
+    if finite.any():
+        assert (dense[finite] - gather[finite]).abs().max() <= bin_size + 1e-6
 
 
-def test_dense_stride_handling() -> None:
+def test_gather_stride_handling() -> None:
     num_bins = 16
     layer = _make_layer(stride=2, kernel_size=3, padding=0)
     times = _make_inputs(H=10, W=10, seed=11, num_bins=num_bins)
     dense_st, _ = layer._conv2d_accumulate(times)
-    sparse_st, _ = spike_driven_conv_accumulate(
-        times, layer.weights_4d, layer.thresholds, stride=2, padding=0
+    gather_st = spiking_backend.first_spike_times(
+        times, layer.weights_4d, layer.thresholds,
+        num_bins=num_bins, stride=2, padding=0,
     )
-    assert dense_st.shape == sparse_st.shape
+    assert dense_st.shape == gather_st.shape
     bin_size = 1.0 / num_bins
-    finite = torch.isfinite(dense_st) & torch.isfinite(sparse_st)
+    finite = torch.isfinite(dense_st) & torch.isfinite(gather_st)
     if finite.any():
-        assert (dense_st[finite] - sparse_st[finite]).abs().max() <= bin_size + 1e-6
+        assert (dense_st[finite] - gather_st[finite]).abs().max() <= bin_size + 1e-6

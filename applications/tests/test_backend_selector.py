@@ -12,10 +12,6 @@ def test_cuda_always_picks_gather(device, first_spike_only) -> None:
 
 
 @pytest.mark.parametrize("first_spike_only", [True, False])
-def test_cpu_threshold(first_spike_only: bool) -> None:
-    assert select_backend("cpu", 1, first_spike_only) == "gather"
-    assert select_backend("cpu", 4, first_spike_only) == "gather"
-    assert select_backend("cpu", 7, first_spike_only) == "gather"
-    assert select_backend("cpu", 8, first_spike_only) == "scatter"
-    assert select_backend("cpu", 128, first_spike_only) == "scatter"
-    assert select_backend("cpu", 1024, first_spike_only) == "scatter"
+def test_cpu_always_picks_gather(first_spike_only: bool) -> None:
+    for B in (1, 4, 7, 8, 128, 1024):
+        assert select_backend("cpu", B, first_spike_only) == "gather"

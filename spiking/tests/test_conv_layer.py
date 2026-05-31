@@ -272,9 +272,9 @@ class TestConvLayerForward:
         )
         return layer, times
 
-    @pytest.mark.parametrize("backend", ["dense", "scatter", "gather"])
+    @pytest.mark.parametrize("backend", ["dense", "gather"])
     def test_backend_matches_base(self, backend):
-        """Inputs bin-aligned to ``NUM_BINS`` so all three backends are exact vs ``base``."""
+        """Inputs bin-aligned to ``NUM_BINS`` so the backends are exact vs ``base``."""
         layer, times = self._setup()
         layer._backend = "base"
         ref = layer(times, first_spike_only=False)
