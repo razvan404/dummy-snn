@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel", "torch>=2.5", "ninja"]
+requires = ["setuptools>=64", "wheel", "torch>=2.5"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,7 +9,6 @@ description = "C++/CUDA extension backend for spiking neural networks"
 requires-python = ">=3.11"
 dependencies = [
     "torch>=2.5",
-    "ninja",
 ]
 
 [tool.setuptools]

@@ -1,6 +1,7 @@
 [build-system]
-requires = ["setuptools>=64", "wheel", "torch>=2.5", "ninja"]
+requires = ["setuptools>=64", "wheel", "torch>=2.5"]
 build-backend = "setuptools.build_meta"
+
 
 [project]
 name = "dummy-snn"
@@ -19,8 +20,8 @@ dependencies = [
     "pillow>=10.1",
     "kagglehub>=1.0",
     "jupyter>=1.1.1",
-    "ninja",
 ]
+
 
 [project.optional-dependencies]
 cpu = [
