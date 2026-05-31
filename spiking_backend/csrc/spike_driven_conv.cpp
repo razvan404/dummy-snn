@@ -10,6 +10,9 @@ namespace {
 
 constexpr float kInf = std::numeric_limits<float>::infinity();
 
+// Below this many output sites, parallelise over (site × filter) for enough work units.
+constexpr size_t kSpatialParallelThreshold = 8;
+
 inline std::pair<int, int> affected_out_range(
     int pos_padded, int kernel, int stride, int out_size) {
   int lo_num = pos_padded - kernel + 1;
@@ -156,27 +159,57 @@ void run_multi_scatter(
   }
 }
 
-inline void fill_gather_bins(
-    int C, int H, int W, int kH, int kW, int stride, int padding, int num_bins,
-    int oh, int ow, const float* in_b, const float* W_f, float* bins
+struct SpikeEvent {
+  int local_idx;
+  int bin;
+};
+
+inline int time_to_bin(float t, int num_bins) {
+  int bin = (int)(t * num_bins);
+  if (bin < 0) return 0;
+  if (bin >= num_bins) return num_bins - 1;
+  return bin;
+}
+
+inline void collect_spike_events(
+    const float* in_b, const ConvShape& s, int stride, int padding,
+    int num_bins, int oh, int ow, std::vector<SpikeEvent>& events
 ) {
-  std::fill(bins, bins + num_bins, 0.0f);
-  for (int c = 0; c < C; ++c) {
-    for (int ky = 0; ky < kH; ++ky) {
+  events.clear();
+  events.reserve((size_t)s.C * s.kH * s.kW);
+  if (padding == 0 && s.H == s.kH && s.W == s.kW) {
+    const int flat = s.C * s.kH * s.kW;
+    for (int i = 0; i < flat; ++i) {
+      float t = in_b[i];
+      if (std::isfinite(t)) events.push_back({i, time_to_bin(t, num_bins)});
+    }
+    return;
+  }
+  for (int c = 0; c < s.C; ++c) {
+    for (int ky = 0; ky < s.kH; ++ky) {
       int y = oh * stride + ky - padding;
-      if (y < 0 || y >= H) continue;
-      for (int kx = 0; kx < kW; ++kx) {
+      for (int kx = 0; kx < s.kW; ++kx) {
         int x = ow * stride + kx - padding;
-        if (x < 0 || x >= W) continue;
-        float t = in_b[((c * H) + y) * W + x];
+        if (y < 0 || y >= s.H || x < 0 || x >= s.W) continue;
+        float t = in_b[((c * s.H) + y) * s.W + x];
         if (!std::isfinite(t)) continue;
-        int bin = (int)(t * num_bins);
-        if (bin < 0) bin = 0;
-        if (bin >= num_bins) bin = num_bins - 1;
-        bins[bin] += W_f[((c * kH) + ky) * kW + kx];
+        events.push_back({((c * s.kH) + ky) * s.kW + kx, time_to_bin(t, num_bins)});
       }
     }
   }
+}
+
+inline void accumulate_bins(
+    const std::vector<SpikeEvent>& events, const float* W_f, std::vector<float>& bins
+) {
+  std::fill(bins.begin(), bins.end(), 0.0f);
+  for (const auto& ev : events) bins[ev.bin] += W_f[ev.local_idx];
+}
+
+inline float sum_bins(const std::vector<float>& bins) {
+  float total = 0.0f;
+  for (float v : bins) total += v;
+  return total;
 }
 
 inline float scan_first_crossing(const float* bins, int num_bins, float th) {
@@ -186,6 +219,18 @@ inline float scan_first_crossing(const float* bins, int num_bins, float th) {
     if (cum >= th) return (float)bin / (float)num_bins;
   }
   return kInf;
+}
+
+inline float scan_first_crossing_with_potential(
+    const float* bins, int num_bins, float th, float* pot_out
+) {
+  float cum = 0.0f, spike_t = kInf;
+  for (int bin = 0; bin < num_bins; ++bin) {
+    cum += bins[bin];
+    if (spike_t == kInf && cum >= th) spike_t = (float)bin / (float)num_bins;
+  }
+  *pot_out = cum;
+  return spike_t;
 }
 
 }  // namespace
@@ -296,33 +341,58 @@ std::tuple<at::Tensor, at::Tensor> first_spike_times_cpu(
   const int nb = (int)num_bins;
   const int oHoW = s.oH * s.oW;
   const int CkHkW = s.C * s.kH * s.kW;
-  const size_t total = (size_t)s.B * s.F * oHoW;
+  const size_t num_spatial = (size_t)s.B * oHoW;
+
+  auto write_result = [&](const std::vector<float>& bins, float th_f, size_t idx) {
+    if (compute_cum_potential)
+      st_p[idx] = scan_first_crossing_with_potential(bins.data(), nb, th_f, pot_p + idx);
+    else
+      st_p[idx] = scan_first_crossing(bins.data(), nb, th_f);
+  };
+
+  if (num_spatial >= kSpatialParallelThreshold) {
 #pragma omp parallel
-  {
-    std::vector<float> bins((size_t)nb);
+    {
+      std::vector<float> bins((size_t)nb);
+      std::vector<SpikeEvent> events;
 #pragma omp for schedule(static)
-    for (size_t idx = 0; idx < total; ++idx) {
-      const int ow = (int)(idx % s.oW);
-      const int oh = (int)((idx / s.oW) % s.oH);
-      const int f = (int)((idx / oHoW) % s.F);
-      const int b = (int)(idx / (s.F * oHoW));
-      fill_gather_bins(s.C, s.H, s.W, s.kH, s.kW, stride, padding, nb,
-                       oh, ow, in_p + (size_t)b * s.CHW(),
-                       W_p + (size_t)f * CkHkW, bins.data());
-      const float th_f = th_p[f];
-      if (compute_cum_potential) {
-        float cum = 0.0f, spike_t = kInf;
-        for (int bin = 0; bin < nb; ++bin) {
-          cum += bins[bin];
-          if (spike_t == kInf && cum >= th_f) spike_t = (float)bin / (float)nb;
+      for (size_t spatial_idx = 0; spatial_idx < num_spatial; ++spatial_idx) {
+        const int ow = (int)(spatial_idx % s.oW);
+        const int oh = (int)((spatial_idx / s.oW) % s.oH);
+        const int b = (int)(spatial_idx / oHoW);
+        collect_spike_events(in_p + (size_t)b * s.CHW(), s, stride, padding, nb, oh, ow, events);
+        for (int f = 0; f < s.F; ++f) {
+          accumulate_bins(events, W_p + (size_t)f * CkHkW, bins);
+          write_result(bins, th_p[f], ((size_t)b * s.F + f) * oHoW + oh * s.oW + ow);
         }
-        st_p[idx] = spike_t;
-        pot_p[idx] = cum;
-      } else {
-        st_p[idx] = scan_first_crossing(bins.data(), nb, th_f);
+      }
+    }
+  } else {
+    std::vector<std::vector<SpikeEvent>> events(num_spatial);
+    for (size_t spatial_idx = 0; spatial_idx < num_spatial; ++spatial_idx) {
+      const int ow = (int)(spatial_idx % s.oW);
+      const int oh = (int)((spatial_idx / s.oW) % s.oH);
+      const int b = (int)(spatial_idx / oHoW);
+      collect_spike_events(in_p + (size_t)b * s.CHW(), s, stride, padding, nb, oh, ow,
+                           events[spatial_idx]);
+    }
+    const size_t total_tasks = num_spatial * s.F;
+#pragma omp parallel
+    {
+      std::vector<float> bins((size_t)nb);
+#pragma omp for schedule(static)
+      for (size_t task_idx = 0; task_idx < total_tasks; ++task_idx) {
+        const int f = (int)(task_idx % s.F);
+        const size_t spatial_idx = task_idx / s.F;
+        const int ow = (int)(spatial_idx % s.oW);
+        const int oh = (int)((spatial_idx / s.oW) % s.oH);
+        const int b = (int)(spatial_idx / oHoW);
+        accumulate_bins(events[spatial_idx], W_p + (size_t)f * CkHkW, bins);
+        write_result(bins, th_p[f], ((size_t)b * s.F + f) * oHoW + oh * s.oW + ow);
       }
     }
   }
+
   return {spike_times, cum_potential};
 }
 
@@ -353,31 +423,59 @@ std::tuple<at::Tensor, at::Tensor> first_spike_times_multi_threshold_cpu(
   const int nb = (int)num_bins;
   const int oHoW = s.oH * s.oW;
   const int CkHkW = s.C * s.kH * s.kW;
-  const size_t total = (size_t)s.B * s.F * oHoW;
   const size_t per_K = (size_t)s.B * s.FoHoW();
+  const size_t num_spatial = (size_t)s.B * oHoW;
+
+  auto write_result = [&](const std::vector<float>& bins, int f, size_t idx) {
+    if (compute_cum_potential) pot_p[idx] = sum_bins(bins);
+    for (int k = 0; k < K; ++k)
+      st_p[(size_t)k * per_K + idx] =
+          scan_first_crossing(bins.data(), nb, th_p[(size_t)k * s.F + f]);
+  };
+
+  if (num_spatial >= kSpatialParallelThreshold) {
 #pragma omp parallel
-  {
-    std::vector<float> bins((size_t)nb);
+    {
+      std::vector<float> bins((size_t)nb);
+      std::vector<SpikeEvent> events;
 #pragma omp for schedule(static)
-    for (size_t idx = 0; idx < total; ++idx) {
-      const int ow = (int)(idx % s.oW);
-      const int oh = (int)((idx / s.oW) % s.oH);
-      const int f = (int)((idx / oHoW) % s.F);
-      const int b = (int)(idx / (s.F * oHoW));
-      fill_gather_bins(s.C, s.H, s.W, s.kH, s.kW, stride, padding, nb,
-                       oh, ow, in_p + (size_t)b * s.CHW(),
-                       W_p + (size_t)f * CkHkW, bins.data());
-      if (compute_cum_potential) {
-        float total_sum = 0.0f;
-        for (int bin = 0; bin < nb; ++bin) total_sum += bins[bin];
-        pot_p[idx] = total_sum;
+      for (size_t spatial_idx = 0; spatial_idx < num_spatial; ++spatial_idx) {
+        const int ow = (int)(spatial_idx % s.oW);
+        const int oh = (int)((spatial_idx / s.oW) % s.oH);
+        const int b = (int)(spatial_idx / oHoW);
+        collect_spike_events(in_p + (size_t)b * s.CHW(), s, stride, padding, nb, oh, ow, events);
+        for (int f = 0; f < s.F; ++f) {
+          accumulate_bins(events, W_p + (size_t)f * CkHkW, bins);
+          write_result(bins, f, ((size_t)b * s.F + f) * oHoW + oh * s.oW + ow);
+        }
       }
-      for (int k = 0; k < K; ++k) {
-        st_p[(size_t)k * per_K + idx] =
-            scan_first_crossing(bins.data(), nb, th_p[(size_t)k * s.F + f]);
+    }
+  } else {
+    std::vector<std::vector<SpikeEvent>> events(num_spatial);
+    for (size_t spatial_idx = 0; spatial_idx < num_spatial; ++spatial_idx) {
+      const int ow = (int)(spatial_idx % s.oW);
+      const int oh = (int)((spatial_idx / s.oW) % s.oH);
+      const int b = (int)(spatial_idx / oHoW);
+      collect_spike_events(in_p + (size_t)b * s.CHW(), s, stride, padding, nb, oh, ow,
+                           events[spatial_idx]);
+    }
+    const size_t total_tasks = num_spatial * s.F;
+#pragma omp parallel
+    {
+      std::vector<float> bins((size_t)nb);
+#pragma omp for schedule(static)
+      for (size_t task_idx = 0; task_idx < total_tasks; ++task_idx) {
+        const int f = (int)(task_idx % s.F);
+        const size_t spatial_idx = task_idx / s.F;
+        const int ow = (int)(spatial_idx % s.oW);
+        const int oh = (int)((spatial_idx / s.oW) % s.oH);
+        const int b = (int)(spatial_idx / oHoW);
+        accumulate_bins(events[spatial_idx], W_p + (size_t)f * CkHkW, bins);
+        write_result(bins, f, ((size_t)b * s.F + f) * oHoW + oh * s.oW + ow);
       }
     }
   }
+
   return {spike_times, cum_potential};
 }
 

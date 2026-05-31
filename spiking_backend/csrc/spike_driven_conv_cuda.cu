@@ -14,6 +14,8 @@ constexpr float kInf = std::numeric_limits<float>::infinity();
 constexpr int kWarpSize = 32;
 constexpr int kGatherMaxBlock = 256;
 constexpr int kGatherSmemBudgetBytes = 32 * 1024;
+// Channels staged into shared memory per tile, bounding the input scratch footprint.
+constexpr int kChannelChunk = 16;
 
 __device__ inline int affected_lo(int p, int kernel, int stride) {
   int n = p - kernel + 1;
@@ -113,30 +115,46 @@ __global__ void event_scatter_multi(
   }
 }
 
-__device__ __forceinline__ void gather_bins(
+// Stage each channel tile of the receptive field into shared memory, then bin per-filter.
+// Every thread must reach both __syncthreads(), so threads with f >= F still load smem.
+__device__ __forceinline__ void gather_bins_tiled(
     const float* __restrict__ input_times,
     const float* __restrict__ weights,
-    int b, int C, int H, int W, int f, int kH, int kW,
+    int b, int C, int H, int W, int f, int F, int kH, int kW,
     int oh, int ow, int stride, int pad, int num_bins,
-    float* __restrict__ my_bins
+    float* smem_inputs, float* my_bins
 ) {
+  const int tid = threadIdx.x;
+  const int CkHkW = C * kH * kW;
   for (int i = 0; i < num_bins; ++i) my_bins[i] = 0.0f;
-  for (int c = 0; c < C; ++c) {
-    #pragma unroll
-    for (int ky = 0; ky < kH; ++ky) {
+
+  for (int c_start = 0; c_start < C; c_start += kChannelChunk) {
+    const int chunk_C = (C - c_start) < kChannelChunk ? (C - c_start) : kChannelChunk;
+    const int chunk_size = chunk_C * kH * kW;
+
+    for (int i = tid; i < chunk_size; i += blockDim.x) {
+      int c = c_start + i / (kH * kW);
+      int ky = (i / kW) % kH;
+      int kx = i % kW;
       int y = oh * stride + ky - pad;
-      if (y < 0 || y >= H) continue;
-      #pragma unroll
-      for (int kx = 0; kx < kW; ++kx) {
-        int x = ow * stride + kx - pad;
-        if (x < 0 || x >= W) continue;
-        float t = input_times[(((size_t)b * C + c) * H + y) * W + x];
+      int x = ow * stride + kx - pad;
+      smem_inputs[i] = (y >= 0 && y < H && x >= 0 && x < W)
+          ? input_times[(((size_t)b * C + c) * H + y) * W + x]
+          : kInf;
+    }
+    __syncthreads();
+
+    if (f < F) {
+      const float* W_f = weights + (size_t)f * CkHkW + (size_t)c_start * kH * kW;
+      for (int i = 0; i < chunk_size; ++i) {
+        float t = smem_inputs[i];
         if (!isfinite(t)) continue;
         int bin = (int)(t * num_bins);
         bin = bin < 0 ? 0 : (bin >= num_bins ? num_bins - 1 : bin);
-        my_bins[bin] += weights[(((size_t)f * C + c) * kH + ky) * kW + kx];
+        my_bins[bin] += W_f[i];
       }
     }
+    __syncthreads();
   }
 }
 
@@ -172,21 +190,31 @@ __global__ void gather_first_spike_kernel_t(
     float* __restrict__ cum_potential
 ) {
   extern __shared__ float smem[];
-  const int tid = threadIdx.x;
-  const int idx = blockIdx.x * blockDim.x + tid;
-  if (idx >= B * F * oH * oW) return;
+  const int spatial_idx = blockIdx.x;
+  const int f_block = blockIdx.y;
+  const int chunk_C = C < kChannelChunk ? C : kChannelChunk;
 
-  const int ow = idx % oW;
-  const int oh = (idx / oW) % oH;
-  const int f = (idx / (oW * oH)) % F;
-  const int b = idx / (oW * oH * F);
+  float* smem_inputs = smem;
+  float* my_bins = smem + chunk_C * kH * kW + (size_t)threadIdx.x * (num_bins + 1);
 
-  float* my_bins = smem + (size_t)tid * (num_bins + 1);
-  gather_bins(input_times, weights, b, C, H, W, f, kH, kW, oh, ow,
-              stride, pad, num_bins, my_bins);
+  const int ow = spatial_idx % oW;
+  const int oh = (spatial_idx / oW) % oH;
+  const int b = spatial_idx / (oH * oW);
+  const int f = f_block * blockDim.x + threadIdx.x;
+
+  gather_bins_tiled(input_times, weights, b, C, H, W, f, F, kH, kW,
+                    oh, ow, stride, pad, num_bins, smem_inputs, my_bins);
+
+  if (f >= F) return;
+
   float total;
-  spike_times[idx] = scan_bins<WITH_POT>(my_bins, num_bins, thresholds[f], &total);
-  if constexpr (WITH_POT) cum_potential[idx] = total;
+  float st = scan_bins<WITH_POT>(my_bins, num_bins, thresholds[f], &total);
+
+  size_t out_idx = (((size_t)b * F + f) * oH + oh) * oW + ow;
+  spike_times[out_idx] = st;
+  if constexpr (WITH_POT) {
+    cum_potential[out_idx] = total;
+  }
 }
 
 template <bool WITH_POT>
@@ -200,28 +228,35 @@ __global__ void gather_first_spike_multi_kernel_t(
     float* __restrict__ cum_potential
 ) {
   extern __shared__ float smem[];
-  const int tid = threadIdx.x;
-  const int idx = blockIdx.x * blockDim.x + tid;
-  if (idx >= B * F * oH * oW) return;
+  const int spatial_idx = blockIdx.x;
+  const int f_block = blockIdx.y;
+  const int chunk_C = C < kChannelChunk ? C : kChannelChunk;
 
-  const int ow = idx % oW;
-  const int oh = (idx / oW) % oH;
-  const int f = (idx / (oW * oH)) % F;
-  const int b = idx / (oW * oH * F);
+  float* smem_inputs = smem;
+  float* my_bins = smem + chunk_C * kH * kW + (size_t)threadIdx.x * (num_bins + 1);
 
-  float* my_bins = smem + (size_t)tid * (num_bins + 1);
-  gather_bins(input_times, weights, b, C, H, W, f, kH, kW, oh, ow,
-              stride, pad, num_bins, my_bins);
+  const int ow = spatial_idx % oW;
+  const int oh = (spatial_idx / oW) % oH;
+  const int b = spatial_idx / (oH * oW);
+  const int f = f_block * blockDim.x + threadIdx.x;
+
+  gather_bins_tiled(input_times, weights, b, C, H, W, f, F, kH, kW,
+                    oh, ow, stride, pad, num_bins, smem_inputs, my_bins);
+
+  if (f >= F) return;
 
   if constexpr (WITH_POT) {
     float total = 0.0f;
     for (int bin = 0; bin < num_bins; ++bin) total += my_bins[bin];
-    cum_potential[idx] = total;
+    size_t out_idx = (((size_t)b * F + f) * oH + oh) * oW + ow;
+    cum_potential[out_idx] = total;
   }
+
   const size_t FoHoW = (size_t)F * oH * oW;
   for (int k = 0; k < K; ++k) {
-    spike_times_K[(size_t)k * B * FoHoW + (size_t)idx] = scan_bins<false>(
-        my_bins, num_bins, thresholds_2d[(size_t)k * F + f], nullptr);
+    float st = scan_bins<false>(my_bins, num_bins, thresholds_2d[(size_t)k * F + f], nullptr);
+    size_t out_idx = ((size_t)k * B + b) * FoHoW + (size_t)f * oH * oW + oh * oW + ow;
+    spike_times_K[out_idx] = st;
   }
 }
 
@@ -248,6 +283,24 @@ static int pick_gather_block(int num_bins) {
   if (t > kGatherMaxBlock) t = kGatherMaxBlock;
   t = (t / kWarpSize) * kWarpSize;
   return t < kWarpSize ? kWarpSize : t;
+}
+
+struct GatherLaunchConfig {
+  int block;
+  dim3 grid;
+  size_t smem;
+};
+
+static GatherLaunchConfig make_gather_launch(
+    int total_spatial, int F, int C, int kH, int kW, int num_bins
+) {
+  int block = pick_gather_block(num_bins);
+  if (block > F) block = ((F + kWarpSize - 1) / kWarpSize) * kWarpSize;
+  dim3 grid(total_spatial, (F + block - 1) / block);
+  const int chunk_C = C < kChannelChunk ? C : kChannelChunk;
+  const size_t smem = (size_t)(chunk_C * kH * kW) * sizeof(float)
+                    + (size_t)block * (size_t)(num_bins + 1) * sizeof(float);
+  return {block, grid, smem};
 }
 
 }  // namespace
@@ -385,16 +438,14 @@ std::tuple<at::Tensor, at::Tensor> first_spike_times_cuda(
   auto cum_potential = compute_cum_potential
       ? at::zeros({B, F, oH, oW}, opts) : at::empty({0}, opts);
 
-  const int total = B * F * oH * oW;
-  if (total == 0) return {spike_times, cum_potential};
+  const int total_spatial = B * oH * oW;
+  if (total_spatial == 0) return {spike_times, cum_potential};
 
-  const int block = pick_gather_block((int)num_bins);
-  const int grid = (total + block - 1) / block;
-  const size_t smem = (size_t)block * (size_t)(num_bins + 1) * sizeof(float);
+  auto cfg = make_gather_launch(total_spatial, F, C, kH, kW, (int)num_bins);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   auto launch = [&](auto kernel, float* pot_p) {
-    kernel<<<grid, block, smem, stream>>>(
+    kernel<<<cfg.grid, cfg.block, cfg.smem, stream>>>(
         in_c.data_ptr<float>(), W_c.data_ptr<float>(), th_c.data_ptr<float>(),
         B, C, H, W, F, kH, kW, (int)stride, (int)padding, oH, oW, (int)num_bins,
         spike_times.data_ptr<float>(), pot_p);
@@ -428,16 +479,14 @@ std::tuple<at::Tensor, at::Tensor> first_spike_times_multi_threshold_cuda(
   auto cum_potential = compute_cum_potential
       ? at::zeros({B, F, oH, oW}, opts) : at::empty({0}, opts);
 
-  const int total = B * F * oH * oW;
-  if (total == 0) return {spike_times, cum_potential};
+  const int total_spatial = B * oH * oW;
+  if (total_spatial == 0) return {spike_times, cum_potential};
 
-  const int block = pick_gather_block((int)num_bins);
-  const int grid = (total + block - 1) / block;
-  const size_t smem = (size_t)block * (size_t)(num_bins + 1) * sizeof(float);
+  auto cfg = make_gather_launch(total_spatial, F, C, kH, kW, (int)num_bins);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   auto launch = [&](auto kernel, float* pot_p) {
-    kernel<<<grid, block, smem, stream>>>(
+    kernel<<<cfg.grid, cfg.block, cfg.smem, stream>>>(
         in_c.data_ptr<float>(), W_c.data_ptr<float>(), th_c.data_ptr<float>(),
         B, C, H, W, F, kH, kW, (int)stride, (int)padding,
         oH, oW, (int)num_bins, K,
