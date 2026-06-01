@@ -267,6 +267,54 @@ class TorchLinearSVC(ColumnSwapClassifier):
     def weights(self) -> np.ndarray:
         return self._W.cpu().numpy()
 
+    @property
+    def device(self) -> torch.device:
+        return self._device
+
+    def augmented_weights(self) -> torch.Tensor:
+        """The fitted (D+1, K) weight matrix incl. the bias row."""
+        return self._Wa
+
+    def feature_range(self) -> torch.Tensor:
+        """Per-column standardisation range, for mapping scaled gradients back to raw features."""
+        return self._feat_range_t
+
+    def train_predictions(self) -> torch.Tensor:
+        """argmax class predictions on the (current) training features."""
+        return (self._Xa @ self._Wa).argmax(dim=1)
+
+    def train_labels(self) -> torch.Tensor:
+        """The fitted training labels as a device tensor."""
+        return self._y_t
+
+    def raw_feature_gradient(self) -> np.ndarray:
+        """dL/d(raw feature) at the current fit, shape (N, D) — the read-out's pull on each feature."""
+        coef, _ = self.loss_state()
+        grad_scaled = (coef @ self._Wa.T)[:, :-1]
+        grad_raw = grad_scaled / (self._feat_range_t.unsqueeze(0) + 1e-12)
+        return grad_raw.cpu().numpy()
+
+    def raw_feature_gradient_at(self, X_raw: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """raw_feature_gradient evaluated at external features X_raw (for bootstrap averaging)."""
+        X_scaled = self._scale_np(X_raw.astype(np.float32, copy=True))
+        X_t = torch.from_numpy(X_scaled).to(self._device)
+        n = X_t.shape[0]
+        Xa = torch.cat([X_t, torch.ones(n, 1, device=self._device)], dim=1)
+        y_t = torch.as_tensor(y, dtype=torch.long, device=self._device)
+        Y = -torch.ones(n, self._K, device=self._device)
+        Y[torch.arange(n, device=self._device), y_t] = 1.0
+        score = Xa @ self._Wa
+        margin = Y * score
+        if self._loss_type == "svc":
+            active = (margin < 1.0).float()
+            coef = -2.0 * self._C * active * (1.0 - margin) * Y
+        else:
+            sigma = torch.sigmoid(margin)
+            coef = -self._C * (1.0 - sigma) * Y
+        grad_scaled = (coef @ self._Wa.T)[:, :-1]
+        grad_raw = grad_scaled / (self._feat_range_t.unsqueeze(0) + 1e-12)
+        return grad_raw.cpu().numpy()
+
     _loss_type = "svc"
 
     def loss_state(self) -> tuple[torch.Tensor, torch.Tensor]:
