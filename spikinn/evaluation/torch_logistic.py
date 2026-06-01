@@ -11,6 +11,7 @@ class TorchLogisticRegression(TorchLinearSVC):
         Xa: torch.Tensor,
         Y: torch.Tensor,
         W_init: torch.Tensor | None = None,
+        max_iter: int | None = None,
     ) -> torch.Tensor:
         da = Xa.shape[1]
         d = da - 1
@@ -19,7 +20,8 @@ class TorchLogisticRegression(TorchLinearSVC):
 
         warm = W_init is not None
         W = W_init.clone() if warm else torch.zeros(da, K, device=Xa.device)
-        max_iter = self._warm_max_iter if warm else self._max_iter
+        if max_iter is None:
+            max_iter = self._warm_max_iter if warm else self._max_iter
 
         I_diag = torch.eye(da, device=Xa.device)
         I_diag[d, d] = 1e-4
@@ -40,9 +42,8 @@ class TorchLogisticRegression(TorchLinearSVC):
                 break
 
             H_batch = I_diag.unsqueeze(0).expand(K, -1, -1).clone()
-            for k in range(K):
-                XaW = Xa * weight[:, k].unsqueeze(1)
-                H_batch[k] += C * (XaW.T @ Xa)
+            XaW = Xa.unsqueeze(0) * weight.t().unsqueeze(2)
+            H_batch += C * torch.bmm(XaW.transpose(1, 2), Xa.unsqueeze(0).expand(K, -1, -1))
 
             rhs = -G.T.unsqueeze(2)
             try:

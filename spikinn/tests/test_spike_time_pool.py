@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from spikinn.layers import SpikeTimeMinPool, SpikinnSequential
+from spikinn.layers import SpikeTimeMinPool, SpikingSequential
 from spikinn.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
 from spikinn.threshold.constant_initialization import ConstantInitialization
 
@@ -44,7 +44,7 @@ class TestSpikeTimeMinPool:
         c2 = ConvIntegrateAndFireLayer(8, 6, 3, 1, 0, init, refractory_period=INF)
         torch.nn.init.uniform_(c1.weights, 0, 1)
         torch.nn.init.uniform_(c2.weights, 0, 1)
-        model = SpikinnSequential(c1, SpikeTimeMinPool(2, 2), c2)
+        model = SpikingSequential(c1, SpikeTimeMinPool(2, 2), c2)
         inp = torch.rand(4, 2, 12, 12)
         inp[inp > 0.7] = INF
         out = model.infer_spike_times_batch(inp)

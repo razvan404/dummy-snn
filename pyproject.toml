@@ -11,16 +11,9 @@ description = "Unsupervised convolutional spiking neural networks with STDP"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.1",
-    "scipy>=1.14",
-    "matplotlib>=3.9",
-    "scikit-learn>=1.6",
     "tqdm>=4.67",
     "torch>=2.5",
     "torchvision>=0.20",
-    "seaborn>=0.13",
-    "pillow>=10.1",
-    "kagglehub>=1.0",
-    "jupyter>=1.1.1",
 ]
 
 
@@ -51,9 +44,8 @@ exclude = ["benchmarks*", "scripts*", "logs*", "data*", "checkpoints*"]
 spikinn_backend = ["csrc/*.cpp", "csrc/*.cu", "csrc/*.h"]
 
 [tool.pytest.ini_options]
-# archive/ imports deleted modules and breaks collection.
 testpaths = ["spikinn/tests"]
-norecursedirs = ["archive", ".venv", "build", "logs", "data", "torch_extensions"]
+norecursedirs = [".venv", "build", "logs", "data", "torch_extensions"]
 
 [tool.black]
 target-version = ["py310"]
