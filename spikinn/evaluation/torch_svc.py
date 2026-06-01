@@ -81,17 +81,17 @@ class TorchLinearSVC(ColumnSwapClassifier):
 
             rhs = -G.T.unsqueeze(2)
             try:
-                L = torch.linalg.cholesky(H_batch)
+                L = torch.stack([torch.linalg.cholesky(H_batch[k]) for k in range(K)])
                 delta = torch.cholesky_solve(rhs, L).squeeze(2).T
             except torch._C._LinAlgError:
                 try:
-                    delta = torch.linalg.solve(H_batch, rhs).squeeze(2).T
+                    delta = torch.stack([torch.linalg.solve(H_batch[k], rhs[k]) for k in range(K)]).squeeze(2).T
                 except torch._C._LinAlgError:
                     H_batch = H_batch + 1e-2 * torch.eye(
                         da, device=Xa.device
                     ).unsqueeze(0)
                     try:
-                        L = torch.linalg.cholesky(H_batch)
+                        L = torch.stack([torch.linalg.cholesky(H_batch[k]) for k in range(K)])
                         delta = torch.cholesky_solve(rhs, L).squeeze(2).T
                     except torch._C._LinAlgError:
                         break  # give up, return current W
