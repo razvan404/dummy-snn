@@ -76,8 +76,8 @@ class TorchLinearSVC(ColumnSwapClassifier):
 
             H_batch = I_diag.unsqueeze(0).expand(K, -1, -1).clone()
             for k in range(K):
-                Xa_active = Xa * active_float[:, k].unsqueeze(1)
-                H_batch[k] += 2.0 * C * (Xa_active.T @ Xa)
+                Xa_active = Xa[active[:, k]]
+                H_batch[k] += 2.0 * C * (Xa_active.T @ Xa_active)
 
             rhs = -G.T.unsqueeze(2)
             try:
