@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 
-from spikinn.spikinn_module import SpikinnModule
+from spikinn.spikinn_module import SpikingModule
 
 
-class SpikinnSequential(SpikinnModule):
-    def __init__(self, *layers: SpikinnModule):
+class SpikingSequential(SpikingModule):
+    def __init__(self, *layers: SpikingModule):
         assert len(layers) >= 1
         super().__init__(
             num_inputs=layers[0].num_inputs,
@@ -37,3 +37,6 @@ class SpikinnSequential(SpikinnModule):
     def reset(self):
         for layer in self.layers:
             layer.reset()
+
+
+SpikinnSequential = SpikingSequential

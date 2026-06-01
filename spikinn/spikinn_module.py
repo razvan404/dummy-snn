@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 
-class SpikinnModule(nn.Module, ABC):
+class SpikingModule(nn.Module, ABC):
     _backend: str = "gather"
 
     def __init__(self, num_inputs: int, num_outputs: int):
@@ -20,3 +20,6 @@ class SpikinnModule(nn.Module, ABC):
     @abstractmethod
     def reset(self):
         pass
+
+
+SpikinnModule = SpikingModule

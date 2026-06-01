@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from spikinn import SpikinnModule
+from spikinn import SpikingModule
 from spikinn.evaluation.decoding import ScaledInversion, TargetRelative
 
 
@@ -17,7 +17,7 @@ def spike_times_to_features(
 
 @torch.no_grad()
 def extract_features(
-    model: SpikinnModule,
+    model: SpikingModule,
     dataloader: DataLoader,
     t_target: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:

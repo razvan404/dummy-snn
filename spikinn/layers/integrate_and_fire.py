@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
 
-from spikinn.spikinn_module import SpikinnModule
+from spikinn.spikinn_module import SpikingModule
 from spikinn.threshold import ThresholdInitialization
 
 from .surrogate_spike import SurrogateSpike
 
 
-class IntegrateAndFireLayer(SpikinnModule):
+class IntegrateAndFireLayer(SpikingModule):
     def __init__(
         self,
         num_inputs: int,

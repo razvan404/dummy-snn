@@ -3,10 +3,10 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
-from spikinn.spikinn_module import SpikinnModule
+from spikinn.spikinn_module import SpikingModule
 
 
-class SpikeTimeMinPool(SpikinnModule):
+class SpikeTimeMinPool(SpikingModule):
     """First-spike-wins pooling: each output is the earliest (min) spike time in its window.
 
     min over a window = −max(−x), so `F.max_pool2d` handles ∞ correctly — a window of all

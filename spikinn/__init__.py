@@ -1,9 +1,10 @@
 from .iterate_spikes import iterate_spikes
-from .spikinn_module import SpikinnModule
+from .spikinn_module import SpikingModule, SpikinnModule
 
 from .layers import (
     IntegrateAndFireLayer,
     ConvIntegrateAndFireLayer,
+    SpikingSequential,
     SpikinnSequential,
 )
 from .learning import (
@@ -35,9 +36,11 @@ from .utils import save_model, load_model
 
 __all__ = [
     "iterate_spikes",
+    "SpikingModule",
     "SpikinnModule",
     "IntegrateAndFireLayer",
     "ConvIntegrateAndFireLayer",
+    "SpikingSequential",
     "SpikinnSequential",
     "BiologicalSTDP",
     "ConvLearner",

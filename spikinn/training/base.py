@@ -5,14 +5,14 @@ import torch
 from torch.utils.data import DataLoader
 
 from spikinn.learning.base import BaseLearner
-from spikinn.spikinn_module import SpikinnModule
-from spikinn.layers.sequential import SpikinnSequential
+from spikinn.spikinn_module import SpikingModule
+from spikinn.layers.sequential import SpikingSequential
 
 
 class BaseUnsupervisedTrainer(ABC):
     def __init__(
         self,
-        model: SpikinnModule,
+        model: SpikingModule,
         learner: BaseLearner,
         image_shape: tuple[int, int, int],
         on_batch_end: Callable[[int, float, str], None] | None = None,
@@ -31,10 +31,14 @@ class BaseUnsupervisedTrainer(ABC):
         ...
 
     def _get_pre_spike_times(self, prepared_times: torch.Tensor) -> torch.Tensor:
+        if isinstance(self.model, SpikingSequential):
+            target_layer = self.learner.layer
+            if hasattr(target_layer, "_pre_spike_times"):
+                return target_layer._pre_spike_times
         return prepared_times
 
     def _write_spike_times(
-        self, layer: SpikinnModule, spike_times: torch.Tensor
+        self, layer: SpikingModule, spike_times: torch.Tensor
     ) -> None:
         if hasattr(layer, "_oH") and layer._oH is None:
             if spike_times.dim() >= 3:
@@ -43,9 +47,10 @@ class BaseUnsupervisedTrainer(ABC):
         layer._spike_times.copy_(spike_times)
 
     def _forward_analytical(self, prepared: torch.Tensor) -> None:
-        if isinstance(self.model, SpikinnSequential):
+        if isinstance(self.model, SpikingSequential):
             times = prepared
             for layer in self.model.layers:
+                layer._pre_spike_times = times
                 spike_times = layer.infer_spike_times(times)
                 self._write_spike_times(layer, spike_times)
                 times = spike_times

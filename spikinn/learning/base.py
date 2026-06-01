@@ -4,14 +4,14 @@ import torch
 
 from .competition import CompetitionMechanism
 from .mechanism import LearningMechanism
-from spikinn.spikinn_module import SpikinnModule
+from spikinn.spikinn_module import SpikingModule
 from spikinn.threshold import ThresholdAdaptation
 
 
 class BaseLearner(ABC):
     def __init__(
         self,
-        layer: SpikinnModule,
+        layer: SpikingModule,
         learning_mechanism: LearningMechanism | None = None,
         competition: CompetitionMechanism | None = None,
         threshold_adaptation: ThresholdAdaptation | None = None,
