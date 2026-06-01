@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Tuple
 
 import torch
 
 from . import reference
+
+logger = logging.getLogger(__name__)
 
 try:
     from . import _ext as _ext_module
@@ -15,6 +18,10 @@ except ImportError:
         _ext = load_backend()
     except Exception:
         _ext = None
+        logger.warning(
+            "spikinn compiled backend unavailable; using the pure-PyTorch reference kernel "
+            "(slower, and may differ in tie-break / accumulation order)."
+        )
 
 
 def is_compiled_available() -> bool:
