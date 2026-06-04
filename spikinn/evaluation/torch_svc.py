@@ -102,9 +102,13 @@ class TorchLinearSVC(ColumnSwapClassifier):
                 + C * (active_float * (1.0 - margin)).pow(2).sum()
             )
             gTd = (G * delta).sum()
+            
+            # Precompute Xa @ delta to avoid full matrix multiplication inside the loop
+            Xa_delta = Xa @ delta
+            
             for _ in range(20):
                 W_new = W + step * delta
-                margin_new = Y * (Xa @ W_new)
+                margin_new = Y * (scores + step * Xa_delta)
                 new_obj = (
                     0.5 * (W_new[:d] ** 2).sum()
                     + C * torch.clamp(1.0 - margin_new, min=0).pow(2).sum()

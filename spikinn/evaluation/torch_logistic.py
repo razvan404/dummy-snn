@@ -42,8 +42,8 @@ class TorchLogisticRegression(TorchLinearSVC):
                 break
 
             H_batch = I_diag.unsqueeze(0).expand(K, -1, -1).clone()
-            XaW = Xa.unsqueeze(0) * weight.t().unsqueeze(2)
-            H_batch += C * torch.bmm(XaW.transpose(1, 2), Xa.unsqueeze(0).expand(K, -1, -1))
+            for k in range(K):
+                H_batch[k] += C * (Xa.T @ (Xa * weight[:, k].unsqueeze(1)))
 
             rhs = -G.T.unsqueeze(2)
             try:
