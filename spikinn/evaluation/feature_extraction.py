@@ -3,15 +3,21 @@ import torch
 from torch.utils.data import DataLoader
 
 from spikinn import SpikingModule
-from spikinn.evaluation.decoding import ScaledInversion, TargetRelative
+from spikinn.evaluation.decoding import Decoder, ScaledInversion, TargetRelative
 
 
 def spike_times_to_features(
     spike_times: torch.Tensor,
     t_target: float | None = None,
+    decoder: Decoder | None = None,
 ) -> torch.Tensor:
-    """Convert spike times to [0, 1] features (with optional target latency)."""
-    decoder = TargetRelative(t_target) if t_target is not None else ScaledInversion()
+    """Convert spike times to [0, 1] features.
+
+    Pass an explicit ``decoder`` to override the default; otherwise falls back to
+    :class:`TargetRelative` when ``t_target`` is given, else :class:`ScaledInversion`.
+    """
+    if decoder is None:
+        decoder = TargetRelative(t_target) if t_target is not None else ScaledInversion()
     return decoder.decode(spike_times)
 
 
