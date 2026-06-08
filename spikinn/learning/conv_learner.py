@@ -2,6 +2,7 @@ import torch
 
 from .base import BaseLearner
 from spikinn.layers.conv_integrate_and_fire import ConvIntegrateAndFireLayer
+from spikinn.utils.conv_ops import unfold_patches
 
 
 class ConvLearner(BaseLearner):
@@ -14,7 +15,12 @@ class ConvLearner(BaseLearner):
     def _update_weights(
         self, neurons_to_learn: torch.Tensor, pre_spike_times: torch.Tensor
     ) -> torch.Tensor:
-        patches = self.layer._unfold_patches(pre_spike_times)
+        patches = unfold_patches(
+            pre_spike_times,
+            self.layer.kernel_size,
+            self.layer.stride,
+            self.layer.padding,
+        )
         L = patches.shape[0]
         dim = patches.shape[1]
         device = patches.device

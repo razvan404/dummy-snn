@@ -484,7 +484,7 @@ class TestConvFCEquivalence:
                     )
 
 
-class TestConv2dVsUnfoldEquivalence:
+class TestConvBatchVsSingleEquivalence:
     def _make_input(self, B, C, H, W, seed=42):
         torch.manual_seed(seed)
         t = torch.rand(B, C, H, W)
@@ -492,97 +492,9 @@ class TestConv2dVsUnfoldEquivalence:
         t[t >= 0.9] = float("inf")
         return t
 
-    def test_small_no_padding(self):
-        layer = make_layer(in_channels=2, num_filters=4, kernel_size=3, padding=0)
-        inp = self._make_input(4, 2, 8, 8)
-        conv2d_result = layer.infer_spike_times_batch(inp)
-        unfold_result = layer.infer_spike_times_batch_unfold(inp)
-        torch.testing.assert_close(conv2d_result, unfold_result)
-
-    def test_with_padding(self):
-        layer = make_layer(
-            in_channels=6,
-            num_filters=8,
-            kernel_size=5,
-            padding=2,
-            threshold=5.0,
-        )
-        inp = self._make_input(8, 6, 10, 10, seed=7)
-        conv2d_result = layer.infer_spike_times_batch(inp)
-        unfold_result = layer.infer_spike_times_batch_unfold(inp)
-        torch.testing.assert_close(conv2d_result, unfold_result)
-
-    def test_large_batch(self):
-        layer = make_layer(in_channels=6, num_filters=16, kernel_size=5, padding=0)
-        inp = self._make_input(32, 6, 32, 32, seed=99)
-        conv2d_result = layer.infer_spike_times_batch(inp)
-        unfold_result = layer.infer_spike_times_batch_unfold(inp)
-        torch.testing.assert_close(conv2d_result, unfold_result)
-
-    def test_all_inf(self):
-        layer = make_layer(in_channels=6, num_filters=4, kernel_size=5)
-        inp = torch.full((4, 6, 10, 10), float("inf"))
-        conv2d_result = layer.infer_spike_times_batch(inp)
-        unfold_result = layer.infer_spike_times_batch_unfold(inp)
-        assert torch.isinf(conv2d_result).all()
-        assert torch.isinf(unfold_result).all()
-
     def test_single_image_matches(self):
         layer = make_layer(in_channels=6, num_filters=8, kernel_size=5, padding=0)
         inp = self._make_input(1, 6, 12, 12, seed=3)
         batch_result = layer.infer_spike_times_batch(inp)
         single_result = layer.infer_spike_times(inp.squeeze(0))
         torch.testing.assert_close(batch_result.squeeze(0), single_result)
-
-
-class TestConvInferenceBenchmark:
-    def test_benchmark_64x64(self):
-        import time
-
-        C, F_n, K = 6, 64, 5
-        H, W, B = 64, 64, 16
-        torch.manual_seed(42)
-
-        layer = make_layer(
-            in_channels=C,
-            num_filters=F_n,
-            kernel_size=K,
-            threshold=10.0,
-        )
-        inp = torch.rand(B, C, H, W)
-        inp = (inp * 16).floor() / 16
-        inp[inp >= 0.9] = float("inf")
-
-        warmup = 3
-        runs = 10
-
-        with torch.no_grad():
-            for _ in range(warmup):
-                layer.infer_spike_times_batch(inp)
-                layer.infer_spike_times_batch_unfold(inp)
-
-        with torch.no_grad():
-            t0 = time.perf_counter()
-            for _ in range(runs):
-                layer.infer_spike_times_batch(inp)
-            t_conv2d = (time.perf_counter() - t0) / runs
-
-        with torch.no_grad():
-            t0 = time.perf_counter()
-            for _ in range(runs):
-                layer.infer_spike_times_batch_unfold(inp)
-            t_unfold = (time.perf_counter() - t0) / runs
-
-        with torch.no_grad():
-            r1 = layer.infer_spike_times_batch(inp)
-            r2 = layer.infer_spike_times_batch_unfold(inp)
-        torch.testing.assert_close(r1, r2)
-
-        oH, oW = layer._compute_output_size(H, W)
-        print(f"\n{'=' * 60}")
-        print(f"Benchmark: {B}x{C}x{H}x{W} input, {F_n} filters, {K}x{K} kernel")
-        print(f"Output spatial: {oH}x{oW} = {oH * oW} positions")
-        print(f"  conv2d:  {t_conv2d * 1000:.2f} ms")
-        print(f"  unfold:  {t_unfold * 1000:.2f} ms")
-        print(f"  speedup: {t_unfold / t_conv2d:.2f}x")
-        print(f"{'=' * 60}")

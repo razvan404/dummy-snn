@@ -129,31 +129,8 @@ class TestWhiteningToSpikes:
         assert (finite < 1).all()
 
 
-class TestConv2dVsUnfoldOnRealData:
-    """Verify conv2d and unfold inference match on realistic spike-encoded data."""
-
-    def test_equivalence_on_whitened_cifar_like(self):
-        images = make_random_rgb_images(8, 32, 32, seed=7)
-        kernels, mean = fit_whitening_kernels(images, patch_size=9, n_patches=500)
-        whitened = apply_whitening_kernels(images, kernels, mean)
-        encoded = torch.stack([encode_whitened_image(img) for img in whitened])
-        spike_times = DiscretizeTimes(16)(encoded)
-
-        iH, iW = spike_times.shape[2], spike_times.shape[3]
-        init = ConstantInitialization(10.0)
-        layer = ConvIntegrateAndFireLayer(
-            in_channels=6,
-            num_filters=16,
-            kernel_size=5,
-            threshold_initialization=init,
-            refractory_period=float("inf"),
-        )
-
-        with torch.no_grad():
-            conv2d_result = layer.infer_spike_times_batch(spike_times)
-            unfold_result = layer.infer_spike_times_batch_unfold(spike_times)
-
-        torch.testing.assert_close(conv2d_result, unfold_result)
+class TestConvBatchVsSingleOnRealData:
+    """Verify batch and single-sample inference match on realistic spike-encoded data."""
 
     def test_single_vs_batch_on_whitened(self):
         images = make_random_rgb_images(4, 32, 32, seed=11)

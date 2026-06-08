@@ -59,27 +59,6 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         oW = (W + 2 * self.padding - self.kernel_size) // self.stride + 1
         return oH, oW
 
-    def _unfold_patches(self, input_times: torch.Tensor) -> torch.Tensor:
-        has_batch = input_times.dim() == 4
-        if self.padding == 0 and input_times.shape[-2:] == (self.kernel_size, self.kernel_size):
-            if has_batch:
-                return input_times.reshape(input_times.shape[0], -1).unsqueeze(1)
-            return input_times.flatten().unsqueeze(0)
-
-        if not has_batch:
-            input_times = input_times.unsqueeze(0)
-        if self.padding > 0:
-            input_times = F.pad(input_times, [self.padding] * 4, value=float("inf"))
-        patches = F.unfold(
-            input_times,
-            kernel_size=self.kernel_size,
-            padding=0,
-            stride=self.stride,
-        )
-        patches = patches.permute(0, 2, 1)
-        return patches if has_batch else patches.squeeze(0)
-
-
     def forward(
         self,
         input_times: torch.Tensor,
@@ -143,20 +122,6 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
         winner_mask = winner_mask & candidates.any(dim=1, keepdim=True)
         return torch.where(
             winner_mask, spike_times, torch.full_like(spike_times, float("inf"))
-        )
-
-    @torch.no_grad()
-    def _dense_conv2d_accumulate(
-        self, input_times: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        from spikinn.layers.backends.dense import dense
-
-        return dense(
-            input_times,
-            self.weights_4d,
-            self.thresholds,
-            stride=self.stride,
-            padding=self.padding,
         )
 
     def _init_spatial_buffers(self, oH: int, oW: int) -> None:
@@ -262,20 +227,12 @@ class ConvIntegrateAndFireLayer(IntegrateAndFireLayer):
 
     @torch.no_grad()
     def infer_spike_times(self, input_times: torch.Tensor) -> torch.Tensor:
+        from spikinn.utils.conv_ops import unfold_patches
+
         if input_times.dim() == 1:
             return super().infer_spike_times(input_times)
         C, H, W = input_times.shape
         oH, oW = self._compute_output_size(H, W)
-        patches = self._unfold_patches(input_times)
+        patches = unfold_patches(input_times, self.kernel_size, self.stride, self.padding)
         result = super().infer_spike_times_batch(patches)
         return result.view(oH, oW, self.num_filters).permute(2, 0, 1)
-
-    @torch.no_grad()
-    def infer_spike_times_batch_unfold(self, input_times: torch.Tensor) -> torch.Tensor:
-        B, C, H, W = input_times.shape
-        oH, oW = self._compute_output_size(H, W)
-        L = oH * oW
-        patches = self._unfold_patches(input_times)
-        flat = patches.reshape(B * L, -1)
-        flat_result = super().infer_spike_times_batch(flat)
-        return flat_result.view(B, oH, oW, self.num_filters).permute(0, 3, 1, 2)
