@@ -5,7 +5,7 @@ from typing import Callable, Tuple
 import torch
 
 from .base import base
-from .dense import dense
+from .dense import dense, dense_fp16
 from .gather import gather
 from .differential_base import differential_base
 from .differential_dense import differential_dense
@@ -16,6 +16,7 @@ Backend = Callable[..., Tuple[torch.Tensor, torch.Tensor]]
 BACKENDS: dict[str, Backend] = {
     "base": base,
     "dense": dense,
+    "dense_fp16": dense_fp16,
     "gather": gather,
     "differential_base": differential_base,
     "differential_dense": differential_dense,
@@ -36,6 +37,6 @@ def is_differentiable(name: str) -> bool:
 
 __all__ = [
     "BACKENDS", "Backend", "get_backend", "is_differentiable",
-    "base", "dense", "gather",
+    "base", "dense", "dense_fp16", "gather",
     "differential_base", "differential_dense",
 ]
