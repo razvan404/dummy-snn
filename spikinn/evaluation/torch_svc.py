@@ -44,14 +44,14 @@ class TorchLinearSVC(ColumnSwapClassifier):
         C = self._C
 
         warm = W_init is not None
-        W = W_init.clone() if warm else torch.zeros(da, K, device=Xa.device)
+        W = W_init.clone() if warm else torch.zeros(da, K, device=Xa.device, dtype=Xa.dtype)
         if max_iter is None:
             max_iter = self._warm_max_iter if warm else self._max_iter
         active_tol = 0 if warm else self._active_tol
 
-        I_diag = torch.eye(da, device=Xa.device)
+        I_diag = torch.eye(da, device=Xa.device, dtype=Xa.dtype)
         I_diag[d, d] = 1e-4
-        I_diag += 1e-4 * torch.eye(da, device=Xa.device)
+        I_diag += 1e-4 * torch.eye(da, device=Xa.device, dtype=Xa.dtype)
 
         prev_active = None
 
@@ -84,11 +84,15 @@ class TorchLinearSVC(ColumnSwapClassifier):
                 L = torch.stack([torch.linalg.cholesky(H_batch[k]) for k in range(K)])
                 delta = torch.cholesky_solve(rhs, L).squeeze(2).T
             except torch._C._LinAlgError:
+                # GPU/float32 Gram can be non-PD for an ill-conditioned H at large N (CPU build
+                # is fine). Flag it so fit() refits the whole solve on CPU; keep the in-loop
+                # fallbacks so warm-start / greedy paths still progress.
+                self._solve_failed = True
                 try:
                     delta = torch.stack([torch.linalg.solve(H_batch[k], rhs[k]) for k in range(K)]).squeeze(2).T
                 except torch._C._LinAlgError:
                     H_batch = H_batch + 1e-2 * torch.eye(
-                        da, device=Xa.device
+                        da, device=Xa.device, dtype=Xa.dtype
                     ).unsqueeze(0)
                     try:
                         L = torch.stack([torch.linalg.cholesky(H_batch[k]) for k in range(K)])
@@ -185,7 +189,15 @@ class TorchLinearSVC(ColumnSwapClassifier):
         y_t = torch.from_numpy(self._y).long().to(self._device)
         self._build_gpu_state(X_t, y_t)
 
+        self._solve_failed = False
         self._Wa = self._solve_l2svm(self._Xa, self._Y)
+        if self._device.type == "cuda" and self._solve_failed:
+            # float32 Cholesky hit a spurious non-PD on the large-N Hessian; refit in float64
+            self._solve_failed = False
+            Wa = self._solve_l2svm(self._Xa.double(), self._Y.double())
+            if self._solve_failed:
+                raise RuntimeError("read-out Hessian non-PD even in float64")
+            self._Wa = Wa.to(device=self._device, dtype=self._Xa.dtype)
         d = X_t.shape[1]
         self._W = self._Wa[:d, :]
         self._b = self._Wa[d, :]

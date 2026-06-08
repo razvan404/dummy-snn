@@ -5,6 +5,13 @@ from spikinn.evaluation.torch_svc import TorchLinearSVC
 
 class TorchLogisticRegression(TorchLinearSVC):
     _loss_type = "logistic"
+    _hess_weight_eps = 0.0  # Hessian-subsampling threshold; 0 = exact
+
+    def __init__(self, *args, hess_weight_eps: float = 0.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        # only rows with IRLS weight sigma(1-sigma) > eps enter the Hessian; the gradient stays
+        # exact so the optimum is unchanged
+        self._hess_weight_eps = hess_weight_eps
 
     def _solve_l2svm(
         self,
@@ -19,13 +26,13 @@ class TorchLogisticRegression(TorchLinearSVC):
         C = self._C
 
         warm = W_init is not None
-        W = W_init.clone() if warm else torch.zeros(da, K, device=Xa.device)
+        W = W_init.clone() if warm else torch.zeros(da, K, device=Xa.device, dtype=Xa.dtype)
         if max_iter is None:
             max_iter = self._warm_max_iter if warm else self._max_iter
 
-        I_diag = torch.eye(da, device=Xa.device)
+        I_diag = torch.eye(da, device=Xa.device, dtype=Xa.dtype)
         I_diag[d, d] = 1e-4
-        I_diag += 1e-4 * torch.eye(da, device=Xa.device)
+        I_diag += 1e-4 * torch.eye(da, device=Xa.device, dtype=Xa.dtype)
 
         for _ in range(max_iter):
             scores = Xa @ W
@@ -42,19 +49,28 @@ class TorchLogisticRegression(TorchLinearSVC):
                 break
 
             H_batch = I_diag.unsqueeze(0).expand(K, -1, -1).clone()
+            eps = self._hess_weight_eps
             for k in range(K):
-                H_batch[k] += C * (Xa.T @ (Xa * weight[:, k].unsqueeze(1)))
+                if eps > 0.0:
+                    # subsampled Newton: drop rows whose curvature weight sigma(1-sigma) <= eps
+                    m = weight[:, k] > eps
+                    Xm = Xa[m]
+                    H_batch[k] += C * (Xm.T @ (Xm * weight[m, k].unsqueeze(1)))
+                else:
+                    H_batch[k] += C * (Xa.T @ (Xa * weight[:, k].unsqueeze(1)))
 
             rhs = -G.T.unsqueeze(2)
             try:
                 L = torch.linalg.cholesky(H_batch)
                 delta = torch.cholesky_solve(rhs, L).squeeze(2).T
             except torch._C._LinAlgError:
+                # flag for the float64 refit in fit() (mirrors the SVC solver)
+                self._solve_failed = True
                 try:
                     delta = torch.linalg.solve(H_batch, rhs).squeeze(2).T
                 except torch._C._LinAlgError:
                     H_batch = H_batch + 1e-2 * torch.eye(
-                        da, device=Xa.device
+                        da, device=Xa.device, dtype=Xa.dtype
                     ).unsqueeze(0)
                     try:
                         L = torch.linalg.cholesky(H_batch)
