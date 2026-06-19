@@ -74,29 +74,39 @@ class TorchLinearSVC(ColumnSwapClassifier):
             if G.norm().item() < self._gnorm_tol:
                 break
 
-            H_batch = I_diag.unsqueeze(0).expand(K, -1, -1).clone()
-            for k in range(K):
-                Xa_active = Xa[active[:, k]]
-                H_batch[k] += 2.0 * C * (Xa_active.T @ Xa_active)
-
             rhs = -G.T.unsqueeze(2)
+            # Chunk the K class solves (csz=K for small K) so we never factor all K systems at once -> avoids OOM.
+            budget = getattr(self, "_solve_chunk_bytes", 2_000_000_000)
+            csz = max(1, min(K, int(budget // (da * da * Xa.element_size()))))
+            delta = torch.empty(da, K, device=Xa.device, dtype=Xa.dtype)
+
+            def _Hchunk(lo, hi, reg=0.0):
+                Hc = I_diag.unsqueeze(0).expand(hi - lo, -1, -1).clone()
+                if reg:
+                    Hc = Hc + reg * torch.eye(da, device=Xa.device, dtype=Xa.dtype)
+                for i, k in enumerate(range(lo, hi)):
+                    Xa_active = Xa[active[:, k]]
+                    Hc[i] += 2.0 * C * (Xa_active.T @ Xa_active)
+                return Hc
+
             try:
-                L = torch.stack([torch.linalg.cholesky(H_batch[k]) for k in range(K)])
-                delta = torch.cholesky_solve(rhs, L).squeeze(2).T
+                for j in range(0, K, csz):
+                    hi = min(j + csz, K)
+                    Lj = torch.linalg.cholesky(_Hchunk(j, hi))
+                    delta[:, j:hi] = torch.cholesky_solve(rhs[j:hi], Lj).squeeze(2).T
             except torch._C._LinAlgError:
-                # GPU/float32 Gram can be non-PD for an ill-conditioned H at large N (CPU build
-                # is fine). Flag it so fit() refits the whole solve on CPU; keep the in-loop
-                # fallbacks so warm-start / greedy paths still progress.
+                # non-PD float32 Gram -> flag for float64/CPU refit in fit()
                 self._solve_failed = True
                 try:
-                    delta = torch.stack([torch.linalg.solve(H_batch[k], rhs[k]) for k in range(K)]).squeeze(2).T
+                    for j in range(0, K, csz):
+                        hi = min(j + csz, K)
+                        delta[:, j:hi] = torch.linalg.solve(_Hchunk(j, hi), rhs[j:hi]).squeeze(2).T
                 except torch._C._LinAlgError:
-                    H_batch = H_batch + 1e-2 * torch.eye(
-                        da, device=Xa.device, dtype=Xa.dtype
-                    ).unsqueeze(0)
                     try:
-                        L = torch.stack([torch.linalg.cholesky(H_batch[k]) for k in range(K)])
-                        delta = torch.cholesky_solve(rhs, L).squeeze(2).T
+                        for j in range(0, K, csz):
+                            hi = min(j + csz, K)
+                            Lj = torch.linalg.cholesky(_Hchunk(j, hi, reg=1e-2))
+                            delta[:, j:hi] = torch.cholesky_solve(rhs[j:hi], Lj).squeeze(2).T
                     except torch._C._LinAlgError:
                         break  # give up, return current W
 
